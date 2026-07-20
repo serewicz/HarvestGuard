@@ -10,6 +10,27 @@ HarvestGuard scans filesystems and cloud storage for encryption status and sensi
 
 If you find a place where this isn't true, that's a security bug — please report it privately (see below), not as a public issue.
 
+## Container network posture
+
+The `Dockerfile` image makes no network calls HarvestGuard itself didn't
+request on your behalf — there is no telemetry and no HarvestGuard-operated
+service for it to phone home to; none exists.
+
+- **Local filesystem and PII/secrets scans make no network calls** — verify
+  yourself: `scanner/filesystem.py` and `classifier/scanner.py` import
+  nothing network-related. For independent verification, you can run fully
+  network-isolated with `docker run --network none --read-only --tmpfs /tmp
+  ...`, though note that also makes the Streamlit UI itself unreachable from
+  the host (`--network none` disables container networking entirely,
+  including published ports) — it's a proof mode, not the normal way to run
+  it.
+- **Cloud scans (S3/GCS/Azure) need outbound access to that provider's API
+  only** — to authenticate and to list/read the bucket or container you
+  pointed the scan at. Nothing else.
+- The image runs as a non-root user (uid 65532) on a distroless base (no
+  shell, no package manager), and is compatible with `--read-only` root
+  filesystems — `/tmp` is the only path it writes to, mount it as a tmpfs.
+
 ## Supported Versions
 
 HarvestGuard is pre-1.0 and does not yet maintain parallel release branches. Security fixes land on `main`; there is no backport policy until a first stable release exists.
