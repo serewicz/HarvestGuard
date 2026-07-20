@@ -1,0 +1,84 @@
+name: Container Build, SBOM & Sign
+
+# Only runs when the image itself could have changed -- not on every push,
+# and not on PRs. Signing corresponds to real commits on main, not
+# transient PR builds.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "requirements.txt"
+      - "main.py"
+      - "scanner/**"
+      - "analyzer/**"
+      - "classifier/**"
+      - "dashboard/**"
+      - ".github/workflows/container-build.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # required for keyless cosign signing via GitHub's OIDC token
+
+jobs:
+  build-sign-sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Lowercase repository name
+        # GHCR requires an all-lowercase image path; github.repository
+        # preserves the repo's actual casing (serewicz/HarvestGuard).
+        id: repo
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # Tagged only by commit SHA, deliberately never "latest" -- a
+          # mutable tag undermines the point of signing a specific,
+          # verifiable artifact.
+          tags: ghcr.io/${{ steps.repo.outputs.name }}:${{ github.sha }}
+
+      - name: Install syft
+        run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          syft "ghcr.io/${{ steps.repo.outputs.name }}@${{ steps.build.outputs.digest }}" \
+            -o cyclonedx-json=sbom.cdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless, via GitHub OIDC -- no private key to manage or leak)
+        run: |
+          cosign sign --yes "ghcr.io/${{ steps.repo.outputs.name }}@${{ steps.build.outputs.digest }}"
+
+      - name: Attach signed SBOM attestation
+        run: |
+          cosign attest --yes --type cyclonedx --predicate sbom.cdx.json \
+            "ghcr.io/${{ steps.repo.outputs.name }}@${{ steps.build.outputs.digest }}"

@@ -31,6 +31,42 @@ service for it to phone home to; none exists.
   shell, no package manager), and is compatible with `--read-only` root
   filesystems — `/tmp` is the only path it writes to, mount it as a tmpfs.
 
+## Verifying the container image
+
+Every image published from `main` (`.github/workflows/container-build.yml`)
+is signed **keylessly** via [Sigstore](https://www.sigstore.dev/)/cosign,
+using GitHub Actions' own OIDC token — there is no private signing key for
+anyone to steal, and the signature cryptographically proves the image was
+built by that specific workflow run, from that specific commit, not hand-
+pushed by anyone with registry credentials. A CycloneDX SBOM is generated
+with [syft](https://github.com/anchore/syft) and attached as a signed
+attestation on the same image, so "what's in this image" is independently
+verifiable too, not just asserted here.
+
+```bash
+# Verify the image signature
+cosign verify \
+  --certificate-identity-regexp "^https://github.com/serewicz/HarvestGuard/\.github/workflows/container-build\.yml@refs/heads/main$" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/serewicz/harvestguard:<commit-sha>
+
+# Pull and inspect the signed SBOM
+cosign verify-attestation \
+  --type cyclonedx \
+  --certificate-identity-regexp "^https://github.com/serewicz/HarvestGuard/\.github/workflows/container-build\.yml@refs/heads/main$" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/serewicz/harvestguard:<commit-sha> \
+  | jq -r '.payload' | base64 -d | jq '.predicate'
+```
+
+The sign/attest mechanics (image build → SBOM generation → sign → attest →
+verify) were tested end-to-end locally against a local registry before this
+workflow was written. The keyless OIDC signing step specifically can only be
+exercised for real inside GitHub Actions, since it depends on GitHub's own
+OIDC token issuer — it hasn't produced a real published, verifiable image
+yet as of this commit; that happens on the first `container-build.yml` run
+against `main`.
+
 ## Supported Versions
 
 HarvestGuard is pre-1.0 and does not yet maintain parallel release branches. Security fixes land on `main`; there is no backport policy until a first stable release exists.

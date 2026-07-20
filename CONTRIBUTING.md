@@ -42,6 +42,29 @@ ruff check .
 
 Both run automatically in CI on every PR, but running them locally first saves round-trips.
 
+If you're touching `Dockerfile`, build and actually run it before opening a
+PR — a Dockerfile that builds isn't the same as one that works (an unpinned
+dependency version once broke the app's routing entirely inside the
+container while building cleanly):
+
+```bash
+docker build -t harvestguard .
+docker run --rm -p 8501:8501 --read-only --tmpfs /tmp harvestguard
+```
+
+To test the SBOM/signing flow locally (`syft`, `cosign` — install via
+`brew install syft cosign` or see their docs), sign against a local
+registry rather than pushing anywhere real:
+
+```bash
+docker run -d -p 5000:5000 registry:2
+docker tag harvestguard localhost:5000/harvestguard
+docker push localhost:5000/harvestguard
+syft localhost:5000/harvestguard -o cyclonedx-json=sbom.json
+cosign generate-key-pair   # local test key only -- production signing is keyless, see SECURITY.md
+cosign sign --key cosign.key localhost:5000/harvestguard
+```
+
 ## Making changes
 
 - Keep PRs focused — one logical change per PR is easier to review than a bundle of unrelated fixes.
