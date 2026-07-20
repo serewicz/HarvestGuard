@@ -20,7 +20,9 @@ Two things follow from that:
 
 Current state (as of this writing): local filesystem, AWS S3, GCS, and Azure
 Blob scanning all do real encryption-status detection; the PII/secrets
-classifier ships as its own scan type. No containers yet, no CBOM/PDF export,
+classifier ships as its own scan type. A minimal non-root container image
+and least-privilege IAM templates ship too (Pillar 2, partial — signed
+images/SBOM and the k8s manifest are still open). No CBOM/PDF export yet,
 no network- or code-level crypto detection.
 
 ---
@@ -126,10 +128,10 @@ Everything above covers data at rest (filesystem, object storage). Matching
 market-quality crypto/data-safety tooling means also covering data in
 transit and crypto usage in code — and, for all of these, leaning on
 proven OSS tools rather than re-implementing detection logic from scratch.
-This section is risk #2 above (cryptographic inventory blind spots) and is
-next in line, ahead of containers, in terms of what closes the biggest
-diligence gap — sequencing of engineering time between this and Pillar 2
-still depends on which gap a real engagement hits first.
+This section is risk #2 above (cryptographic inventory blind spots). The
+containers-vs-this sequencing question was resolved in favor of containers
+first (the trust story has to exist before adding more scan surfaces on top
+of it); with Pillar 2's first slice now shipped, this is next up.
 
 - [ ] **Network traffic / cipher detection** (data in transit — nothing
       today covers this). Candidates: **Zeek** (best-in-class OSS network
@@ -163,18 +165,24 @@ still depends on which gap a real engagement hits first.
 
 ## Pillar 2 — Containers: the trust boundary
 
-- [ ] **Minimal scan-runner image** — distroless or scratch base, non-root,
-      read-only root filesystem. This is what a firm's IT/security team will
-      actually inspect before approving use on deal data.
-- [ ] **No default outbound network access** — scan results stay on the
-      machine/volume unless the user explicitly exports them. Document this
-      as an explicit guarantee, not just an implementation detail. This is
-      also why a hosted AI-integration API (see Pillar 3) is not planned as
-      a default-on feature.
-- [ ] **Read-only IAM policy templates** per cloud (AWS/GCP/Azure
-      least-privilege scan roles) — small to build, and one of the highest
-      trust-per-effort items on this list; a security-conscious buyer will
-      ask for exactly this.
+- [x] **Minimal scan-runner image** (`Dockerfile`) — distroless
+      `python3-debian12:nonroot` base (no shell, no package manager), runs
+      as uid 65532, read-only-root-fs compatible (`/tmp` is the only
+      writable path). Building and running it for real, not just writing it,
+      surfaced a real bug: an unpinned `streamlit` floor let a fresh install
+      pull a version that auto-detects "dev mode" under `pip install
+      --target=` and serves the frontend on the wrong port, 404ing every
+      page. Pinned to a verified-working range.
+- [x] **No default outbound network access** (`SECURITY.md`) — verified,
+      not just asserted: `scanner/filesystem.py` and `classifier/scanner.py`
+      have no network-related imports, and `docker run --network none` was
+      actually exercised (with the honestly-documented caveat that it also
+      blocks the UI's published port, so it's a verification mode, not the
+      normal way to run the container). This is also why a hosted AI-
+      integration API (see Pillar 3) is not planned as a default-on feature.
+- [x] **Read-only IAM policy templates** per cloud (`deploy/iam/`) —
+      AWS/GCP/Azure least-privilege scan roles, scoped to exactly the API
+      calls each scanner module makes.
 - [ ] **Signed images + SBOM** (cosign, syft) for the scanner itself —
       supply-chain provenance, and a natural dogfood of the project's own
       crypto-inventory premise. SBOM should target the same CycloneDX format
