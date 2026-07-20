@@ -19,3 +19,17 @@ def display_risk_dashboard(df: pd.DataFrame):
 
     st.subheader("Detailed Results")
     st.dataframe(df, use_container_width=True)
+
+
+def display_sensitive_data_dashboard(df: pd.DataFrame):
+    if df.empty:
+        st.success("No sensitive data patterns detected in scanned files.")
+        return
+
+    st.subheader(f"Sensitive Data Findings — {len(df)} file(s) flagged")
+
+    category_counts = df["Categories"].str.split(", ").explode().value_counts()
+    st.bar_chart(category_counts)
+
+    st.subheader("Flagged Files")
+    st.dataframe(df, use_container_width=True)

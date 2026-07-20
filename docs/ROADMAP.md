@@ -34,11 +34,14 @@ status alone.
       (FileVault / LUKS / BitLocker) per scan root. Replaces the `"Unknown"`
       placeholder. Next: expand signature coverage (encrypted Office/PDF,
       VeraCrypt) and add APFS/dm-crypt detail beyond the on/off check.
-- [ ] **Sensitive-data classification module** (new `classifier/` package) —
-      PII (names, SSNs, emails, phone numbers), payment card patterns, and
-      secrets/API keys/credentials, scanned alongside crypto status. This is
-      the "customer data safety" pillar, distinct from HNDL/crypto risk, and
-      is what most directly matches what this audience actually asks for.
+- [x] **Sensitive-data classification module** (`classifier/` package) —
+      regex-based detection for email, SSN, phone, payment card (Luhn-
+      validated), and secrets/credentials (AWS keys, private keys, GitHub/
+      Slack tokens, generic assignment-style secrets). Findings report
+      category + count only, never the matched values, so scan results
+      can't themselves leak the sensitive data they found. Wired into the
+      dashboard as its own scan type. Next: expand beyond regex (NER for
+      names/addresses), tune false-positive rate on real-world corpora.
 - [ ] **GCS scanner** (`scanner/gcs.py`) — mirror `scanner/cloud.py`:
       per-object encryption status via the GCS API (CMEK vs. Google-managed
       vs. none).
