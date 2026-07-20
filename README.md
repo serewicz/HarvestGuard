@@ -44,16 +44,26 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
 **Future Roadmap**: Microservices architecture, Prometheus + Grafana monitoring, advanced AI recommendations, hardware partnerships for crypto-agility.
 
 ## Quick Start
+## Quick Start (macOS / Linux / Windows)
 
 ### Prerequisites
-- Python 3.10+
-- Elevated rights (`sudo`) for deep local filesystem scans (or appropriate IAM roles for cloud)
-- (Optional but recommended) Docker for easy deployment
+- Python 3.10+ (`python3 --version`)
+- Elevated rights (`sudo`) for deep local scans (or IAM for cloud)
 
 ### Installation
 
 ```bash
-git clone https://github.com/serewicz/harvestguard.git
-cd harvestguard
-pip install -r requirements.txt
+# Clone the repo
+git clone https://github.com/serewicz/HarvestGuard.git
+cd HarvestGuard
+
+# Create and activate virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate    # On macOS/Linux
+# venv\Scripts\activate    # On Windows
+
+# Install dependencies
+pip install -r requirements.txt     # or pip3 if needed
+
+# Run the dashboard
 streamlit run main.py
