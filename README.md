@@ -46,12 +46,16 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
   credentials/secrets (AWS keys, private keys, GitHub/Slack tokens). Reports
   category and count only, never the matched values, so a scan result can't
   itself leak the sensitive data it found.
+- **Crypto code analysis** — flags weak/legacy crypto library usage in
+  source (MD5/SHA1, DES/3DES/RC4, ECB mode, sub-2048-bit RSA keys) via a
+  small vendored Semgrep rule set, not Semgrep's hosted registry — local
+  scans stay network-free.
 - **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
   exposure scoring (High/Medium/Low) layered on top of encryption status.
 - **Streamlit dashboard** — pie/bar charts and a results table per scan.
 
 Not yet built: CBOM/PDF export, a CLI (today it's `streamlit run main.py`
-only), and network/code-level crypto scanning. See
+only), and network-level crypto scanning (TLS/cipher-suite detection). See
 [docs/ROADMAP.md](docs/ROADMAP.md) for what's next and why, in rough
 priority order.
 
