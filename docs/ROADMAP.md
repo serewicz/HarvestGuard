@@ -42,11 +42,22 @@ status alone.
       can't themselves leak the sensitive data they found. Wired into the
       dashboard as its own scan type. Next: expand beyond regex (NER for
       names/addresses), tune false-positive rate on real-world corpora.
-- [ ] **GCS scanner** (`scanner/gcs.py`) — mirror `scanner/cloud.py`:
-      per-object encryption status via the GCS API (CMEK vs. Google-managed
-      vs. none).
-- [ ] **Azure Blob scanner** (`scanner/azure.py`) — per-blob encryption
-      status via the Azure SDK (customer-managed vs. Microsoft-managed keys).
+- [x] **GCS scanner** (`scanner/gcs.py`) — per-blob encryption status via
+      the GCS API: CMEK (Low risk) vs. Google-managed default (Medium risk).
+      GCS encrypts everything at rest, so unlike S3 there's no "unencrypted"
+      state to detect -- the signal is customer key control vs. platform
+      default. Auth failures (`DefaultCredentialsError`, raised eagerly by
+      `storage.Client()` construction) are caught explicitly -- this was
+      found live, not in review: an early version only caught
+      `GoogleAPIError` and crashed the whole Streamlit app on missing
+      credentials, since `DefaultCredentialsError` comes from `google.auth`,
+      a separate exception hierarchy.
+- [x] **Azure Blob scanner** (`scanner/azure_blob.py`, named to avoid
+      shadowing the `azure` package) — per-blob encryption status via the
+      Azure SDK: customer-managed encryption scope (Low risk) vs.
+      Microsoft-managed default (Medium risk), same rationale as GCS. Uses
+      `DefaultAzureCredential` for auth, consistent with AWS/GCP's automatic
+      credential-chain resolution.
 - [ ] **Common `ScanResult` interface** — normalize local/AWS/GCP/Azure/
       classifier output into one schema so the analyzer, dashboard, and
       exporters don't special-case each source. Do this once a second cloud
