@@ -1,17 +1,18 @@
 import os
-import stat
 from datetime import datetime
+
 import pandas as pd
+
 
 def scan_filesystem(path: str, max_depth: int = 3):
     """Simple filesystem scanner for POC."""
     results = []
-    
+
     for root, dirs, files in os.walk(path):
         depth = root.count(os.sep) - path.count(os.sep)
         if depth > max_depth:
             continue
-            
+
         for f in files:
             full_path = os.path.join(root, f)
             try:
@@ -27,5 +28,5 @@ def scan_filesystem(path: str, max_depth: int = 3):
                 })
             except Exception:
                 pass  # Skip permission issues
-                
+
     return pd.DataFrame(results)

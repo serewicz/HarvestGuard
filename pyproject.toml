@@ -1,0 +1,23 @@
+[project]
+name = "harvestguard"
+version = "0.1.0"
+description = "Open-source cryptographic inventory and quantum risk scanner for enterprise resilience."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Timothy Serewicz" }]
+requires-python = ">=3.10"
+
+# NOTE: This project isn't packaged for PyPI distribution yet (it's run via
+# `streamlit run main.py`, not installed as a library). This file currently
+# exists to centralize dev-tooling config (pytest, ruff). Turning it into a
+# real installable package is tracked as a roadmap item — see CONTRIBUTING.md.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
