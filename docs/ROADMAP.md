@@ -183,11 +183,18 @@ of it); with Pillar 2's first slice now shipped, this is next up.
 - [x] **Read-only IAM policy templates** per cloud (`deploy/iam/`) —
       AWS/GCP/Azure least-privilege scan roles, scoped to exactly the API
       calls each scanner module makes.
-- [ ] **Signed images + SBOM** (cosign, syft) for the scanner itself —
-      supply-chain provenance, and a natural dogfood of the project's own
-      crypto-inventory premise. SBOM should target the same CycloneDX format
-      as the CBOM export below — one format across the project, and it
-      happens to be what the Compliance section needs too.
+- [x] **Signed images + SBOM** (`.github/workflows/container-build.yml`) —
+      keyless cosign signing via GitHub Actions' OIDC token (no private key
+      to manage or leak), plus a syft-generated CycloneDX SBOM attached as a
+      signed attestation on the same image — one format across the project,
+      matching the CBOM export target and doubling as input for the
+      Compliance section's technical documentation dossier. The full
+      build→SBOM→sign→attest→verify flow was tested end-to-end locally
+      against a throwaway registry before writing the workflow; the keyless
+      OIDC step itself can only be exercised for real inside GitHub Actions,
+      so it's unverified against a real published image as of this commit
+      (see `SECURITY.md` for the honest caveat and how to verify it once it
+      has run).
 - [ ] **k8s Job manifest / Helm chart** for larger in-cluster or in-VPC scans
       where the target environment is already containerized.
 
