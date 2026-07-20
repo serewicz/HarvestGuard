@@ -63,6 +63,52 @@ status alone.
       exporters don't special-case each source. Do this once a second cloud
       backend exists, not before (avoid speculative abstraction).
 
+### Future scan surfaces — tooling landscape
+
+Everything above covers data at rest (filesystem, object storage). Matching
+market-quality crypto/data-safety tooling means also covering data in
+transit and crypto usage in code — and, for all of these, leaning on
+proven OSS tools rather than re-implementing detection logic from scratch.
+This is a survey to pull individual items from, not a commitment to build
+all of it; sequencing depends on which gap a real due-diligence engagement
+hits first.
+
+- [ ] **Network traffic / cipher detection** (data in transit — nothing
+      today covers this). Candidates: **Zeek** (best-in-class OSS network
+      analyzer — cipher suites, TLS versions, certs, straight from a pcap
+      or live capture), **sslyze** (fast, scriptable TLS config scanner),
+      **testssl.sh** (comprehensive TLS/SSL test script), **nmap**
+      (`--script ssl-enum-ciphers` for a quick enumeration pass).
+- [ ] **Code & binary analysis** (crypto *library usage* in source — a
+      different axis from `classifier/`'s content-pattern matching).
+      Candidates: **CodeQL** (static analysis queries purpose-built for
+      crypto API usage), **Semgrep** (lightweight, fast pattern rules —
+      likely the easiest first integration given the project is already
+      Python-centric tooling), **SonarQube** + community crypto rulesets.
+- [ ] **Restricted/weak-algorithm scanning** — Wind River's
+      **crypto-detector** as reference for flagging known-weak algorithms
+      in code; **entropy analysis** as a cheap heuristic for encrypted-blob
+      detection, potentially a useful complement to `scanner/filesystem.py`'s
+      signature checks for files that don't match a known format.
+- [ ] **Runtime analysis via eBPF** (`bpftrace`, `BCC`) to hook crypto
+      library calls (OpenSSL, etc.) directly. Deepest visibility of any
+      option here, also the most invasive to run — a later-stage item, not
+      a starting point.
+- [ ] **Quantum-specific checks** — flag known-vulnerable algorithms/key
+      sizes (RSA/ECC under safe thresholds) explicitly rather than only
+      inferring HNDL risk from encryption presence/absence as today; Mosca
+      inequality-style modeling (data lifetime vs. quantum timeline) to
+      turn "this is at risk" into "this is at risk starting in ~N years";
+      hybrid PQC-readiness checks once a library like `liboqs` is
+      integrated. This is the project's namesake (Harvest-Now-Decrypt-Later)
+      and currently the least literally-implemented part of the roadmap.
+- [ ] **Cloud metadata as the reliable baseline** — not a gap, a validation:
+      the provider-API approach `scanner/cloud.py` / `scanner/gcs.py` /
+      `scanner/azure_blob.py` already use (reading `ServerSideEncryption`,
+      `kms_key_name`, `encryption_scope` directly) is the same approach
+      called out here as most reliable for cloud storage. Current design
+      direction is correct; no change needed.
+
 ## Pillar 2 — Containers: the trust boundary
 
 - [ ] **Minimal scan-runner image** — distroless or scratch base, non-root,
@@ -83,7 +129,10 @@ status alone.
 
 ## Pillar 3 — Reporting: where deal value gets argued
 
-- [ ] **CBOM JSON export** — promised in the README, not yet built.
+- [ ] **CBOM JSON export** — promised in the README, not yet built. Target
+      the **CycloneDX 1.6+** CBOM format specifically rather than a bespoke
+      shape — standardized output is what makes this interoperable with
+      other tools a due-diligence team might already run.
 - [ ] **PDF report export** — `weasyprint` is already a dependency and
       unused; wire it up.
 - [ ] **Dollarized risk output** — translate findings into estimated
