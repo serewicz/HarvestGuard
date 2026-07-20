@@ -51,12 +51,16 @@ Both run automatically in CI on every PR, but running them locally first saves r
 
 ## Where to start
 
-Good areas for a first contribution:
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the current, maintained priority
+list — it's the single source of truth, so this file doesn't try to keep a
+duplicate one in sync. A few concrete, currently-open starting points:
 
-- Real encryption/algorithm detection in `scanner/filesystem.py` (currently a placeholder that returns `"Unknown"` for every file).
-- Additional cloud targets in `scanner/` (Azure Blob, GCS) following the pattern in `scanner/cloud.py`.
-- Export formats (CBOM JSON, PDF via `weasyprint`) referenced in the README but not yet implemented.
-- Test coverage for existing modules.
+- Test coverage for `scanner/cloud.py` (the AWS S3 scanner) — it's the one
+  scanner module with zero tests today.
+- Export formats (CBOM JSON targeting CycloneDX 1.6+, PDF via `weasyprint`)
+  referenced in the README but not yet implemented.
+- The common `ScanResult` interface described in the roadmap's Pillar 1 —
+  now that three cloud scanners exist, the normalization is worth doing.
 
 Check open issues labeled `good first issue` if present, or open a new issue to discuss an idea before investing significant time — that avoids duplicate or misaligned work.
 

@@ -5,7 +5,7 @@ HarvestGuard scans filesystems and cloud storage for encryption status and sensi
 ## Data handling
 
 - HarvestGuard runs entirely locally (or wherever you deploy it). It does not send scan results, file contents, file paths, or credentials to any third-party service.
-- AWS/cloud credentials are read from your local environment (see `.env.example`) using standard SDK credential resolution (boto3). HarvestGuard does not store, log, or transmit these credentials anywhere beyond the API calls needed to perform the scan you requested.
+- Cloud credentials are read from your local environment using each provider's standard SDK credential resolution — boto3's default chain for AWS (see `.env.example`), Application Default Credentials for GCS, and `DefaultAzureCredential` for Azure Blob. HarvestGuard does not store, log, or transmit these credentials anywhere beyond the API calls needed to perform the scan you requested.
 - Scan output (dataframes, exports) stays on the machine running the app unless you explicitly export or share it.
 
 If you find a place where this isn't true, that's a security bug — please report it privately (see below), not as a public issue.
