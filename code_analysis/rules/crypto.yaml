@@ -1,0 +1,82 @@
+rules:
+  - id: weak-hash-md5
+    languages: [python]
+    severity: ERROR
+    message: >-
+      MD5 is cryptographically broken and unsuitable for security use
+      (collision-resistance is fully defeated). Use hashlib.sha256 or
+      stronger. If this is a non-security checksum use, ignore this finding.
+    metadata:
+      category: crypto-inventory
+      references:
+        - https://sg.run/vYrY
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.md5(...)
+          - pattern: hashlib.new("md5", ...)
+
+  - id: weak-hash-sha1
+    languages: [python]
+    severity: WARNING
+    message: >-
+      SHA-1 is deprecated for security purposes (practical collision attacks
+      exist). Use hashlib.sha256 or stronger.
+    metadata:
+      category: crypto-inventory
+    patterns:
+      - pattern-either:
+          - pattern: hashlib.sha1(...)
+          - pattern: hashlib.new("sha1", ...)
+
+  - id: weak-cipher-des
+    languages: [python]
+    severity: ERROR
+    message: >-
+      DES/3DES is a broken cipher (56-bit effective key, known practical
+      attacks). Use AES-256 via the cryptography package instead.
+    metadata:
+      category: crypto-inventory
+    pattern-either:
+      - pattern: Crypto.Cipher.DES.new(...)
+      - pattern: DES.new(...)
+      - pattern: DES3.new(...)
+
+  - id: weak-cipher-rc4
+    languages: [python]
+    severity: ERROR
+    message: >-
+      RC4 is a broken stream cipher (biased keystream, practical plaintext
+      recovery attacks). Use ChaCha20 or AES-GCM instead.
+    metadata:
+      category: crypto-inventory
+    pattern-either:
+      - pattern: ARC4.new(...)
+      - pattern: algorithms.ARC4(...)
+
+  - id: weak-cipher-ecb-mode
+    languages: [python]
+    severity: ERROR
+    message: >-
+      ECB mode encrypts identical plaintext blocks to identical ciphertext
+      blocks, leaking structural patterns (the canonical example is a
+      still-recognizable encrypted image). Use GCM, or CBC with a random IV.
+    metadata:
+      category: crypto-inventory
+    pattern-either:
+      - pattern: $CIPHER.new($KEY, $MODULE.MODE_ECB)
+      - pattern: modes.ECB()
+
+  - id: weak-rsa-key-size
+    languages: [python]
+    severity: WARNING
+    message: >-
+      RSA key sizes below 2048 bits are considered too weak for current use;
+      NIST recommends 2048-bit as the minimum through 2030, and larger for
+      longer-lived data given HNDL exposure.
+    metadata:
+      category: crypto-inventory
+    patterns:
+      - pattern: $LIB.generate_private_key(..., key_size=$SIZE, ...)
+      - metavariable-comparison:
+          metavariable: $SIZE
+          comparison: int($SIZE) < 2048

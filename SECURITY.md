@@ -16,14 +16,20 @@ The `Dockerfile` image makes no network calls HarvestGuard itself didn't
 request on your behalf — there is no telemetry and no HarvestGuard-operated
 service for it to phone home to; none exists.
 
-- **Local filesystem and PII/secrets scans make no network calls** — verify
-  yourself: `scanner/filesystem.py` and `classifier/scanner.py` import
-  nothing network-related. For independent verification, you can run fully
-  network-isolated with `docker run --network none --read-only --tmpfs /tmp
-  ...`, though note that also makes the Streamlit UI itself unreachable from
-  the host (`--network none` disables container networking entirely,
-  including published ports) — it's a proof mode, not the normal way to run
-  it.
+- **Local filesystem, PII/secrets, and crypto code analysis scans make no
+  network calls** — verify yourself: `scanner/filesystem.py` and
+  `classifier/scanner.py` import nothing network-related, and
+  `code_analysis/scanner.py` runs Semgrep against a small vendored rule set
+  (`code_analysis/rules/crypto.yaml`) rather than Semgrep's hosted registry,
+  with `--metrics=off --disable-version-check` explicitly set — both
+  otherwise call home regardless of where the rules come from. For
+  independent verification, you can run fully network-isolated with `docker
+  run --network none --read-only --tmpfs /tmp ...`, though note that also
+  makes the Streamlit UI itself unreachable from the host (`--network none`
+  disables container networking entirely, including published ports) — it's
+  a proof mode, not the normal way to run it. All three scan types were
+  re-verified against `--network none` after the code analysis scanner was
+  added.
 - **Cloud scans (S3/GCS/Azure) need outbound access to that provider's API
   only** — to authenticate and to list/read the bucket or container you
   pointed the scan at. Nothing else.

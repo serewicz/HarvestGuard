@@ -20,10 +20,10 @@ Two things follow from that:
 
 Current state (as of this writing): local filesystem, AWS S3, GCS, and Azure
 Blob scanning all do real encryption-status detection; the PII/secrets
-classifier ships as its own scan type. A minimal non-root container image
-and least-privilege IAM templates ship too (Pillar 2, partial — signed
-images/SBOM and the k8s manifest are still open). No CBOM/PDF export yet,
-no network- or code-level crypto detection.
+classifier and a Semgrep-based crypto code analysis scanner each ship as
+their own scan type. Pillar 2 (containers) is done except the k8s manifest —
+signed, keylessly-attested images with an SBOM ship from CI. No CBOM/PDF
+export yet, no network-level crypto detection (TLS/cipher-suite scanning).
 
 ---
 
@@ -36,16 +36,18 @@ deliberately doesn't live in the engineering backlog at all.
 
 1. **Harvest Now, Decrypt Later (HNDL)** — done. Pillar 1's encryption
    detection + HNDL exposure scoring.
-2. **Cryptographic inventory blind spots** — next up. Pillar 1's "Future scan
-   surfaces" section (network/cipher detection, code & binary crypto usage
-   analysis) — most companies have no map of what algorithms/key
-   lengths/libraries they're running, which is exactly what that section
+2. **Cryptographic inventory blind spots** — partially done. Pillar 1's
+   "Future scan surfaces" section covers this; code & binary crypto usage
+   analysis now ships (`code_analysis/`), network/cipher detection doesn't
+   yet — most companies have no map of what algorithms/key
+   lengths/libraries they're running, which is exactly what this section
    targets.
-3. **PQC migration debt / crypto-agility** — blocked on #2, not skipped.
-   Assessing whether a system can swap algorithms requires first knowing
-   what algorithms and libraries it uses — the code/binary analysis
-   foundation has to land before crypto-agility assessment is buildable.
-   See the Quantum Risk Engine section below.
+3. **PQC migration debt / crypto-agility** — the code/binary analysis
+   prerequisite now exists, but assessing crypto-agility itself (can a
+   system swap algorithms without a rewrite) remains unsolved — no clear
+   detection approach yet beyond "does the code use a crypto-agility
+   abstraction," itself a further code-analysis question. See the Quantum
+   Risk Engine section below.
 4. **Data ownership & classification gaps** — primarily an advisory/services
    deliverable, not a tool feature. See "Advisory backlog" below.
 5. **Supply chain & third-party exposure (incl. shadow AI)** — explicitly out
@@ -124,14 +126,13 @@ depends on the code/binary analysis work landing first:
 
 ### Future scan surfaces — tooling landscape
 
-Everything above covers data at rest (filesystem, object storage). Matching
-market-quality crypto/data-safety tooling means also covering data in
-transit and crypto usage in code — and, for all of these, leaning on
+Most of Pillar 1 above covers data at rest (filesystem, object storage).
+Matching market-quality crypto/data-safety tooling means also covering data
+in transit and crypto usage in code — and, for all of these, leaning on
 proven OSS tools rather than re-implementing detection logic from scratch.
-This section is risk #2 above (cryptographic inventory blind spots). The
-containers-vs-this sequencing question was resolved in favor of containers
-first (the trust story has to exist before adding more scan surfaces on top
-of it); with Pillar 2's first slice now shipped, this is next up.
+This section is risk #2 above (cryptographic inventory blind spots); code &
+binary analysis is now done, network/cipher detection is the remaining gap
+and the natural next pick.
 
 - [ ] **Network traffic / cipher detection** (data in transit — nothing
       today covers this). Candidates: **Zeek** (best-in-class OSS network
@@ -139,19 +140,29 @@ of it); with Pillar 2's first slice now shipped, this is next up.
       or live capture), **sslyze** (fast, scriptable TLS config scanner),
       **testssl.sh** (comprehensive TLS/SSL test script), **nmap**
       (`--script ssl-enum-ciphers` for a quick enumeration pass).
-- [ ] **Code & binary analysis** (crypto *library usage* in source — a
-      different axis from `classifier/`'s content-pattern matching, and the
-      prerequisite for the Quantum Risk Engine's algorithm/key-length check
-      and for any real crypto-agility assessment). Candidates: **CodeQL**
-      (static analysis queries purpose-built for crypto API usage),
-      **Semgrep** (lightweight, fast pattern rules — likely the easiest
-      first integration given the project is already Python-centric
-      tooling), **SonarQube** + community crypto rulesets.
-- [ ] **Restricted/weak-algorithm scanning** — Wind River's
-      **crypto-detector** as reference for flagging known-weak algorithms
-      in code; **entropy analysis** as a cheap heuristic for encrypted-blob
-      detection, potentially a useful complement to `scanner/filesystem.py`'s
-      signature checks for files that don't match a known format.
+- [x] **Code & binary analysis** (`code_analysis/` package) — crypto
+      *library usage* in source, a different axis from `classifier/`'s
+      content-pattern matching, and the prerequisite for the Quantum Risk
+      Engine's algorithm/key-length check and for any real crypto-agility
+      assessment. Uses **Semgrep** against a small vendored rule set
+      (`code_analysis/rules/crypto.yaml`) rather than Semgrep's hosted
+      registry — registry configs need network access, and local scans must
+      not, per Pillar 2's guarantee. This also covers the bulk of
+      "Restricted/weak-algorithm scanning" below (MD5/SHA1, DES/3DES/RC4,
+      ECB mode, sub-2048-bit RSA). Getting this working in the container
+      took three real fixes found only by running the built image (broken
+      cross-stage shebang, semgrep's core `execvp`-ing `pysemgrep` off PATH,
+      and a settings-file write failing under `--read-only`) — see
+      `CLAUDE.md` for details. Re-verified the network-isolation guarantee
+      still holds with this scan type included. Next: CodeQL/SonarQube for
+      deeper analysis, more languages, more rules.
+- [ ] **Restricted/weak-algorithm scanning** — the vendored Semgrep rules
+      above (`code_analysis/`) already cover the known-weak-algorithm half
+      of this (modeled after Wind River's **crypto-detector** approach).
+      Remaining: **entropy analysis** as a cheap heuristic for
+      encrypted-blob detection, a useful complement to
+      `scanner/filesystem.py`'s signature checks for files that don't match
+      a known format.
 - [ ] **Runtime analysis via eBPF** (`bpftrace`, `BCC`) to hook crypto
       library calls (OpenSSL, etc.) directly. Deepest visibility of any
       option here, also the most invasive to run — a later-stage item, not

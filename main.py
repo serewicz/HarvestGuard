@@ -2,7 +2,12 @@ import streamlit as st
 
 from analyzer.risk import analyze_risks
 from classifier.scanner import scan_filesystem_for_sensitive_data
-from dashboard.visualizations import display_risk_dashboard, display_sensitive_data_dashboard
+from code_analysis.scanner import scan_source_for_crypto_usage
+from dashboard.visualizations import (
+    display_code_analysis_dashboard,
+    display_risk_dashboard,
+    display_sensitive_data_dashboard,
+)
 from scanner.azure_blob import scan_azure_container
 from scanner.cloud import scan_s3_bucket
 from scanner.filesystem import scan_filesystem
@@ -13,6 +18,7 @@ S3_BUCKET_SCAN = "AWS S3 Bucket"
 GCS_BUCKET_SCAN = "GCS Bucket"
 AZURE_BLOB_SCAN = "Azure Blob Container"
 SENSITIVE_DATA_SCAN = "Local Filesystem — Sensitive Data (PII/Secrets)"
+CODE_ANALYSIS_SCAN = "Local Filesystem — Crypto Code Analysis (Semgrep)"
 
 st.set_page_config(page_title="HarvestGuard", layout="wide")
 st.title("🌾 HarvestGuard")
@@ -21,7 +27,14 @@ st.markdown("**Open-source cryptographic inventory and quantum risk scanner**")
 st.sidebar.header("Scan Configuration")
 scan_type = st.sidebar.selectbox(
     "Scan Target",
-    [LOCAL_FILESYSTEM_SCAN, S3_BUCKET_SCAN, GCS_BUCKET_SCAN, AZURE_BLOB_SCAN, SENSITIVE_DATA_SCAN],
+    [
+        LOCAL_FILESYSTEM_SCAN,
+        S3_BUCKET_SCAN,
+        GCS_BUCKET_SCAN,
+        AZURE_BLOB_SCAN,
+        SENSITIVE_DATA_SCAN,
+        CODE_ANALYSIS_SCAN,
+    ],
 )
 target = st.sidebar.text_input("Path / Bucket Name", value="/Users")
 if scan_type == AZURE_BLOB_SCAN:
@@ -40,13 +53,19 @@ if st.sidebar.button("Run Scan", type="primary"):
             df = scan_azure_container(
                 f"https://{account_name}.blob.core.windows.net", container_name
             )
-        else:
+        elif scan_type == SENSITIVE_DATA_SCAN:
             df = scan_filesystem_for_sensitive_data(target, max_depth=2)
+        else:
+            df = scan_source_for_crypto_usage(target)
 
         if scan_type == SENSITIVE_DATA_SCAN:
             if not df.empty:
                 st.success(f"Scan Complete - {len(df)} file(s) flagged")
             display_sensitive_data_dashboard(df)
+        elif scan_type == CODE_ANALYSIS_SCAN:
+            if not df.empty:
+                st.success(f"Scan Complete - {len(df)} finding(s)")
+            display_code_analysis_dashboard(df)
         elif not df.empty:
             df = analyze_risks(df)
             st.success(f"Scan Complete - {len(df)} items analyzed")

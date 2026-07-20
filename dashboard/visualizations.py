@@ -33,3 +33,17 @@ def display_sensitive_data_dashboard(df: pd.DataFrame):
 
     st.subheader("Flagged Files")
     st.dataframe(df, use_container_width=True)
+
+
+def display_code_analysis_dashboard(df: pd.DataFrame):
+    if df.empty:
+        st.success("No weak/legacy crypto library usage detected.")
+        return
+
+    st.subheader(f"Crypto Code Analysis Findings — {len(df)} finding(s)")
+
+    rule_counts = df["Rule"].value_counts()
+    st.bar_chart(rule_counts)
+
+    st.subheader("Findings")
+    st.dataframe(df, use_container_width=True)
