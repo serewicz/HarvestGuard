@@ -13,6 +13,11 @@ def test_calculate_risk_score_unencrypted():
     assert calculate_risk_score(row) == 90
 
 
+def test_calculate_risk_score_unencrypted_filesystem_value():
+    row = {"Encryption": "Unencrypted", "Location": "/data/file.txt"}
+    assert calculate_risk_score(row) == 90
+
+
 def test_calculate_risk_score_sensitive_path_is_capped_at_100():
     row = {"Encryption": "Unknown / Unencrypted", "Location": "/data/Sensitive/customers.csv"}
     # 50 base + 40 (unencrypted) + 20 (sensitive path) = 110, capped at 100

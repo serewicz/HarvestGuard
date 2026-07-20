@@ -1,10 +1,15 @@
 import pandas as pd
 
+# Values scanners use to signal "confirmed unencrypted" across sources
+# (filesystem scans emit "Unencrypted"; S3 emits "None"; legacy POC value
+# kept for compatibility).
+_UNENCRYPTED_VALUES = {"Unknown / Unencrypted", "None", "Unencrypted"}
+
 
 def calculate_risk_score(row):
     """Simple risk scoring for POC - expand with real logic later."""
     score = 50  # Base
-    if row.get("Encryption") in ["Unknown / Unencrypted", "None"]:
+    if row.get("Encryption") in _UNENCRYPTED_VALUES:
         score += 40
     if "Sensitive" in str(row.get("Location", "")):
         score += 20
