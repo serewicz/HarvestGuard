@@ -17,7 +17,7 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
 ## Target Users & Use Cases
 
 - **M&A, IP Lawyers, PE/VC Firms**  
-  Quickly scan target company storage/clusters/cloud for encryption status, weak algorithms, unencrypted sensitive data (IP, customer PII), and HNDL exposure. Many targets have poor inventory—this tool surfaces risks early.
+  Quickly scan target company storage/cloud for encryption status, unencrypted sensitive data (IP, customer PII), and HNDL exposure. Many targets have poor inventory—this tool surfaces risks early.
 
 - **Deal Speed & Risk Mitigation**  
   Pre-LOI or during DD, identify crypto debt that could delay integration or create liabilities (breaches, compliance failures post-quantum).
@@ -28,22 +28,33 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
 - **Ease of Use**  
   Free/open-source, self-hosted, or simple web-based assessment → low friction entry.
 
-- **Audit Trail**  
-  Generates CBOMs and professional reports for legal/IP teams.
+- **Audit Trail** *(planned — see [docs/ROADMAP.md](docs/ROADMAP.md))*  
+  CBOM and professional-report export for legal/IP teams.
 
 ## Features (MVP)
 
-- Multi-environment scanning (local filesystems, storage clusters, AWS S3 — expandable)
-- Encryption detection & strength assessment
-- Ownership, access patterns, and usage insights
-- Quantum risk analysis (HNDL exposure, risk scoring)
-- Visualizations (risk heatmaps, tables, basic flame graphs)
-- Exports: CBOM JSON, PDF reports
-- Streamlit web dashboard + CLI support
+- **Local filesystem** — real encryption detection: file-signature checks for
+  common encrypted formats (OpenSSL, PGP/GPG, age, LUKS containers, encrypted
+  ZIP), falling back to volume-level status (FileVault / LUKS / BitLocker)
+  when a file isn't itself a recognized encrypted format.
+- **AWS S3, Google Cloud Storage, Azure Blob Storage** — per-object/blob
+  encryption status via each provider's API (S3 `ServerSideEncryption`, GCS
+  CMEK vs. Google-managed, Azure customer-managed encryption scope vs.
+  Microsoft-managed).
+- **Sensitive-data classifier** — flags files containing email addresses,
+  SSNs, phone numbers, Luhn-validated payment card numbers, and
+  credentials/secrets (AWS keys, private keys, GitHub/Slack tokens). Reports
+  category and count only, never the matched values, so a scan result can't
+  itself leak the sensitive data it found.
+- **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
+  exposure scoring (High/Medium/Low) layered on top of encryption status.
+- **Streamlit dashboard** — pie/bar charts and a results table per scan.
 
-**Future Roadmap**: Microservices architecture, Prometheus + Grafana monitoring, advanced AI recommendations, hardware partnerships for crypto-agility.
+Not yet built: CBOM/PDF export, a CLI (today it's `streamlit run main.py`
+only), and network/code-level crypto scanning. See
+[docs/ROADMAP.md](docs/ROADMAP.md) for what's next and why, in rough
+priority order.
 
-## Quick Start
 ## Quick Start (macOS / Linux / Windows)
 
 ### Prerequisites
@@ -67,3 +78,14 @@ pip install -r requirements.txt     # or pip3 if needed
 
 # Run the dashboard
 streamlit run main.py
+```
+
+## Contributing
+
+Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,
+test/lint commands, and good first-contribution areas.
+
+## Security
+
+Found a vulnerability? Please don't open a public issue — see
+[SECURITY.md](SECURITY.md) for how to report it privately.

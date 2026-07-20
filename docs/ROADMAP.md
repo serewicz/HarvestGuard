@@ -60,8 +60,10 @@ status alone.
       credential-chain resolution.
 - [ ] **Common `ScanResult` interface** — normalize local/AWS/GCP/Azure/
       classifier output into one schema so the analyzer, dashboard, and
-      exporters don't special-case each source. Do this once a second cloud
-      backend exists, not before (avoid speculative abstraction).
+      exporters don't special-case each source. Deliberately deferred until
+      a second cloud backend existed, to avoid speculative abstraction —
+      that condition is now met (S3 + GCS + Azure all ship). Ready to pick
+      up.
 
 ### Future scan surfaces — tooling landscape
 
