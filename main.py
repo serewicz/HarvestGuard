@@ -1,9 +1,9 @@
 import streamlit as st
-import pandas as pd
-from scanner.filesystem import scan_filesystem
-from scanner.cloud import scan_s3_bucket
+
 from analyzer.risk import analyze_risks
 from dashboard.visualizations import display_risk_dashboard
+from scanner.cloud import scan_s3_bucket
+from scanner.filesystem import scan_filesystem
 
 st.set_page_config(page_title="HarvestGuard", layout="wide")
 st.title("🌾 HarvestGuard")
@@ -19,7 +19,7 @@ if st.sidebar.button("Run Scan", type="primary"):
             df = scan_filesystem(target, max_depth=2)
         else:
             df = scan_s3_bucket(target)
-        
+
         if not df.empty:
             df = analyze_risks(df)
             st.success(f"Scan Complete - {len(df)} items analyzed")

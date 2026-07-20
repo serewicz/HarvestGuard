@@ -1,11 +1,13 @@
 import boto3
+import pandas as pd
 from botocore.exceptions import ClientError
+
 
 def scan_s3_bucket(bucket_name: str, prefix: str = ""):
     """Scan S3 bucket for encryption status."""
     s3 = boto3.client('s3')
     results = []
-    
+
     try:
         response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
         for obj in response.get('Contents', []):
@@ -24,6 +26,5 @@ def scan_s3_bucket(bucket_name: str, prefix: str = ""):
                 pass
     except Exception as e:
         print(f"Error scanning S3: {e}")
-        
-    import pandas as pd
+
     return pd.DataFrame(results)
