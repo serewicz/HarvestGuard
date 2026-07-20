@@ -3,9 +3,15 @@ import streamlit as st
 from analyzer.risk import analyze_risks
 from classifier.scanner import scan_filesystem_for_sensitive_data
 from dashboard.visualizations import display_risk_dashboard, display_sensitive_data_dashboard
+from scanner.azure_blob import scan_azure_container
 from scanner.cloud import scan_s3_bucket
 from scanner.filesystem import scan_filesystem
+from scanner.gcs import scan_gcs_bucket
 
+LOCAL_FILESYSTEM_SCAN = "Local Filesystem"
+S3_BUCKET_SCAN = "AWS S3 Bucket"
+GCS_BUCKET_SCAN = "GCS Bucket"
+AZURE_BLOB_SCAN = "Azure Blob Container"
 SENSITIVE_DATA_SCAN = "Local Filesystem — Sensitive Data (PII/Secrets)"
 
 st.set_page_config(page_title="HarvestGuard", layout="wide")
@@ -14,16 +20,26 @@ st.markdown("**Open-source cryptographic inventory and quantum risk scanner**")
 
 st.sidebar.header("Scan Configuration")
 scan_type = st.sidebar.selectbox(
-    "Scan Target", ["Local Filesystem", "AWS S3 Bucket", SENSITIVE_DATA_SCAN]
+    "Scan Target",
+    [LOCAL_FILESYSTEM_SCAN, S3_BUCKET_SCAN, GCS_BUCKET_SCAN, AZURE_BLOB_SCAN, SENSITIVE_DATA_SCAN],
 )
 target = st.sidebar.text_input("Path / Bucket Name", value="/Users")
+if scan_type == AZURE_BLOB_SCAN:
+    st.sidebar.caption("Format: storage-account-name/container-name")
 
 if st.sidebar.button("Run Scan", type="primary"):
     with st.spinner("Scanning and analyzing..."):
-        if scan_type == "Local Filesystem":
+        if scan_type == LOCAL_FILESYSTEM_SCAN:
             df = scan_filesystem(target, max_depth=2)
-        elif scan_type == "AWS S3 Bucket":
+        elif scan_type == S3_BUCKET_SCAN:
             df = scan_s3_bucket(target)
+        elif scan_type == GCS_BUCKET_SCAN:
+            df = scan_gcs_bucket(target)
+        elif scan_type == AZURE_BLOB_SCAN:
+            account_name, _, container_name = target.partition("/")
+            df = scan_azure_container(
+                f"https://{account_name}.blob.core.windows.net", container_name
+            )
         else:
             df = scan_filesystem_for_sensitive_data(target, max_depth=2)
 
