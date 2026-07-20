@@ -53,7 +53,7 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
 ### Installation
 
 ```bash
-git clone https://github.com/yourusername/harvestguard.git
+git clone https://github.com/serewicz/harvestguard.git
 cd harvestguard
 pip install -r requirements.txt
 streamlit run main.py
