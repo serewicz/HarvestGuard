@@ -18,11 +18,41 @@ Two things follow from that:
   container, never phones home, never persists what it scans" is not a
   packaging detail — it's the reason they're allowed to run this at all.
 
-Current state (as of this writing): Streamlit POC. Local filesystem scan is a
-stub (`Encryption` is hardcoded `"Unknown"`). AWS S3 scan is real (checks
-`ServerSideEncryption` per object). No GCP, no Azure, no containers, no PII/
-secrets detection — risk scoring is a simple heuristic on top of the crypto
-status alone.
+Current state (as of this writing): local filesystem, AWS S3, GCS, and Azure
+Blob scanning all do real encryption-status detection; the PII/secrets
+classifier ships as its own scan type. No containers yet, no CBOM/PDF export,
+no network- or code-level crypto detection.
+
+---
+
+## Quantum risk taxonomy
+
+Due-diligence quantum risk breaks down into seven categories, roughly ordered
+by immediacy and financial impact. This is the taxonomy the rest of the
+roadmap is organized around — each row says where that risk lives, or why it
+deliberately doesn't live in the engineering backlog at all.
+
+1. **Harvest Now, Decrypt Later (HNDL)** — done. Pillar 1's encryption
+   detection + HNDL exposure scoring.
+2. **Cryptographic inventory blind spots** — next up. Pillar 1's "Future scan
+   surfaces" section (network/cipher detection, code & binary crypto usage
+   analysis) — most companies have no map of what algorithms/key
+   lengths/libraries they're running, which is exactly what that section
+   targets.
+3. **PQC migration debt / crypto-agility** — blocked on #2, not skipped.
+   Assessing whether a system can swap algorithms requires first knowing
+   what algorithms and libraries it uses — the code/binary analysis
+   foundation has to land before crypto-agility assessment is buildable.
+   See the Quantum Risk Engine section below.
+4. **Data ownership & classification gaps** — primarily an advisory/services
+   deliverable, not a tool feature. See "Advisory backlog" below.
+5. **Supply chain & third-party exposure (incl. shadow AI)** — explicitly out
+   of scope for now; see bottom of this doc.
+6. **Valuation & integration impact** — Pillar 3's dollarized-risk and
+   partner-ready-summary items. Related existing work:
+   [technology-leadership-portfolio](https://github.com/serewicz/technology-leadership-portfolio).
+7. **Talent & governance gaps** — not scannable; advisory-only, with one
+   small tool-buildable nicety (see "Advisory backlog" below).
 
 ---
 
@@ -65,15 +95,41 @@ status alone.
       that condition is now met (S3 + GCS + Azure all ship). Ready to pick
       up.
 
+### Quantum Risk Engine (`analyzer/risk.py`)
+
+Today `analyzer/risk.py` is a simple heuristic (base score + fixed
+adjustments). Formalizing it into a real rules engine is risk #3 above and
+depends on the code/binary analysis work landing first:
+
+- [ ] **Algorithm/key-length vulnerability check** — flag known-vulnerable
+      algorithms and key sizes (RSA/ECC under safe thresholds) explicitly,
+      rather than only inferring HNDL risk from encryption presence/absence
+      as today. Depends on the "Code & binary analysis" item below for its
+      input signal.
+- [ ] **HNDL lifetime modeling** — Mosca inequality-style calculation (data
+      lifetime vs. quantum timeline) to turn "this is at risk" into "this is
+      at risk starting in ~N years." This is the project's namesake and
+      currently the least literally-implemented part of the roadmap.
+- [ ] **Hybrid PQC-readiness checks** — once a library like `liboqs` is
+      integrated as a reference. Crypto-agility assessment itself (can this
+      system swap algorithms without a rewrite) is a genuinely hard,
+      not-yet-solved problem here — no clear detection approach exists yet
+      beyond "does the code use a crypto-agility layer/abstraction," which
+      is itself a code-analysis question.
+- Note: a "migration effort estimator" was also proposed for this layer, but
+  that's the same thing as Pillar 3's **Dollarized risk output** below —
+  intentionally not duplicated as a separate item.
+
 ### Future scan surfaces — tooling landscape
 
 Everything above covers data at rest (filesystem, object storage). Matching
 market-quality crypto/data-safety tooling means also covering data in
 transit and crypto usage in code — and, for all of these, leaning on
 proven OSS tools rather than re-implementing detection logic from scratch.
-This is a survey to pull individual items from, not a commitment to build
-all of it; sequencing depends on which gap a real due-diligence engagement
-hits first.
+This section is risk #2 above (cryptographic inventory blind spots) and is
+next in line, ahead of containers, in terms of what closes the biggest
+diligence gap — sequencing of engineering time between this and Pillar 2
+still depends on which gap a real engagement hits first.
 
 - [ ] **Network traffic / cipher detection** (data in transit — nothing
       today covers this). Candidates: **Zeek** (best-in-class OSS network
@@ -82,11 +138,13 @@ hits first.
       **testssl.sh** (comprehensive TLS/SSL test script), **nmap**
       (`--script ssl-enum-ciphers` for a quick enumeration pass).
 - [ ] **Code & binary analysis** (crypto *library usage* in source — a
-      different axis from `classifier/`'s content-pattern matching).
-      Candidates: **CodeQL** (static analysis queries purpose-built for
-      crypto API usage), **Semgrep** (lightweight, fast pattern rules —
-      likely the easiest first integration given the project is already
-      Python-centric tooling), **SonarQube** + community crypto rulesets.
+      different axis from `classifier/`'s content-pattern matching, and the
+      prerequisite for the Quantum Risk Engine's algorithm/key-length check
+      and for any real crypto-agility assessment). Candidates: **CodeQL**
+      (static analysis queries purpose-built for crypto API usage),
+      **Semgrep** (lightweight, fast pattern rules — likely the easiest
+      first integration given the project is already Python-centric
+      tooling), **SonarQube** + community crypto rulesets.
 - [ ] **Restricted/weak-algorithm scanning** — Wind River's
       **crypto-detector** as reference for flagging known-weak algorithms
       in code; **entropy analysis** as a cheap heuristic for encrypted-blob
@@ -96,14 +154,6 @@ hits first.
       library calls (OpenSSL, etc.) directly. Deepest visibility of any
       option here, also the most invasive to run — a later-stage item, not
       a starting point.
-- [ ] **Quantum-specific checks** — flag known-vulnerable algorithms/key
-      sizes (RSA/ECC under safe thresholds) explicitly rather than only
-      inferring HNDL risk from encryption presence/absence as today; Mosca
-      inequality-style modeling (data lifetime vs. quantum timeline) to
-      turn "this is at risk" into "this is at risk starting in ~N years";
-      hybrid PQC-readiness checks once a library like `liboqs` is
-      integrated. This is the project's namesake (Harvest-Now-Decrypt-Later)
-      and currently the least literally-implemented part of the roadmap.
 - [ ] **Cloud metadata as the reliable baseline** — not a gap, a validation:
       the provider-API approach `scanner/cloud.py` / `scanner/gcs.py` /
       `scanner/azure_blob.py` already use (reading `ServerSideEncryption`,
@@ -118,33 +168,54 @@ hits first.
       actually inspect before approving use on deal data.
 - [ ] **No default outbound network access** — scan results stay on the
       machine/volume unless the user explicitly exports them. Document this
-      as an explicit guarantee, not just an implementation detail.
+      as an explicit guarantee, not just an implementation detail. This is
+      also why a hosted AI-integration API (see Pillar 3) is not planned as
+      a default-on feature.
 - [ ] **Read-only IAM policy templates** per cloud (AWS/GCP/Azure
       least-privilege scan roles) — small to build, and one of the highest
       trust-per-effort items on this list; a security-conscious buyer will
       ask for exactly this.
 - [ ] **Signed images + SBOM** (cosign, syft) for the scanner itself —
       supply-chain provenance, and a natural dogfood of the project's own
-      crypto-inventory premise.
+      crypto-inventory premise. SBOM should target the same CycloneDX format
+      as the CBOM export below — one format across the project, and it
+      happens to be what the Compliance section needs too.
 - [ ] **k8s Job manifest / Helm chart** for larger in-cluster or in-VPC scans
       where the target environment is already containerized.
 
-## Pillar 3 — Reporting: where deal value gets argued
+## Pillar 3 — Reporting: where deal value gets argued (Output Layer)
 
 - [ ] **CBOM JSON export** — promised in the README, not yet built. Target
       the **CycloneDX 1.6+** CBOM format specifically rather than a bespoke
       shape — standardized output is what makes this interoperable with
-      other tools a due-diligence team might already run.
-- [ ] **PDF report export** — `weasyprint` is already a dependency and
-      unused; wire it up.
+      other tools a due-diligence team might already run, and doubles as a
+      safe, zero-new-engineering way for a client's internal AI/RAG tooling
+      to consume scan results (a plain file export, not a hosted API — see
+      the API note below).
+- [ ] **Markdown + PDF report export** — `weasyprint` is already a
+      dependency and unused; wire it up. Structure both as an executive
+      summary (for a partner/GC) plus a technical appendix (for whoever
+      does the remediation work) — Markdown as the lighter-weight,
+      easier-to-diff/embed format, PDF as the polished deliverable.
 - [ ] **Dollarized risk output** — translate findings into estimated
       remediation cost/effort ("this dataset requires ~$Y to remediate"),
       which is what makes the README's valuation-impact claim real instead
-      of aspirational.
+      of aspirational. (This is also what covers the "migration effort
+      estimator" idea from the Quantum Risk Engine section — one item, not
+      two.)
 - [ ] **Partner-ready findings summary** — a report clean enough to hand to
       a partner or GC directly, with a low-key pointer to services for firms
       that want help acting on it. This is the actual lead-gen mechanism for
       the consulting side — keep it understated in the OSS tool itself.
+
+**Explicitly deferred, not committed — hosted AI-integration API.** A file
+export (above) is AI-consumable for free. A live API endpoint that a
+client's internal AI/RAG system calls is a different thing architecturally:
+it's in direct tension with Pillar 2's "never phones home, no default
+outbound network access" trust guarantee, which is the reason this audience
+is allowed to run the tool at all. If this gets built, it should be a
+local-only, explicitly opt-in endpoint — never a hosted default — and is a
+later-stage evaluation, not a current commitment.
 
 ## Pillar 4 — Project hygiene
 
@@ -158,9 +229,67 @@ hits first.
 
 ---
 
+## Compliance & regulatory (EU Cyber Resilience Act)
+
+Not legal advice — flagging here so it isn't lost, and so engineering effort
+only gets spent where it's actually actionable. The CRA has a carve-out for
+FOSS not developed "in the course of a commercial activity," which may not
+apply once the services business is live; get real counsel before relying on
+it.
+
+- [ ] **Technical documentation dossier (Annex VII)** — buildable now, no
+      legal gate. Architecture description, threat model, essential-
+      requirements-to-solution mapping, vulnerability-handling process
+      description. Mostly overlaps with Pillar 2's SBOM/signing work and
+      `SECURITY.md`'s existing disclosure policy — this is largely writing
+      up what's already being built, not new engineering.
+- **Blocked on a legal decision, not on engineering effort — CE marking /
+  formal conformity assessment.** Requires (1) a product classification call
+  (default vs. "Important Class I" — a credential-reading, sensitive-data-
+  scanning tool plausibly resembles the identity/access-management and
+  security-monitoring categories CRA's Annex III calls out as "important,"
+  which may rule out simple self-assessment) and (2) appointing an EU-based
+  Authorized Representative, since the manufacturer isn't EU-established.
+  Do not attempt to self-certify without resolving both first.
+- **Deferred to long-term — ENISA incident/vulnerability reporting
+  pipeline.** The 24-hour early-warning / 72-hour full-report / 14-day
+  final-report obligations for actively exploited vulnerabilities and severe
+  incidents. Only relevant once there's real commercial EU distribution;
+  revisit alongside the CE marking decision above, not before.
+
+## Advisory backlog (not tool-buildable)
+
+Captured so these don't get lost, and so they're not mistaken for
+engineering work — these are due-diligence risk categories where the tool's
+job is to surface a signal, not close the whole gap.
+
+- **Data ownership & classification gaps** (risk #4) — the strongest
+  advisor/professional-services angle of the seven. The classifier already
+  surfaces *what* sensitive data exists and roughly *where*; mapping that to
+  who legally owns it, how long it must stay confidential, and third-party/
+  backup residency is a consulting deliverable built on top of scan output,
+  not a scannable fact in itself.
+- **Talent & governance gaps** (risk #7) — not scannable at all (no
+  filesystem/cloud signal indicates whether a target's leadership
+  understands quantum risk). One small tool-buildable nicety: include a
+  boilerplate "board discussion questions" section in the generated report
+  (Pillar 3), authored once, not derived from scan data.
+- **Valuation & integration impact** (risk #6) — the engineering side of
+  this is Pillar 3's dollarized-risk and partner-ready-summary items above;
+  the framing/content side has existing related work at
+  [technology-leadership-portfolio](https://github.com/serewicz/technology-leadership-portfolio)
+  worth reviewing as an input, not yet reviewed in depth here.
+
+---
+
 ## Explicitly out of scope for now
 
 - Packaging as an installable PyPI library (`pyproject.toml` already notes
   this; revisit once there's a CLI consumer, not before).
 - Microservices split / Prometheus+Grafana (mentioned in the README's "Future
   Roadmap") — premature before the core scanning coverage above exists.
+- **Supply chain & third-party exposure, including shadow AI detection**
+  (risk #5) — likely too large a scope for this tool as currently conceived;
+  shadow-AI/shadow-IT discovery is closer to a CASB product category than a
+  crypto/data-safety scanner. Not committed; revisit only if a specific
+  engagement makes the gap unavoidable.
