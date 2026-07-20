@@ -1,0 +1,9 @@
+title: "HarvestGuard Read-Only Scan"
+description: >-
+  Least-privilege custom role for HarvestGuard's GCS scanner
+  (scanner/gcs.py). List + read object metadata only -- no write, no
+  delete, no bucket configuration access.
+stage: "GA"
+includedPermissions:
+  - storage.objects.list
+  - storage.objects.get

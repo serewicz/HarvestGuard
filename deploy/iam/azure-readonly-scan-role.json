@@ -1,0 +1,14 @@
+{
+  "Name": "HarvestGuard Read-Only Scan",
+  "IsCustom": true,
+  "Description": "Least-privilege role for HarvestGuard's Azure Blob scanner (scanner/azure_blob.py) -- list and read blobs only, no write/delete. This duplicates the built-in 'Storage Blob Data Reader' role; prefer assigning that built-in role directly unless a custom role is specifically required by policy.",
+  "Actions": [],
+  "NotActions": [],
+  "DataActions": [
+    "Microsoft.Storage/storageAccounts/blobServices/containers/blobs/read"
+  ],
+  "NotDataActions": [],
+  "AssignableScopes": [
+    "/subscriptions/REPLACE_WITH_SUBSCRIPTION_ID"
+  ]
+}

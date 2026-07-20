@@ -1,4 +1,4 @@
-streamlit>=1.38.0
+streamlit>=1.38.0,<1.51.0  # >=1.51 changed the local dev-server model (frontend no longer served on the same port as the backend under `streamlit run`) -- confirmed against a fresh install, not yet compatible with how this app is run/containerized
 boto3>=1.35.0
 google-cloud-storage>=2.18.0
 azure-storage-blob>=12.19.0

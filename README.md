@@ -80,6 +80,22 @@ pip install -r requirements.txt     # or pip3 if needed
 streamlit run main.py
 ```
 
+### Running in a container
+
+For deal data you'd rather not run through a bare Python environment: a
+non-root, distroless, read-only-filesystem-compatible image is provided.
+
+```bash
+docker build -t harvestguard .
+docker run --rm -p 8501:8501 --read-only --tmpfs /tmp harvestguard
+```
+
+Local filesystem and PII/secrets scans need no network access at all —
+verified in [SECURITY.md](SECURITY.md#container-network-posture). Cloud
+scans need outbound access only to that provider's API; see
+[deploy/iam/](deploy/iam/) for least-privilege, read-only IAM policy
+templates scoped to exactly what each scanner calls.
+
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,

@@ -1,0 +1,13 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+venv
+tests
+docs
+*.md
+.env
+.env.example
+.gitignore
+requirements-dev.txt
+pyproject.toml
