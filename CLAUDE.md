@@ -9,7 +9,7 @@ Open-source cryptographic inventory and quantum-risk (Harvest-Now-Decrypt-Later)
 ## Current state of the code (100% Python, MVP stage)
 
 - `main.py` — Streamlit entry point. Sidebar picks "Local Filesystem" or "AWS S3 Bucket", runs a scan, renders results.
-- `scanner/filesystem.py` — walks a path, records size/mtime/owner. **Encryption detection is a hardcoded placeholder (`"Unknown"`) — not implemented.** This is the single biggest gap and the actual value proposition of the tool.
+- `scanner/filesystem.py` — walks a path, records size/mtime/owner, and now does real encryption detection: per-file signature checks (OpenSSL, PGP/GPG, age, LUKS containers, encrypted ZIP), falling back to volume-level status (FileVault/LUKS/BitLocker, checked once per scan root and cached). Remaining gap: signature coverage is still narrow (no encrypted Office/PDF/VeraCrypt yet).
 - `scanner/cloud.py` — real logic: checks each S3 object's `ServerSideEncryption` header via boto3, flags unencrypted objects High risk. This one works, not a stub.
 - `analyzer/risk.py` — simple heuristic scoring (base 50, +40 if unencrypted, +20 if "Sensitive" in path string, capped at 100). Buckets into High/Medium/Low HNDL exposure.
 - `dashboard/visualizations.py` — Plotly pie + bar chart, raw data table.
@@ -30,8 +30,12 @@ None of this has been committed/pushed yet — the prior session had no way to r
 
 ## Recommended next priorities, roughly in order
 
-1. Real encryption/algorithm detection in `scanner/filesystem.py` — read file headers/magic bytes for known encrypted formats, check filesystem-level encryption (LUKS/FileVault/BitLocker), replace the `"Unknown"` placeholder.
-2. Commit the scaffolding above and confirm CI goes green.
-3. Additional cloud scan targets (Azure Blob, GCS) following the `scanner/cloud.py` pattern.
-4. CBOM JSON export and the PDF export the README promises (weasyprint dependency is already declared, unused).
-5. Read `docs/` in the actual repo to see if it changes any of the above priorities — it wasn't accessible in the prior session.
+See `docs/ROADMAP.md` for the full pillar breakdown (scanning coverage,
+containers, reporting, project hygiene). Status as of this writing:
+
+1. ~~Real encryption/algorithm detection in `scanner/filesystem.py`~~ — done.
+2. ~~Commit the scaffolding above and confirm CI goes green.~~ — done (both merged to `main`).
+3. Sensitive-data classification (PII/secrets/payment card patterns) — new pillar, not started.
+4. Additional cloud scan targets (Azure Blob, GCS) following the `scanner/cloud.py` pattern.
+5. CBOM JSON export and the PDF export the README promises (weasyprint dependency is already declared, unused).
+6. Containerization (Pillar 2 in the roadmap) — not started; this is the trust story for the target audience, not just packaging.

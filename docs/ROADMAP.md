@@ -28,11 +28,12 @@ status alone.
 
 ## Pillar 1 — Scanning engine: coverage
 
-- [ ] **Real local encryption detection** (`scanner/filesystem.py`) — file
-      magic bytes for known encrypted formats, filesystem-level encryption
-      status (LUKS / FileVault / BitLocker / dm-crypt). Replaces the
-      `"Unknown"` placeholder — currently the single biggest credibility gap
-      in the tool.
+- [x] **Real local encryption detection** (`scanner/filesystem.py`) — file
+      signature checks for common encrypted formats (OpenSSL, PGP/GPG, age,
+      LUKS containers, encrypted ZIP), falling back to volume-level status
+      (FileVault / LUKS / BitLocker) per scan root. Replaces the `"Unknown"`
+      placeholder. Next: expand signature coverage (encrypted Office/PDF,
+      VeraCrypt) and add APFS/dm-crypt detail beyond the on/off check.
 - [ ] **Sensitive-data classification module** (new `classifier/` package) —
       PII (names, SSNs, emails, phone numbers), payment card patterns, and
       secrets/API keys/credentials, scanned alongside crypto status. This is
