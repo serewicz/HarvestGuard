@@ -1,0 +1,78 @@
+name: Container build + runtime validation
+description: >
+  Builds the HarvestGuard container image locally (never pushed by this
+  action) and validates it actually runs: an import check that catches
+  import-time failures a health check alone misses, plus a real container
+  run under the documented non-root / read-only / tmpfs posture with a
+  bounded health-endpoint check. Used by both the PR-validation job and the
+  main-branch publication job so this logic exists in exactly one place.
+inputs:
+  image-ref:
+    description: Image tag to build and validate (e.g. ghcr.io/org/repo:sha)
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build image (local only -- never pushed by this action)
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: false
+        load: true
+        tags: ${{ inputs.image-ref }}
+
+    - name: Import check
+      # The health endpoint alone does NOT catch import-time failures: it
+      # only proves the web server process is alive, not that main.py's
+      # script executes successfully. Streamlit only actually runs the
+      # script once a real browser session connects over WebSocket -- a
+      # plain HTTP GET never triggers it. Verified directly against a known
+      # -broken image (missing normalized-finding modules): the health
+      # endpoint returned 200 while `import main` failed with
+      # ModuleNotFoundError.
+      shell: bash
+      run: |
+        set -uo pipefail
+        IMAGE="${{ inputs.image-ref }}"
+
+        if ! docker run --rm --entrypoint python "$IMAGE" -c "import main" > import_check.log 2>&1; then
+          echo "::error::main.py failed to import inside the container"
+          cat import_check.log
+          exit 1
+        fi
+        echo "main.py and all reachable scanner imports succeeded"
+
+    - name: Container run + health endpoint
+      shell: bash
+      run: |
+        set -uo pipefail
+        IMAGE="${{ inputs.image-ref }}"
+        NAME="hg-smoke-test"
+
+        docker run -d --name "$NAME" --read-only --tmpfs /tmp -p 8501:8501 "$IMAGE"
+
+        health_status=1
+        for i in $(seq 1 30); do
+          if [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" != "true" ]; then
+            echo "::error::Container exited early"
+            break
+          fi
+          if curl -sf http://localhost:8501/_stcore/health >/dev/null 2>&1; then
+            echo "Health check passed after ${i}s"
+            health_status=0
+            break
+          fi
+          sleep 1
+        done
+
+        if [ "$health_status" -ne 0 ]; then
+          echo "::error::Container smoke test failed"
+          docker logs "$NAME" || true
+        fi
+
+        docker rm -f "$NAME" >/dev/null 2>&1 || true
+        exit "$health_status"
