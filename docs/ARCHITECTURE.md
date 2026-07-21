@@ -75,10 +75,13 @@ dashboard behavior, or assessment models.
 The built-in dashboard is for local exploration and drill-down. Current reports
 are evidence-only Markdown, JSON, and console outputs for sharing scanner
 observations with technical, security, advisory, and CTO audiences. These
-outputs contribute to the intended Technology Due Diligence Evidence Package.
-Reports must keep summary claims tied to observed findings and must not add
-risk scores, executive priority, remediation recommendations, ownership
-inference, or other assessment conclusions.
+outputs contribute to the intended Technology Due Diligence Evidence Package
+and other executive deliverables described in
+[EXECUTIVE_DELIVERABLES.md](EXECUTIVE_DELIVERABLES.md). Technical evidence can
+feed multiple report types, but reports must keep summary claims tied to
+observed findings and must not add risk scores, executive priority,
+remediation recommendations, ownership inference, or other assessment
+conclusions.
 
 ### Optional Prometheus and Grafana
 

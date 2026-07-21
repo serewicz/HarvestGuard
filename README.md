@@ -35,6 +35,11 @@ HarvestGuard is additive to tools organizations may already use for security ope
 - **Evidence Package** *(planned — see [docs/ROADMAP.md](docs/ROADMAP.md))*  
   Current JSON and Markdown reports are evidence outputs; future work may package these into a broader Technology Due Diligence Evidence Package for legal, advisory, and executive review.
 
+Executive-facing reporting vision is documented in
+[docs/EXECUTIVE_DELIVERABLES.md](docs/EXECUTIVE_DELIVERABLES.md). HarvestGuard
+produces technical evidence first; executive deliverables are derived from that
+evidence and must remain traceable back to it.
+
 ## Features (MVP)
 
 - **Local filesystem** — real encryption detection: file-signature checks for

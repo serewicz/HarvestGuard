@@ -36,6 +36,11 @@ new scanner category, introducing a new service or datastore, expanding the
 dashboard, adding compliance frameworks, adding remediation behavior, or
 duplicating functionality available from an established tool.
 
+[Executive Deliverables](docs/EXECUTIVE_DELIVERABLES.md) is the canonical
+reporting-vision document. New reporting features should support one or more
+documented executive deliverables, and reports must preserve traceability from
+executive statements back to technical evidence.
+
 ## Current state of the code
 
 - `main.py` — Streamlit entry point. Sidebar selects one of six scan types (Local Filesystem, AWS S3 Bucket, GCS Bucket, Azure Blob Container, Local Filesystem — Sensitive Data, Local Filesystem — Crypto Code Analysis), runs the scan, renders results.
