@@ -55,12 +55,14 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
   containers, and JKS header evidence) with algorithm, key size, issuer,
   subject, expiration, fingerprint, confidence, and parsing errors. See
   [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
+- **Unified CLI** — runs local scanners through the normalized finding model
+  with summary, JSON, and Markdown output. See [docs/CLI.md](docs/CLI.md).
 - **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
   exposure scoring (High/Medium/Low) layered on top of encryption status.
 - **Streamlit dashboard** — pie/bar charts and a results table per scan.
 
-Not yet built: CBOM/PDF export, a CLI (today it's `streamlit run main.py`
-only), and network-level crypto scanning (TLS/cipher-suite detection). See
+Not yet built: CBOM/PDF export and network-level crypto scanning
+(TLS/cipher-suite detection). See
 [docs/ROADMAP.md](docs/ROADMAP.md) for what's next and why, in rough
 priority order.
 
@@ -85,8 +87,14 @@ source venv/bin/activate    # On macOS/Linux
 # Install dependencies
 pip install -r requirements.txt     # or pip3 if needed
 
+# Optional: install the unified CLI command
+pip install -e .
+
 # Run the dashboard
 streamlit run main.py
+
+# Or run a local CLI scan
+harvestguard scan ./tests/fixtures/crypto_inventory
 ```
 
 ### Running in a container

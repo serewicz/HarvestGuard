@@ -123,12 +123,13 @@ Key product constraints:
 - **Title:** CLI
 - **Purpose:** Make scanner behavior scriptable, testable, and suitable for
   diligence workflows before adding more visual polish.
-- **Status:** Planned
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-003
 - **Acceptance criteria:** Users can run supported scan types from the command
   line; output can be written as JSON; nonzero exit codes distinguish user
   errors from scanner failures; dashboard behavior remains unchanged.
+  Implemented in `harvestguard.py` and documented in `docs/CLI.md`.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/16
 
 ### HG-005

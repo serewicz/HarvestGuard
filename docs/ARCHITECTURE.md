@@ -65,7 +65,9 @@ and future drift comparison without requiring a server or external database.
 
 The CLI is the first stable user interface for scanner execution and export.
 The service layer should let the CLI, dashboard, and reports reuse the same
-scan and persistence paths.
+scan and persistence paths. The current CLI is documented in [CLI.md](CLI.md)
+and runs local scanners through normalized findings without adding storage,
+dashboard behavior, or assessment models.
 
 ### Built-in Dashboard and Reports
 
@@ -100,6 +102,7 @@ and migration-difficulty models exist.
 - `findings.py` defines the versioned normalized finding model.
 - `finding_adapters.py` maps current scanner DataFrames into normalized
   findings without changing existing scanner behavior.
+- `harvestguard.py` provides the unified local CLI entry point.
 - `analyzer/risk.py` contains a simple heuristic risk score.
 - `main.py` wires current scan types into Streamlit.
 - `tests/` covers local scanning, classifier behavior, code analysis, risk
