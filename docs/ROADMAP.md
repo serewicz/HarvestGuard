@@ -110,14 +110,18 @@ Key product constraints:
 ### HG-002
 
 - **Title:** Defensible risk terminology
-- **Purpose:** Use risk language that is accurate enough for diligence,
-  remediation, and executive reporting without overstating certainty.
+- **Purpose:** Use evidence and risk language that is accurate enough for
+  diligence and executive reporting without overstating certainty or drifting
+  into recommendations.
 - **Status:** Partial
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-001
 - **Acceptance criteria:** Documentation defines observed evidence, inference,
-  confidence, exposure, HNDL exposure, risk score, and remediation priority;
-  UI and reports avoid claiming certainty where only inference exists.
+  ownership signal, unknown, evidence confidence, coverage, partial scan,
+  evidence-based risk topology, executive question, exposure, HNDL exposure,
+  risk score, and remediation priority; recommendation is defined as outside
+  the core HarvestGuard evidence layer; UI and reports avoid claiming
+  certainty where only inference exists.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/14
 
 ### HG-003
@@ -128,11 +132,17 @@ Key product constraints:
 - **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-001, HG-002
-- **Acceptance criteria:** A documented schema represents source, asset,
-  evidence, inference, confidence, timestamps, scanner metadata, and raw
-  immutable details; existing scanner outputs can be converted without changing
-  runtime behavior. Implemented in `findings.py`, `finding_adapters.py`, and
-  documented in `docs/NORMALIZED_FINDINGS.md`.
+- **Acceptance criteria:** A documented schema contract represents asset
+  identity, source, observed evidence, evidence source, scanner identity and
+  version, collection timestamp, ownership signals, unknowns, confidence,
+  limitations, coverage or partial-scan status, derived exposure or topology
+  linkage, executive questions, immutable raw details, and separate mutable
+  assessment records; existing scanner outputs can be converted without
+  changing runtime behavior. This roadmap item describes the intended contract
+  for current and future scanner outputs; it does not require every future
+  field to be implemented by this documentation update. Implemented in
+  `findings.py`, `finding_adapters.py`, and documented in
+  `docs/NORMALIZED_FINDINGS.md`.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/15
 
 ### HG-004
@@ -179,15 +189,19 @@ Key product constraints:
 
 - **Title:** JSON and Markdown reports
 - **Purpose:** Produce reviewable artifacts that can be shared with technical
-  teams and imported into downstream diligence workflows.
-- **Status:** Complete
+  teams and imported into downstream diligence workflows as evidence packages.
+- **Status:** Partial
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-003, HG-004
 - **Acceptance criteria:** CLI can export normalized findings as JSON and a
   human-readable Markdown report; reports separate evidence from inference;
-  sensitive matched values are never written to reports. Implemented in
-  `reports.py`, exposed through `harvestguard.py`, and documented in
-  `docs/CLI.md`.
+  sensitive matched values are never written to reports; report structure
+  supports scope and coverage, observed evidence, ownership signals, unknowns
+  and limitations, evidence-based risk topology, questions for management and
+  executive leadership, and a technical appendix. Current JSON and Markdown
+  report export is implemented in `reports.py`, exposed through
+  `harvestguard.py`, and documented in `docs/CLI.md`; the expanded evidence
+  package structure describes the intended reporting contract.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/19
 
 ### HG-008

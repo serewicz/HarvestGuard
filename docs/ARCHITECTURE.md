@@ -19,6 +19,42 @@ Scan adapters
   -> Future Executive Priority Index
 ```
 
+## Conceptual Evidence Flow
+
+```text
+Observed evidence
+  -> Ownership signals
+  -> Unknowns and limitations
+  -> Evidence confidence
+  -> Evidence-based risk topology
+  -> Executive questions
+```
+
+HarvestGuard collects verifiable cryptographic evidence, communicates
+confidence and unknowns, surfaces ownership signals, and frames the questions
+organizations must answer. It does not prescribe the answer.
+
+The stages in this conceptual flow have separate responsibilities:
+
+- **Observed evidence:** scan adapters collect source-attributed evidence from
+  local filesystems, object stores, source code, and cryptographic inventory
+  targets.
+- **Ownership signals:** ownership metadata remains attributed to its technical
+  source, such as filesystem ownership, cloud tags, IAM metadata, repository
+  metadata, CODEOWNERS, project labels, or namespaces. These signals are not
+  confirmed business accountability without corroboration.
+- **Unknowns and limitations:** unavailable metadata, permission gaps, scanner
+  errors, unsupported assets, and partial-scan boundaries are represented
+  explicitly.
+- **Evidence confidence:** confidence measures the quality, directness, and
+  completeness of the evidence. It does not measure business severity.
+- **Evidence-based risk topology:** derived concentration views must remain
+  traceable to underlying findings, source evidence, confidence, and coverage
+  limits.
+- **Executive questions:** questions for management and leadership may be
+  generated from evidence, unknowns, confidence, and concentration patterns.
+  Recommendations are outside the core product boundary.
+
 ## Boundaries
 
 ### Scan Adapters
@@ -50,9 +86,14 @@ downstream feature. The current internal contract is documented in
 - immutable raw finding details;
 - separately mutable assessment fields.
 
+The model should support observed evidence, inference, ownership signals,
+unknowns, evidence confidence, coverage, partial-scan status, derived exposure
+or topology linkage, executive questions, immutable raw details, and separate
+mutable assessment records without conflating them.
+
 Assessment concepts such as business impact, severity, remediation cost,
-ownership, quantum risk, and executive priority are deliberately excluded from
-the normalized finding model.
+confirmed business ownership, quantum readiness, and executive priority are
+deliberately excluded from the raw finding layer.
 
 ### Local Evidence Store
 
