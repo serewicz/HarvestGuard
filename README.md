@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.38%2B-FF4B4B)](https://streamlit.io/)
 
-**Open-source cryptographic asset inventory and evidence-collection tool for technology due diligence and future migration planning.**
+**Open-source cryptographic evidence scanner for technology diligence and post-quantum migration planning.**
 
 Built by [Timothy Serewicz](https://www.linkedin.com/in/serewicz/). Executive Technology Advisor & Fractional CTO.
 
@@ -17,6 +17,36 @@ In M&A due diligence, PE/VC portfolio reviews, acquisition planning, and enterpr
 HarvestGuard gives teams **local, evidence-focused visibility** into implemented cryptographic posture across supported storage, cloud, source-code, and filesystem targets. Its outputs can contribute to a **Technology Due Diligence Evidence Package** for technology due diligence, executive assessment, acquisition review, integration planning, and cryptographic modernization planning.
 
 HarvestGuard is additive to tools organizations may already use for security operations, cloud security, asset management, vulnerability management, and governance. It is not a replacement for broad vulnerability-management, CSPM, GRC, SIEM, or security-operations platforms.
+
+## What HarvestGuard Does
+
+HarvestGuard collects verifiable cryptographic evidence, communicates
+confidence and unknowns, surfaces ownership signals, and frames the questions
+organizations must answer. It does not prescribe the answer.
+
+In practice, HarvestGuard helps reviewers:
+
+- collect observable cryptographic evidence from supported targets;
+- keep evidence, inference, uncertainty, and coverage limits visible;
+- surface source-attributed ownership signals without assigning business
+  accountability;
+- use the resulting evidence in diligence, executive assessment, and
+  post-quantum migration planning.
+
+## What HarvestGuard Does Not Do
+
+HarvestGuard does not:
+
+- determine whether an organization is quantum-ready;
+- assign business ownership or accountability;
+- recommend products, vendors, architectures, or remediation plans;
+- estimate migration or remediation costs;
+- certify compliance;
+- replace security assessments, legal review, architecture review, diligence
+  professionals, or executive judgment.
+
+See [docs/PRODUCT_PRINCIPLES.md](docs/PRODUCT_PRINCIPLES.md) for the canonical
+evidence, confidence, ownership-signal, and recommendation boundaries.
 
 ## Target Users & Use Cases
 
