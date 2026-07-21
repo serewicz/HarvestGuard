@@ -42,9 +42,11 @@ classifier, local cryptographic asset inventory scanner, and a Semgrep-based
 crypto code analysis scanner each ship as their own scan type. The unified CLI
 can produce console summaries, normalized JSON, and evidence-only Markdown
 reports that can contribute to a future Technology Due Diligence Evidence
-Package. Pillar 2 (containers) is done except the k8s manifest — signed,
-keylessly-attested images with an SBOM ship from CI. No CBOM/PDF export yet,
-no network-level crypto detection (TLS/cipher-suite scanning).
+Package and other executive deliverables described in
+[EXECUTIVE_DELIVERABLES.md](EXECUTIVE_DELIVERABLES.md). Pillar 2 (containers)
+is done except the k8s manifest — signed, keylessly-attested images with an
+SBOM ship from CI. No CBOM/PDF export yet, no network-level crypto detection
+(TLS/cipher-suite scanning).
 
 ## Direction
 
@@ -295,7 +297,8 @@ Key product constraints:
 
 - **Title:** HTML executive report
 - **Purpose:** Package report outputs into a polished local Technology Due
-  Diligence Evidence Package for partners, GCs, boards, and deal teams.
+  Diligence Evidence Package or related executive deliverable for partners,
+  GCs, boards, and deal teams.
 - **Status:** Planned
 - **Milestone:** 2 - MVP+: Visual and Operational Experience
 - **Dependencies:** HG-007, HG-015
