@@ -28,6 +28,16 @@ ENV PYTHONPATH=/deps \
 WORKDIR /app
 COPY --from=builder /deps /deps
 COPY main.py .
+# findings.py and finding_adapters.py: every scanner module now imports
+# these unconditionally at module load time (the normalized-finding layer),
+# so main.py's own import chain fails without them even though main.py
+# never imports them directly -- confirmed by tracing the actual runtime
+# import graph from main.py, not by inspecting source. harvestguard.py and
+# reports.py are the CLI's own entry points; traced and confirmed neither is
+# reachable from main.py's import graph, so they're deliberately not copied
+# here -- this image only ever runs the Streamlit entrypoint.
+COPY findings.py .
+COPY finding_adapters.py .
 COPY scanner/ scanner/
 COPY analyzer/ analyzer/
 COPY classifier/ classifier/
