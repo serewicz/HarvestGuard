@@ -1,11 +1,22 @@
 # HarvestGuard Decision Log
 
-- **2026-07-20**: Chose Streamlit for POC dashboard (fast iteration). Will add Prometheus/Grafana later.
-- **Architecture**: Monolithic for MVP → microservices post-validation.
-- **License**: Apache 2.0
-- **Target**: M&A due diligence workflow
-- **2026-07-20**: Broadened scope beyond crypto/HNDL posture to include general sensitive-data discovery (PII, secrets/credentials) — the target audience asks "where is the customer data and is it protected?", not just "is encryption strong?".
-- **2026-07-20**: Classifier findings report category + count only, never the matched values — a scan result must not itself become a way to leak the sensitive data it found.
-- **2026-07-20**: `scanner/azure_blob.py` (not `scanner/azure.py`) — avoids shadowing the top-level `azure` package the module imports from.
-- **2026-07-20**: CBOM export will target the CycloneDX 1.6+ CBOM format rather than a bespoke JSON shape, for interoperability with other tools a due-diligence team might already run.
-- **2026-07-20**: Common `ScanResult` interface deliberately deferred until a second cloud backend existed, to avoid speculative abstraction — condition now met (S3 + GCS + Azure).
+Architecture decisions are now captured as ADRs in
+[docs/DECISIONS/](DECISIONS/README.md). This file is retained as a historical
+index so older references do not break.
+
+Historical notes preserved in ADRs and roadmap:
+
+- 2026-07-20: Chose local-first operation as the trust boundary.
+- 2026-07-20: Chose SQLite as the initial local evidence store direction.
+- 2026-07-20: Prometheus and Grafana are optional operational layers, not first
+  use requirements.
+- 2026-07-20: Broadened scope to include sensitive-data discovery only where it
+  supports crypto, diligence, remediation, or advisory value.
+- 2026-07-20: Classifier findings report category and count only, never matched
+  values.
+- 2026-07-20: `scanner/azure_blob.py` avoids shadowing the top-level `azure`
+  package.
+- 2026-07-20: CBOM export should target CycloneDX rather than a bespoke JSON
+  shape.
+- 2026-07-20: Common scan-result normalization is now appropriate because S3,
+  GCS, and Azure adapters exist.

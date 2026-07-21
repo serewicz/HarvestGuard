@@ -1,0 +1,75 @@
+name: Feature
+description: Propose roadmap-aligned HarvestGuard work.
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before proposing a feature, review docs/PRODUCT_PRINCIPLES.md, docs/ROADMAP.md, and docs/ARCHITECTURE.md.
+  - type: textarea
+    id: business-purpose
+    attributes:
+      label: Business purpose
+      description: Which diligence, ownership-period risk, remediation, or advisory outcome does this support?
+    validations:
+      required: true
+  - type: textarea
+    id: user-outcome
+    attributes:
+      label: User outcome
+      description: What can the user do after this ships?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included?
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What should this issue explicitly not include?
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed implementation approach
+      description: Files, modules, schema impacts, dependencies, and migration notes.
+    validations:
+      required: false
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Roadmap IDs, ADRs, issues, or external tools this depends on.
+    validations:
+      required: false
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this to be done?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing requirements
+      description: Unit, integration, fixture, documentation, or manual validation requirements.
+    validations:
+      required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security considerations
+      description: Local-first behavior, telemetry, sensitive output, credentials, and evidence/inference separation.
+    validations:
+      required: true

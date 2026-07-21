@@ -1,0 +1,78 @@
+name: Bug
+description: Report behavior that is incorrect, unsafe, incomplete, or misleading.
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include credentials, real secrets, raw sensitive data, or confidential target details.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include scan type, target shape, command or UI action, and redacted output.
+      placeholder: |
+        1. Scan type:
+        2. Target shape:
+        3. Command or UI action:
+        4. Result:
+    validations:
+      required: true
+  - type: dropdown
+    id: scan_type
+    attributes:
+      label: Scan type
+      options:
+        - Local filesystem
+        - Local filesystem sensitive data
+        - AWS S3
+        - GCS
+        - Azure Blob
+        - Dashboard
+        - Reports
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, HarvestGuard commit, container/runtime details.
+      placeholder: |
+        OS:
+        Python:
+        HarvestGuard commit:
+        Container/runtime:
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs, traceback, screenshots, or redacted sample output.
+    validations:
+      required: false
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security notes
+      description: Confirm anything sensitive has been redacted.
+      placeholder: "I have redacted credentials, real secrets, sensitive paths, bucket names, object names, and confidential sample data."
+    validations:
+      required: true

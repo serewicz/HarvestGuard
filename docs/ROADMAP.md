@@ -1,22 +1,27 @@
 # HarvestGuard Roadmap
 
-This roadmap orients the project around its actual buyer: M&A, PE/VC, and law
-firm teams doing technical due diligence, who need fast, trustworthy visibility
-into a target company's data risk — and who often don't know what "good"
-looks like yet. The open-source scanner is the diagnostic; it should be good
-enough, and trustworthy enough, to stand on its own, while naturally
-surfacing where a paid engagement (remediation planning, ongoing monitoring)
-adds value.
+This is the canonical product roadmap for HarvestGuard. It preserves the
+current product direction while organizing implementation work into stable,
+issue-ready milestones.
 
-Two things follow from that:
+HarvestGuard exists for M&A, PE/VC, legal, and enterprise technology diligence
+teams that need fast, trustworthy visibility into cryptographic posture,
+long-lived data exposure, and remediation priorities. It is not a general
+security scanner. The product stays focused on crypto-first evidence, local
+operation, defensible terminology, and reports that serve both executives and
+technical remediation owners.
 
-- **Coverage must span crypto posture *and* sensitive-data discovery.**
-  Buyers ask "where is the customer data and is it protected?" — not just
-  "is encryption strong?" Scope has been broadened accordingly (see Pillar 1).
-- **The container story is the trust story.** This audience is handling
-  someone else's confidential data on day one of a deal. "Runs locally in a
-  container, never phones home, never persists what it scans" is not a
-  packaging detail — it's the reason they're allowed to run this at all.
+## Status Values
+
+- `Complete`: repository evidence shows the capability exists and is tested or
+  documented enough to rely on.
+- `Partial`: repository evidence shows useful implementation exists, but the
+  roadmap item is not fully satisfied.
+- `Needs Validation`: repository evidence is insufficient or the current
+  implementation may not meet the item without review.
+- `Planned`: not implemented yet.
+
+## Current State
 
 Current state (as of this writing): local filesystem, AWS S3, GCS, and Azure
 Blob scanning all do real encryption-status detection; the PII/secrets
@@ -25,14 +30,15 @@ their own scan type. Pillar 2 (containers) is done except the k8s manifest —
 signed, keylessly-attested images with an SBOM ship from CI. No CBOM/PDF
 export yet, no network-level crypto detection (TLS/cipher-suite scanning).
 
----
+## Direction
 
-## Quantum risk taxonomy
+Architecture direction:
 
-Due-diligence quantum risk breaks down into seven categories, roughly ordered
-by immediacy and financial impact. This is the taxonomy the rest of the
-roadmap is organized around — each row says where that risk lives, or why it
-deliberately doesn't live in the engineering backlog at all.
+Scan adapters -> Normalized finding model -> Local evidence store -> CLI and
+service layer -> Built-in dashboard and reports -> Optional Prometheus and
+Grafana -> Future Executive Priority Index.
+
+## Quantum Risk Taxonomy
 
 1. **Harvest Now, Decrypt Later (HNDL)** — done. Pillar 1's encryption
    detection + HNDL exposure scoring.
@@ -58,264 +64,368 @@ deliberately doesn't live in the engineering backlog at all.
 7. **Talent & governance gaps** — not scannable; advisory-only, with one
    small tool-buildable nicety (see "Advisory backlog" below).
 
----
+Key product constraints:
 
-## Pillar 1 — Scanning engine: coverage
+- Local-first operation is the trust boundary.
+- Observed evidence and inferred risk must remain separate.
+- Raw findings are immutable; prioritization is a separate assessment layer.
+- SQLite is the initial local system of record.
+- Prometheus stores operational and trend metrics, not detailed findings.
+- Grafana is optional and must not be required for first use.
 
-- [x] **Real local encryption detection** (`scanner/filesystem.py`) — file
-      signature checks for common encrypted formats (OpenSSL, PGP/GPG, age,
-      LUKS containers, encrypted ZIP), falling back to volume-level status
-      (FileVault / LUKS / BitLocker) per scan root. Replaces the `"Unknown"`
-      placeholder. Next: expand signature coverage (encrypted Office/PDF,
-      VeraCrypt) and add APFS/dm-crypt detail beyond the on/off check.
-- [x] **Sensitive-data classification module** (`classifier/` package) —
-      regex-based detection for email, SSN, phone, payment card (Luhn-
-      validated), and secrets/credentials (AWS keys, private keys, GitHub/
-      Slack tokens, generic assignment-style secrets). Findings report
-      category + count only, never the matched values, so scan results
-      can't themselves leak the sensitive data they found. Wired into the
-      dashboard as its own scan type. Next: expand beyond regex (NER for
-      names/addresses), tune false-positive rate on real-world corpora.
-- [x] **GCS scanner** (`scanner/gcs.py`) — per-blob encryption status via
-      the GCS API: CMEK (Low risk) vs. Google-managed default (Medium risk).
-      GCS encrypts everything at rest, so unlike S3 there's no "unencrypted"
-      state to detect -- the signal is customer key control vs. platform
-      default. Auth failures (`DefaultCredentialsError`, raised eagerly by
-      `storage.Client()` construction) are caught explicitly -- this was
-      found live, not in review: an early version only caught
-      `GoogleAPIError` and crashed the whole Streamlit app on missing
-      credentials, since `DefaultCredentialsError` comes from `google.auth`,
-      a separate exception hierarchy.
-- [x] **Azure Blob scanner** (`scanner/azure_blob.py`, named to avoid
-      shadowing the `azure` package) — per-blob encryption status via the
-      Azure SDK: customer-managed encryption scope (Low risk) vs.
-      Microsoft-managed default (Medium risk), same rationale as GCS. Uses
-      `DefaultAzureCredential` for auth, consistent with AWS/GCP's automatic
-      credential-chain resolution.
-- [ ] **Common `ScanResult` interface** — normalize local/AWS/GCP/Azure/
-      classifier output into one schema so the analyzer, dashboard, and
-      exporters don't special-case each source. Deliberately deferred until
-      a second cloud backend existed, to avoid speculative abstraction —
-      that condition is now met (S3 + GCS + Azure all ship). Ready to pick
-      up.
+## Milestone 1: MVP - Trustworthy Scanner
 
-### Quantum Risk Engine (`analyzer/risk.py`)
+### HG-001
 
-Today `analyzer/risk.py` is a simple heuristic (base score + fixed
-adjustments). Formalizing it into a real rules engine is risk #3 above and
-depends on the code/binary analysis work landing first:
+- **Title:** Cryptographic asset inventory
+- **Purpose:** Identify cryptographic exposure across local filesystems and
+  supported object storage using observable evidence.
+- **Status:** Partial
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** None
+- **Acceptance criteria:** Local filesystem, AWS S3, GCS, Azure Blob, and code
+  crypto analysis scan adapters produce inventory records; each record includes
+  source, location, observed evidence, scanner identity, scan time, and
+  confidence; existing scanner capabilities are preserved.
+- **GitHub issue:** TBD
 
-- [ ] **Algorithm/key-length vulnerability check** — flag known-vulnerable
-      algorithms and key sizes (RSA/ECC under safe thresholds) explicitly,
-      rather than only inferring HNDL risk from encryption presence/absence
-      as today. Depends on the "Code & binary analysis" item below for its
-      input signal.
-- [ ] **HNDL lifetime modeling** — Mosca inequality-style calculation (data
-      lifetime vs. quantum timeline) to turn "this is at risk" into "this is
-      at risk starting in ~N years." This is the project's namesake and
-      currently the least literally-implemented part of the roadmap.
-- [ ] **Hybrid PQC-readiness checks** — once a library like `liboqs` is
-      integrated as a reference. Crypto-agility assessment itself (can this
-      system swap algorithms without a rewrite) is a genuinely hard,
-      not-yet-solved problem here — no clear detection approach exists yet
-      beyond "does the code use a crypto-agility layer/abstraction," which
-      is itself a code-analysis question.
-- Note: a "migration effort estimator" was also proposed for this layer, but
-  that's the same thing as Pillar 3's **Dollarized risk output** below —
-  intentionally not duplicated as a separate item.
+### HG-002
 
-### Future scan surfaces — tooling landscape
+- **Title:** Defensible risk terminology
+- **Purpose:** Use risk language that is accurate enough for diligence,
+  remediation, and executive reporting without overstating certainty.
+- **Status:** Partial
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-001
+- **Acceptance criteria:** Documentation defines observed evidence, inference,
+  confidence, exposure, HNDL exposure, risk score, and remediation priority;
+  UI and reports avoid claiming certainty where only inference exists.
+- **GitHub issue:** TBD
 
-Most of Pillar 1 above covers data at rest (filesystem, object storage).
-Matching market-quality crypto/data-safety tooling means also covering data
-in transit and crypto usage in code — and, for all of these, leaning on
-proven OSS tools rather than re-implementing detection logic from scratch.
-This section is risk #2 above (cryptographic inventory blind spots); code &
-binary analysis is now done, network/cipher detection is the remaining gap
-and the natural next pick.
+### HG-003
 
-- [ ] **Network traffic / cipher detection** (data in transit — nothing
-      today covers this). Candidates: **Zeek** (best-in-class OSS network
-      analyzer — cipher suites, TLS versions, certs, straight from a pcap
-      or live capture), **sslyze** (fast, scriptable TLS config scanner),
-      **testssl.sh** (comprehensive TLS/SSL test script), **nmap**
-      (`--script ssl-enum-ciphers` for a quick enumeration pass).
-- [x] **Code & binary analysis** (`code_analysis/` package) — crypto
-      *library usage* in source, a different axis from `classifier/`'s
-      content-pattern matching, and the prerequisite for the Quantum Risk
-      Engine's algorithm/key-length check and for any real crypto-agility
-      assessment. Uses **Semgrep** against a small vendored rule set
-      (`code_analysis/rules/crypto.yaml`) rather than Semgrep's hosted
-      registry — registry configs need network access, and local scans must
-      not, per Pillar 2's guarantee. This also covers the bulk of
-      "Restricted/weak-algorithm scanning" below (MD5/SHA1, DES/3DES/RC4,
-      ECB mode, sub-2048-bit RSA). Getting this working in the container
-      took three real fixes found only by running the built image (broken
-      cross-stage shebang, semgrep's core `execvp`-ing `pysemgrep` off PATH,
-      and a settings-file write failing under `--read-only`) — see
-      `CLAUDE.md` for details. Re-verified the network-isolation guarantee
-      still holds with this scan type included. Next: CodeQL/SonarQube for
-      deeper analysis, more languages, more rules.
-- [ ] **Restricted/weak-algorithm scanning** — the vendored Semgrep rules
-      above (`code_analysis/`) already cover the known-weak-algorithm half
-      of this (modeled after Wind River's **crypto-detector** approach).
-      Remaining: **entropy analysis** as a cheap heuristic for
-      encrypted-blob detection, a useful complement to
-      `scanner/filesystem.py`'s signature checks for files that don't match
-      a known format.
-- [ ] **Runtime analysis via eBPF** (`bpftrace`, `BCC`) to hook crypto
-      library calls (OpenSSL, etc.) directly. Deepest visibility of any
-      option here, also the most invasive to run — a later-stage item, not
-      a starting point.
-- [ ] **Cloud metadata as the reliable baseline** — not a gap, a validation:
-      the provider-API approach `scanner/cloud.py` / `scanner/gcs.py` /
-      `scanner/azure_blob.py` already use (reading `ServerSideEncryption`,
-      `kms_key_name`, `encryption_scope` directly) is the same approach
-      called out here as most reliable for cloud storage. Current design
-      direction is correct; no change needed.
+- **Title:** Normalized finding schema
+- **Purpose:** Give all scanners a common result contract before reports,
+  history, filters, and prioritization grow around incompatible dataframes.
+- **Status:** Planned
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-001, HG-002
+- **Acceptance criteria:** A documented schema represents source, asset,
+  evidence, inference, confidence, timestamps, scanner metadata, and raw
+  immutable details; existing scanner outputs can be converted without changing
+  runtime behavior.
+- **GitHub issue:** TBD
 
-## Pillar 2 — Containers: the trust boundary
+### HG-004
 
-- [x] **Minimal scan-runner image** (`Dockerfile`) — distroless
-      `python3-debian12:nonroot` base (no shell, no package manager), runs
-      as uid 65532, read-only-root-fs compatible (`/tmp` is the only
-      writable path). Building and running it for real, not just writing it,
-      surfaced a real bug: an unpinned `streamlit` floor let a fresh install
-      pull a version that auto-detects "dev mode" under `pip install
-      --target=` and serves the frontend on the wrong port, 404ing every
-      page. Pinned to a verified-working range.
-- [x] **No default outbound network access** (`SECURITY.md`) — verified,
-      not just asserted: `scanner/filesystem.py` and `classifier/scanner.py`
-      have no network-related imports, and `docker run --network none` was
-      actually exercised (with the honestly-documented caveat that it also
-      blocks the UI's published port, so it's a verification mode, not the
-      normal way to run the container). This is also why a hosted AI-
-      integration API (see Pillar 3) is not planned as a default-on feature.
-- [x] **Read-only IAM policy templates** per cloud (`deploy/iam/`) —
-      AWS/GCP/Azure least-privilege scan roles, scoped to exactly the API
-      calls each scanner module makes.
-- [x] **Signed images + SBOM** (`.github/workflows/container-build.yml`) —
-      keyless cosign signing via GitHub Actions' OIDC token (no private key
-      to manage or leak), plus a syft-generated CycloneDX SBOM attached as a
-      signed attestation on the same image — one format across the project,
-      matching the CBOM export target and doubling as input for the
-      Compliance section's technical documentation dossier. The full
-      build→SBOM→sign→attest→verify flow was tested end-to-end locally
-      against a throwaway registry before writing the workflow; the keyless
-      OIDC step itself can only be exercised for real inside GitHub Actions,
-      so it's unverified against a real published image as of this commit
-      (see `SECURITY.md` for the honest caveat and how to verify it once it
-      has run).
-- [ ] **k8s Job manifest / Helm chart** for larger in-cluster or in-VPC scans
-      where the target environment is already containerized.
+- **Title:** CLI
+- **Purpose:** Make scanner behavior scriptable, testable, and suitable for
+  diligence workflows before adding more visual polish.
+- **Status:** Planned
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-003
+- **Acceptance criteria:** Users can run supported scan types from the command
+  line; output can be written as JSON; nonzero exit codes distinguish user
+  errors from scanner failures; dashboard behavior remains unchanged.
+- **GitHub issue:** TBD
 
-## Pillar 3 — Reporting: where deal value gets argued (Output Layer)
+### HG-005
 
-- [ ] **CBOM JSON export** — promised in the README, not yet built. Target
-      the **CycloneDX 1.6+** CBOM format specifically rather than a bespoke
-      shape — standardized output is what makes this interoperable with
-      other tools a due-diligence team might already run, and doubles as a
-      safe, zero-new-engineering way for a client's internal AI/RAG tooling
-      to consume scan results (a plain file export, not a hosted API — see
-      the API note below).
-- [ ] **Markdown + PDF report export** — `weasyprint` is already a
-      dependency and unused; wire it up. Structure both as an executive
-      summary (for a partner/GC) plus a technical appendix (for whoever
-      does the remediation work) — Markdown as the lighter-weight,
-      easier-to-diff/embed format, PDF as the polished deliverable.
-- [ ] **Dollarized risk output** — translate findings into estimated
-      remediation cost/effort ("this dataset requires ~$Y to remediate"),
-      which is what makes the README's valuation-impact claim real instead
-      of aspirational. (This is also what covers the "migration effort
-      estimator" idea from the Quantum Risk Engine section — one item, not
-      two.)
-- [ ] **Partner-ready findings summary** — a report clean enough to hand to
-      a partner or GC directly, with a low-key pointer to services for firms
-      that want help acting on it. This is the actual lead-gen mechanism for
-      the consulting side — keep it understated in the OSS tool itself.
+- **Title:** Scale, pagination, and safety
+- **Purpose:** Avoid incomplete or unsafe scans when targets contain many
+  files, large cloud buckets, inaccessible paths, or permission failures.
+- **Status:** Partial
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-001, HG-003
+- **Acceptance criteria:** Cloud scanners handle pagination; filesystem scans
+  prune traversal safely; scan limits are visible; permission and API errors
+  are represented without crashing or silently changing findings.
+- **GitHub issue:** TBD
 
-**Explicitly deferred, not committed — hosted AI-integration API.** A file
-export (above) is AI-consumable for free. A live API endpoint that a
-client's internal AI/RAG system calls is a different thing architecturally:
-it's in direct tension with Pillar 2's "never phones home, no default
-outbound network access" trust guarantee, which is the reason this audience
-is allowed to run the tool at all. If this gets built, it should be a
-local-only, explicitly opt-in endpoint — never a hosted default — and is a
-later-stage evaluation, not a current commitment.
+### HG-006
 
-## Pillar 4 — Project hygiene
+- **Title:** Demo target
+- **Purpose:** Provide a safe, repeatable sample target that demonstrates
+  crypto evidence, sensitive-data findings, confidence, and reports.
+- **Status:** Planned
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-002, HG-003
+- **Acceptance criteria:** A small local demo fixture can be scanned without
+  real credentials or sensitive data; expected findings are documented; tests
+  verify the demo remains stable.
+- **GitHub issue:** TBD
 
-- [ ] **Test coverage for cloud scanners** — only `analyzer/risk.py` and
-      `scanner/filesystem.py` have tests today; `scanner/cloud.py` has none.
-- [ ] **CI: build + scan the container image** (e.g. Trivy) once Pillar 2
-      lands.
-- [ ] **"Good first issue" labeling** once the above stabilizes, to invite
-      outside contributors — a visibly active OSS project is itself a trust
-      signal for the target audience.
+### HG-007
 
----
+- **Title:** JSON and Markdown reports
+- **Purpose:** Produce reviewable artifacts that can be shared with technical
+  teams and imported into downstream diligence workflows.
+- **Status:** Planned
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-003, HG-004
+- **Acceptance criteria:** CLI can export normalized findings as JSON and a
+  human-readable Markdown report; reports separate evidence from inference;
+  sensitive matched values are never written to reports.
+- **GitHub issue:** TBD
 
-## Compliance & regulatory (EU Cyber Resilience Act)
+### HG-008
 
-Not legal advice — flagging here so it isn't lost, and so engineering effort
-only gets spent where it's actually actionable. The CRA has a carve-out for
-FOSS not developed "in the course of a commercial activity," which may not
-apply once the services business is live; get real counsel before relying on
-it.
+- **Title:** End-to-end validation
+- **Purpose:** Prove the scanner can run from setup through output generation
+  on representative local and mocked cloud targets.
+- **Status:** Partial
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-004, HG-006, HG-007
+- **Acceptance criteria:** CI covers local scan, classifier scan, cloud scanner
+  unit tests, CLI invocation, and report generation; validation instructions
+  are documented.
+- **GitHub issue:** TBD
 
-- [ ] **Technical documentation dossier (Annex VII)** — buildable now, no
-      legal gate. Architecture description, threat model, essential-
-      requirements-to-solution mapping, vulnerability-handling process
-      description. Mostly overlaps with Pillar 2's SBOM/signing work and
-      `SECURITY.md`'s existing disclosure policy — this is largely writing
-      up what's already being built, not new engineering.
-- **Blocked on a legal decision, not on engineering effort — CE marking /
-  formal conformity assessment.** Requires (1) a product classification call
-  (default vs. "Important Class I" — a credential-reading, sensitive-data-
-  scanning tool plausibly resembles the identity/access-management and
-  security-monitoring categories CRA's Annex III calls out as "important,"
-  which may rule out simple self-assessment) and (2) appointing an EU-based
-  Authorized Representative, since the manufacturer isn't EU-established.
-  Do not attempt to self-certify without resolving both first.
-- **Deferred to long-term — ENISA incident/vulnerability reporting
-  pipeline.** The 24-hour early-warning / 72-hour full-report / 14-day
-  final-report obligations for actively exploited vulnerabilities and severe
-  incidents. Only relevant once there's real commercial EU distribution;
-  revisit alongside the CE marking decision above, not before.
+### HG-009
 
-## Advisory backlog (not tool-buildable)
+- **Title:** Confidence and false-positive handling
+- **Purpose:** Make uncertainty explicit so users can triage findings without
+  mistaking heuristics for proof.
+- **Status:** Needs Validation
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-002, HG-003
+- **Acceptance criteria:** Findings include confidence; scanner docs explain
+  known false positives and false negatives; dashboard and reports expose
+  confidence alongside risk language.
+- **GitHub issue:** TBD
 
-Captured so these don't get lost, and so they're not mistaken for
-engineering work — these are due-diligence risk categories where the tool's
-job is to surface a signal, not close the whole gap.
+### HG-010
 
-- **Data ownership & classification gaps** (risk #4) — the strongest
-  advisor/professional-services angle of the seven. The classifier already
-  surfaces *what* sensitive data exists and roughly *where*; mapping that to
-  who legally owns it, how long it must stay confidential, and third-party/
-  backup residency is a consulting deliverable built on top of scan output,
-  not a scannable fact in itself.
-- **Talent & governance gaps** (risk #7) — not scannable at all (no
-  filesystem/cloud signal indicates whether a target's leadership
-  understands quantum risk). One small tool-buildable nicety: include a
-  boilerplate "board discussion questions" section in the generated report
-  (Pillar 3), authored once, not derived from scan data.
-- **Valuation & integration impact** (risk #6) — the engineering side of
-  this is Pillar 3's dollarized-risk and partner-ready-summary items above;
-  the framing/content side has existing related work at
-  [technology-leadership-portfolio](https://github.com/serewicz/technology-leadership-portfolio)
-  worth reviewing as an input, not yet reviewed in depth here.
+- **Title:** Accurate product claims
+- **Purpose:** Keep README, dashboard text, and reports aligned with actual
+  repository evidence.
+- **Status:** Needs Validation
+- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Dependencies:** HG-001 through HG-009
+- **Acceptance criteria:** README claims match implemented and tested behavior;
+  planned features are labelled as planned; no marketing copy implies
+  unsupported scanner coverage or certainty.
+- **GitHub issue:** TBD
 
----
+## Milestone 2: MVP+ - Visual and Operational Experience
 
-## Explicitly out of scope for now
+### HG-011
 
-- Packaging as an installable PyPI library (`pyproject.toml` already notes
-  this; revisit once there's a CLI consumer, not before).
-- Microservices split / Prometheus+Grafana (mentioned in the README's "Future
-  Roadmap") — premature before the core scanning coverage above exists.
-- **Supply chain & third-party exposure, including shadow AI detection**
-  (risk #5) — likely too large a scope for this tool as currently conceived;
-  shadow-AI/shadow-IT discovery is closer to a CASB product category than a
-  crypto/data-safety scanner. Not committed; revisit only if a specific
-  engagement makes the gap unavoidable.
+- **Title:** Built-in dashboard
+- **Purpose:** Let users inspect scan output locally without requiring Grafana
+  or external services.
+- **Status:** Partial
+- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-003
+- **Acceptance criteria:** Dashboard reads normalized findings, shows evidence
+  and inference separately, and remains usable without network access for
+  local scans.
+- **GitHub issue:** TBD
+
+### HG-012
+
+- **Title:** Finding filters and drill-down
+- **Purpose:** Help users move from summary charts to the underlying evidence
+  for a specific asset or class of findings.
+- **Status:** Planned
+- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-011
+- **Acceptance criteria:** Users can filter by source, exposure state,
+  confidence, scanner, owner state, and finding type; drill-down links back to
+  technical evidence.
+- **GitHub issue:** TBD
+
+### HG-013
+
+- **Title:** Color-coded exposure and ownership states
+- **Purpose:** Make remediation and ownership triage scannable without hiding
+  the underlying evidence.
+- **Status:** Planned
+- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-002, HG-012
+- **Acceptance criteria:** Colors map to documented exposure and ownership
+  states; visual states never replace textual evidence or confidence.
+- **GitHub issue:** TBD
+
+### HG-014
+
+- **Title:** Scan history
+- **Purpose:** Track repeat scans over time for diligence follow-up and
+  ownership-period risk management.
+- **Status:** Planned
+- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-003, ADR-002
+- **Acceptance criteria:** SQLite stores scan runs, immutable raw findings, and
+  derived assessments; users can compare current and previous scans locally.
+- **GitHub issue:** TBD
+
+### HG-015
+
+- **Title:** Technical remediation queue
+- **Purpose:** Turn findings into actionable remediation work without mutating
+  the underlying raw evidence.
+- **Status:** Planned
+- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-014
+- **Acceptance criteria:** Users can assign remediation status, owner, notes,
+  and priority in a separate assessment layer; raw findings remain unchanged.
+- **GitHub issue:** TBD
+
+### HG-016
+
+- **Title:** HTML executive report
+- **Purpose:** Provide a polished local report for partners, GCs, boards, and
+  deal teams.
+- **Status:** Planned
+- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-007, HG-015
+- **Acceptance criteria:** HTML report summarizes exposure, confidence,
+  remediation themes, and technical appendix links; it avoids raw sensitive
+  matched values.
+- **GitHub issue:** TBD
+
+## Milestone 3: Operational Edition
+
+### HG-017
+
+- **Title:** Prometheus metrics endpoint
+- **Purpose:** Expose operational metrics and high-level trends without storing
+  detailed findings in Prometheus.
+- **Status:** Planned
+- **Milestone:** 3 - Operational Edition
+- **Dependencies:** HG-014, ADR-003
+- **Acceptance criteria:** Endpoint exports scan counts, durations, failure
+  counts, finding totals by class, and trend-safe aggregates only; no file
+  paths, secrets, object names, or detailed findings are exported.
+- **GitHub issue:** TBD
+
+### HG-018
+
+- **Title:** Grafana dashboard pack
+- **Purpose:** Offer optional operational visualization for teams already using
+  Grafana.
+- **Status:** Planned
+- **Milestone:** 3 - Operational Edition
+- **Dependencies:** HG-017
+- **Acceptance criteria:** Grafana dashboards import cleanly; first use of
+  HarvestGuard does not require Grafana; dashboards use only Prometheus-safe
+  aggregate metrics.
+- **GitHub issue:** TBD
+
+### HG-019
+
+- **Title:** Scheduled scans
+- **Purpose:** Support ownership-period monitoring after diligence or
+  acquisition.
+- **Status:** Planned
+- **Milestone:** 3 - Operational Edition
+- **Dependencies:** HG-014, HG-017
+- **Acceptance criteria:** Users can schedule repeat local or cloud scans;
+  schedule config is local; failures are visible in history and metrics.
+- **GitHub issue:** TBD
+
+### HG-020
+
+- **Title:** Baseline drift detection
+- **Purpose:** Identify changes in crypto exposure, sensitive-data placement,
+  and scanner confidence over time.
+- **Status:** Planned
+- **Milestone:** 3 - Operational Edition
+- **Dependencies:** HG-014, HG-019
+- **Acceptance criteria:** Users can compare scans against a chosen baseline;
+  added, removed, and changed findings are reported separately from raw
+  findings.
+- **GitHub issue:** TBD
+
+### HG-021
+
+- **Title:** Portfolio and multi-entity comparison
+- **Purpose:** Help PE/VC and advisory users compare exposure across companies,
+  business units, or diligence targets.
+- **Status:** Planned
+- **Milestone:** 3 - Operational Edition
+- **Dependencies:** HG-020
+- **Acceptance criteria:** Users can tag scans by entity; comparisons use
+  aggregate and normalized fields; entity-level reports avoid leaking raw
+  detail across boundaries.
+- **GitHub issue:** TBD
+
+### HG-022
+
+- **Title:** Optional PostgreSQL deployment
+- **Purpose:** Support larger operational deployments while keeping SQLite as
+  the first-use local system of record.
+- **Status:** Planned
+- **Milestone:** 3 - Operational Edition
+- **Dependencies:** HG-014
+- **Acceptance criteria:** PostgreSQL is optional; SQLite remains supported;
+  migration strategy is documented; first use does not require external
+  infrastructure.
+- **GitHub issue:** TBD
+
+## Milestone 4: Decision-Support Edition
+
+### HG-023
+
+- **Title:** Ownership-horizon model
+- **Purpose:** Connect findings to diligence, holding period, and remediation
+  horizon decisions.
+- **Status:** Planned
+- **Milestone:** 4 - Decision-Support Edition
+- **Dependencies:** HG-020, HG-021
+- **Acceptance criteria:** Users can model short, medium, and long ownership
+  horizons; outputs are labelled as decision support, not observed evidence.
+- **GitHub issue:** TBD
+
+### HG-024
+
+- **Title:** Crypto-agility and migration-difficulty models
+- **Purpose:** Estimate how hard it may be to migrate crypto usage after
+  inventory and code-analysis signals exist.
+- **Status:** Planned
+- **Milestone:** 4 - Decision-Support Edition
+- **Dependencies:** HG-003, future code and binary crypto analysis
+- **Acceptance criteria:** Model inputs are documented; assumptions are visible;
+  migration difficulty is stored as assessment data separate from raw findings.
+- **GitHub issue:** TBD
+
+### HG-025
+
+- **Title:** Long-lived data exposure model
+- **Purpose:** Prioritize data whose useful lifetime exceeds plausible
+  cryptographic protection windows.
+- **Status:** Planned
+- **Milestone:** 4 - Decision-Support Edition
+- **Dependencies:** HG-002, HG-023, HG-024
+- **Acceptance criteria:** Reports distinguish long-lived data exposure from
+  generic sensitive data; assumptions are configurable and documented.
+- **GitHub issue:** TBD
+
+### HG-026
+
+- **Title:** Executive Priority Index and board/M&A report
+- **Purpose:** Translate evidence and assessment into a concise executive
+  priority view for board, buyer, GC, and integration planning conversations.
+- **Status:** Planned
+- **Milestone:** 4 - Decision-Support Edition
+- **Dependencies:** HG-016, HG-021, HG-023, HG-024, HG-025
+- **Acceptance criteria:** Index combines normalized findings, confidence,
+  ownership horizon, migration difficulty, and long-lived exposure; report
+  explains assumptions and links to technical evidence.
+- **GitHub issue:** TBD
+
+## Preserved Product Notes
+
+These existing decisions remain part of the roadmap context:
+
+- Coverage must span crypto posture and sensitive-data discovery because users
+  ask where customer data is and whether it is protected.
+- The container story is the trust story: local operation, no telemetry, no
+  default outbound service, non-root image, and read-only-root compatibility.
+- Cloud metadata is the reliable baseline for object storage encryption
+  evidence.
+- CycloneDX is the preferred CBOM target for interoperability.
+- Code crypto analysis now exists through `code_analysis/` and a vendored
+  Semgrep rule set; network, deeper binary, entropy, and runtime crypto
+  analysis remain future scan surfaces and should integrate mature third-party
+  scanners where appropriate.

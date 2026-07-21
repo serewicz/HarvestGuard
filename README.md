@@ -103,7 +103,10 @@ templates scoped to exactly what each scanner calls.
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,
-test/lint commands, and good first-contribution areas.
+test/lint commands, good first-contribution areas, and the contribution
+workflow. Product direction lives in [docs/ROADMAP.md](docs/ROADMAP.md),
+[docs/PRODUCT_PRINCIPLES.md](docs/PRODUCT_PRINCIPLES.md), and
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Security
 
