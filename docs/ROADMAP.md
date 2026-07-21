@@ -108,13 +108,14 @@ Key product constraints:
 - **Title:** Normalized finding schema
 - **Purpose:** Give all scanners a common result contract before reports,
   history, filters, and prioritization grow around incompatible dataframes.
-- **Status:** Planned
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-001, HG-002
 - **Acceptance criteria:** A documented schema represents source, asset,
   evidence, inference, confidence, timestamps, scanner metadata, and raw
   immutable details; existing scanner outputs can be converted without changing
-  runtime behavior.
+  runtime behavior. Implemented in `findings.py`, `finding_adapters.py`, and
+  documented in `docs/NORMALIZED_FINDINGS.md`.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/15
 
 ### HG-004

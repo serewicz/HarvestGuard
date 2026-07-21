@@ -9,6 +9,9 @@ from functools import lru_cache
 
 import pandas as pd
 
+from finding_adapters import normalize_filesystem_df
+from findings import NormalizedFinding
+
 # Leading-byte signatures for common encrypted file formats. Checked before
 # falling back to volume-level status, since a single encrypted file can sit
 # on an otherwise unencrypted volume (and vice versa).
@@ -133,3 +136,9 @@ def scan_filesystem(path: str, max_depth: int = 3):
                 pass  # Skip permission issues
 
     return pd.DataFrame(results)
+
+
+def scan_filesystem_findings(
+    path: str, max_depth: int = 3, scan_id: str | None = None
+) -> list[NormalizedFinding]:
+    return normalize_filesystem_df(scan_filesystem(path, max_depth=max_depth), scan_id=scan_id)

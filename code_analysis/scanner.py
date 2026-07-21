@@ -11,6 +11,9 @@ from pathlib import Path
 import certifi
 import pandas as pd
 
+from finding_adapters import normalize_code_analysis_df
+from findings import NormalizedFinding
+
 _RULES_PATH = os.path.join(os.path.dirname(__file__), "rules", "crypto.yaml")
 _TIMEOUT_SECONDS = 120
 
@@ -125,3 +128,9 @@ def scan_source_for_crypto_usage(path: str) -> pd.DataFrame:
         })
 
     return pd.DataFrame(results)
+
+
+def scan_source_for_crypto_usage_findings(
+    path: str, scan_id: str | None = None
+) -> list[NormalizedFinding]:
+    return normalize_code_analysis_df(scan_source_for_crypto_usage(path), scan_id=scan_id)

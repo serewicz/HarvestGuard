@@ -5,6 +5,9 @@ from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import DefaultCredentialsError
 from google.cloud import storage
 
+from finding_adapters import normalize_gcs_df
+from findings import NormalizedFinding
+
 
 def _encryption_status(blob) -> str:
     return "CMEK" if blob.kms_key_name else "Google-managed"
@@ -43,3 +46,9 @@ def scan_gcs_bucket(bucket_name: str, prefix: str = "") -> pd.DataFrame:
         print(f"Error scanning GCS: {e}")
 
     return pd.DataFrame(results)
+
+
+def scan_gcs_bucket_findings(
+    bucket_name: str, prefix: str = "", scan_id: str | None = None
+) -> list[NormalizedFinding]:
+    return normalize_gcs_df(scan_gcs_bucket(bucket_name, prefix=prefix), scan_id=scan_id)

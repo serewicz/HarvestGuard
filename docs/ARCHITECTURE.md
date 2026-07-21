@@ -38,7 +38,8 @@ Adapters should:
 ### Normalized Finding Model
 
 The normalized finding model is the contract between scanners and every
-downstream feature. It should distinguish:
+downstream feature. The current internal contract is documented in
+[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md). It distinguishes:
 
 - asset identity and source;
 - observed evidence;
@@ -47,6 +48,10 @@ downstream feature. It should distinguish:
 - derived exposure or risk fields;
 - immutable raw finding details;
 - separately mutable assessment fields.
+
+Assessment concepts such as business impact, severity, remediation cost,
+ownership, quantum risk, and executive priority are deliberately excluded from
+the normalized finding model.
 
 ### Local Evidence Store
 
@@ -92,6 +97,9 @@ and migration-difficulty models exist.
   crypto analysis.
 - `scanner/crypto_inventory.py` parses local certificate and key assets into
   evidence-first inventory findings.
+- `findings.py` defines the versioned normalized finding model.
+- `finding_adapters.py` maps current scanner DataFrames into normalized
+  findings without changing existing scanner behavior.
 - `analyzer/risk.py` contains a simple heuristic risk score.
 - `main.py` wires current scan types into Streamlit.
 - `tests/` covers local scanning, classifier behavior, code analysis, risk

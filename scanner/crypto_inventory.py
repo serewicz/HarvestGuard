@@ -16,6 +16,9 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
 
+from finding_adapters import normalize_crypto_inventory_df
+from findings import NormalizedFinding
+
 SCANNER_NAME = "crypto_inventory"
 SCANNER_VERSION = "0.1.0"
 
@@ -87,6 +90,22 @@ def scan_crypto_inventory(
         findings.extend(_scan_file(file_path))
 
     return pd.DataFrame([finding.to_record() for finding in findings])
+
+
+def scan_crypto_inventory_findings(
+    path: str,
+    exclude_patterns: list[str] | None = None,
+    follow_symlinks: bool = False,
+    scan_id: str | None = None,
+) -> list[NormalizedFinding]:
+    return normalize_crypto_inventory_df(
+        scan_crypto_inventory(
+            path,
+            exclude_patterns=exclude_patterns,
+            follow_symlinks=follow_symlinks,
+        ),
+        scan_id=scan_id,
+    )
 
 
 def _iter_candidate_files(
