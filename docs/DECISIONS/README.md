@@ -11,6 +11,7 @@ implementation boundaries.
 - [ADR-003: Prometheus role](ADR-003-prometheus-role.md)
 - [ADR-004: Scanner integration strategy](ADR-004-scanner-integration-strategy.md)
 - [ADR-005: Evidence versus inference](ADR-005-evidence-versus-inference.md)
+- [ADR-006: Product boundary](ADR-006-product-boundary.md)
 
 ## Status Labels
 

@@ -4,6 +4,9 @@ These principles prevent HarvestGuard from drifting into a generic security
 product. They apply to roadmap decisions, issue scoping, implementation review,
 documentation, and release claims.
 
+The durable product-boundary decision is recorded in
+[ADR-006: Product boundary](DECISIONS/ADR-006-product-boundary.md).
+
 1. **Crypto-first, not general-purpose security scanning.** HarvestGuard exists
    to inventory cryptographic posture, long-lived data exposure, and related
    remediation priorities. Sensitive-data discovery is included only where it
@@ -44,8 +47,8 @@ documentation, and release claims.
 13. **Raw findings remain immutable; prioritization is a separate assessment
     layer.** Remediation status, ownership, notes, and priority must not rewrite
     the original evidence.
-14. **Features must improve inventory, evidence quality, reporting, or
-    standalone usability without expanding HarvestGuard into an adjacent
-    security category.** Work that does not support technology due diligence,
-    executive assessment, integration planning, cryptographic modernization, or
-    advisory value belongs outside the core roadmap.
+14. **Features must pass the product-boundary fit test.** A core feature should
+    materially improve cryptographic inventory, evidence quality, the
+    Technology Due Diligence Evidence Package, or standalone usability. Advisory
+    value alone is not sufficient if the work does not improve HarvestGuard's
+    cryptographic inventory, evidence, reporting, or standalone local use.

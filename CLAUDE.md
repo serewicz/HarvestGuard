@@ -30,6 +30,12 @@ standalone usability?
 Do not broaden the product merely because an adjacent capability is technically
 easy.
 
+[ADR-006: Product boundary](docs/DECISIONS/ADR-006-product-boundary.md) is the
+authoritative source for feature-boundary decisions. Consult it before adding a
+new scanner category, introducing a new service or datastore, expanding the
+dashboard, adding compliance frameworks, adding remediation behavior, or
+duplicating functionality available from an established tool.
+
 ## Current state of the code
 
 - `main.py` — Streamlit entry point. Sidebar selects one of six scan types (Local Filesystem, AWS S3 Bucket, GCS Bucket, Azure Blob Container, Local Filesystem — Sensitive Data, Local Filesystem — Crypto Code Analysis), runs the scan, renders results.
