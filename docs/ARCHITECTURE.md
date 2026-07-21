@@ -24,7 +24,8 @@ Scan adapters
 
 Scan adapters collect observed evidence from a specific source. Current adapter
 families include local filesystems, object storage metadata, local
-sensitive-data pattern scanning, and code crypto analysis.
+sensitive-data pattern scanning, code crypto analysis, and local
+cryptographic asset inventory.
 
 Adapters should:
 
@@ -89,6 +90,8 @@ and migration-difficulty models exist.
   counts, not matched values.
 - `code_analysis/` uses Semgrep with a vendored crypto rule set for local code
   crypto analysis.
+- `scanner/crypto_inventory.py` parses local certificate and key assets into
+  evidence-first inventory findings.
 - `analyzer/risk.py` contains a simple heuristic risk score.
 - `main.py` wires current scan types into Streamlit.
 - `tests/` covers local scanning, classifier behavior, code analysis, risk

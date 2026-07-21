@@ -25,10 +25,11 @@ technical remediation owners.
 
 Current state (as of this writing): local filesystem, AWS S3, GCS, and Azure
 Blob scanning all do real encryption-status detection; the PII/secrets
-classifier and a Semgrep-based crypto code analysis scanner each ship as
-their own scan type. Pillar 2 (containers) is done except the k8s manifest —
-signed, keylessly-attested images with an SBOM ship from CI. No CBOM/PDF
-export yet, no network-level crypto detection (TLS/cipher-suite scanning).
+classifier, local cryptographic asset inventory scanner, and a Semgrep-based
+crypto code analysis scanner each ship as their own scan type. Pillar 2
+(containers) is done except the k8s manifest — signed, keylessly-attested
+images with an SBOM ship from CI. No CBOM/PDF export yet, no network-level
+crypto detection (TLS/cipher-suite scanning).
 
 ## Direction
 

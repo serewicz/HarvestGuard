@@ -50,6 +50,11 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
   source (MD5/SHA1, DES/3DES/RC4, ECB mode, sub-2048-bit RSA keys) via a
   small vendored Semgrep rule set, not Semgrep's hosted registry — local
   scans stay network-free.
+- **Cryptographic asset inventory** — discovers local certificate and key
+  material (PEM/DER X.509 certificates, PEM and OpenSSH keys, PKCS#12
+  containers, and JKS header evidence) with algorithm, key size, issuer,
+  subject, expiration, fingerprint, confidence, and parsing errors. See
+  [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
   exposure scoring (High/Medium/Low) layered on top of encryption status.
 - **Streamlit dashboard** — pie/bar charts and a results table per scan.

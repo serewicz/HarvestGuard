@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import sys
+import tempfile
+from pathlib import Path
 
+import certifi
 import pandas as pd
 
 _RULES_PATH = os.path.join(os.path.dirname(__file__), "rules", "crypto.yaml")
@@ -14,6 +19,26 @@ _SEVERITY_TO_RISK = {
     "WARNING": "Medium",
     "INFO": "Low",
 }
+
+
+def _semgrep_command() -> str:
+    return shutil.which("semgrep") or str(Path(sys.executable).parent / "semgrep")
+
+
+def _semgrep_env() -> dict[str, str]:
+    env = os.environ.copy()
+    semgrep_home = Path(tempfile.gettempdir()) / "harvestguard-semgrep"
+    semgrep_home.mkdir(parents=True, exist_ok=True)
+    env.update({
+        "HOME": str(semgrep_home),
+        "OTEL_SDK_DISABLED": "true",
+        "SEMGREP_ENABLE_VERSION_CHECK": "0",
+        "SEMGREP_SEND_METRICS": "off",
+        "SEMGREP_SETTINGS_FILE": str(semgrep_home / "settings.yml"),
+        "REQUESTS_CA_BUNDLE": certifi.where(),
+        "SSL_CERT_FILE": certifi.where(),
+    })
+    return env
 
 
 def scan_source_for_crypto_usage(path: str) -> pd.DataFrame:
@@ -41,7 +66,7 @@ def scan_source_for_crypto_usage(path: str) -> pd.DataFrame:
     try:
         completed = subprocess.run(
             [
-                "semgrep",
+                _semgrep_command(),
                 "--config", _RULES_PATH,
                 "--json",
                 "--quiet",
@@ -50,6 +75,7 @@ def scan_source_for_crypto_usage(path: str) -> pd.DataFrame:
                 path,
             ],
             capture_output=True,
+            env=_semgrep_env(),
             text=True,
             timeout=_TIMEOUT_SECONDS,
             check=False,
