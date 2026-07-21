@@ -87,7 +87,7 @@ Key product constraints:
   crypto analysis scan adapters produce inventory records; each record includes
   source, location, observed evidence, scanner identity, scan time, and
   confidence; existing scanner capabilities are preserved.
-- **GitHub issue:** TBD
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/13
 
 ### HG-002
 
@@ -100,7 +100,7 @@ Key product constraints:
 - **Acceptance criteria:** Documentation defines observed evidence, inference,
   confidence, exposure, HNDL exposure, risk score, and remediation priority;
   UI and reports avoid claiming certainty where only inference exists.
-- **GitHub issue:** TBD
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/14
 
 ### HG-003
 
@@ -114,7 +114,7 @@ Key product constraints:
   evidence, inference, confidence, timestamps, scanner metadata, and raw
   immutable details; existing scanner outputs can be converted without changing
   runtime behavior.
-- **GitHub issue:** TBD
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/15
 
 ### HG-004
 
@@ -127,7 +127,7 @@ Key product constraints:
 - **Acceptance criteria:** Users can run supported scan types from the command
   line; output can be written as JSON; nonzero exit codes distinguish user
   errors from scanner failures; dashboard behavior remains unchanged.
-- **GitHub issue:** TBD
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/16
 
 ### HG-005
 
@@ -140,7 +140,7 @@ Key product constraints:
 - **Acceptance criteria:** Cloud scanners handle pagination; filesystem scans
   prune traversal safely; scan limits are visible; permission and API errors
   are represented without crashing or silently changing findings.
-- **GitHub issue:** TBD
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/17
 
 ### HG-006
 
@@ -153,7 +153,7 @@ Key product constraints:
 - **Acceptance criteria:** A small local demo fixture can be scanned without
   real credentials or sensitive data; expected findings are documented; tests
   verify the demo remains stable.
-- **GitHub issue:** TBD
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/18
 
 ### HG-007
 
@@ -166,7 +166,7 @@ Key product constraints:
 - **Acceptance criteria:** CLI can export normalized findings as JSON and a
   human-readable Markdown report; reports separate evidence from inference;
   sensitive matched values are never written to reports.
-- **GitHub issue:** TBD
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/19
 
 ### HG-008
 
