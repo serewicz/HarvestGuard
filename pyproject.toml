@@ -7,10 +7,12 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Timothy Serewicz" }]
 requires-python = ">=3.10"
 
-# NOTE: This project isn't packaged for PyPI distribution yet (it's run via
-# `streamlit run main.py`, not installed as a library). This file currently
-# exists to centralize dev-tooling config (pytest, ruff). Turning it into a
-# real installable package is tracked as a roadmap item — see CONTRIBUTING.md.
+[project.scripts]
+harvestguard = "harvestguard:main"
+
+# NOTE: This project isn't packaged for PyPI distribution yet. This file
+# centralizes dev-tooling config and exposes a local editable-install CLI entry
+# point for development use.
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

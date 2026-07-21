@@ -1,0 +1,89 @@
+name: Scanner change
+description: Propose or modify scanner, adapter, classifier, or code-analysis behavior.
+title: "[Scanner] "
+labels: ["enhancement", "work:scanner"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Scanner changes can affect trust in HarvestGuard's evidence. GitHub Issues are the source of truth for implementation scope. Keep observed evidence separate from inferred risk, and do not include credentials, real secrets, raw sensitive data, or confidential target details.
+  - type: input
+    id: roadmap-reference
+    attributes:
+      label: Roadmap reference
+      description: Optional HG roadmap ID or related roadmap section. Use "None" if this is not roadmap-linked.
+      placeholder: "HG-005, HG-009, or None"
+    validations:
+      required: true
+  - type: textarea
+    id: scanner-purpose
+    attributes:
+      label: Scanner purpose
+      description: What evidence should this scanner change discover, preserve, or correct?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What scanner behavior, source types, file types, providers, or adapters are included?
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What behavior, providers, formats, risk interpretation, or UI work is excluded?
+    validations:
+      required: true
+  - type: textarea
+    id: evidence-model
+    attributes:
+      label: Evidence model
+      description: What observed evidence, confidence, errors, and technical metadata should be returned?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this scanner change to be done?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing requirements
+      description: Unit, fixture, malformed input, permission-error, pagination, CLI, or integration coverage required.
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation impact
+      description: Which scanner docs, limitations, examples, or user-facing claims must change? Use "None" if not applicable.
+    validations:
+      required: true
+  - type: checkboxes
+    id: local-first
+    attributes:
+      label: Local-first and privacy checks
+      options:
+        - label: This scanner work preserves local-first behavior for local scans.
+          required: true
+        - label: This scanner work does not add telemetry or a HarvestGuard-operated outbound service by default.
+          required: true
+        - label: This scanner work does not write raw sensitive matched values into findings or reports.
+          required: true
+        - label: This scanner work keeps observed evidence separate from inferred risk or priority.
+          required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security considerations
+      description: Credentials, cloud permissions, sensitive outputs, path/object-name handling, and evidence/inference separation.
+    validations:
+      required: true

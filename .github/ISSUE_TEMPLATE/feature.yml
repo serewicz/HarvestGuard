@@ -1,12 +1,22 @@
-name: Feature
-description: Propose roadmap-aligned HarvestGuard work.
+name: Feature work
+description: Propose roadmap-aligned HarvestGuard product work.
 title: "[Feature] "
 labels: ["enhancement"]
 body:
   - type: markdown
     attributes:
       value: |
-        Before proposing a feature, review docs/PRODUCT_PRINCIPLES.md, docs/ROADMAP.md, and docs/ARCHITECTURE.md.
+        GitHub Issues are HarvestGuard's source of truth for implementation scope. HG roadmap IDs may be referenced for planning, but this Issue controls the accepted scope for the PR.
+
+        Before proposing a feature, review docs/PRODUCT_PRINCIPLES.md, docs/ROADMAP.md, docs/ARCHITECTURE.md, and CONTRIBUTING.md.
+  - type: input
+    id: roadmap-reference
+    attributes:
+      label: Roadmap reference
+      description: Optional HG roadmap ID or related roadmap section. Use "None" if this is not roadmap-linked.
+      placeholder: "HG-006, Milestone 1, or None"
+    validations:
+      required: true
   - type: textarea
     id: business-purpose
     attributes:
@@ -36,20 +46,6 @@ body:
     validations:
       required: true
   - type: textarea
-    id: approach
-    attributes:
-      label: Proposed implementation approach
-      description: Files, modules, schema impacts, dependencies, and migration notes.
-    validations:
-      required: false
-  - type: textarea
-    id: dependencies
-    attributes:
-      label: Dependencies
-      description: Roadmap IDs, ADRs, issues, or external tools this depends on.
-    validations:
-      required: false
-  - type: textarea
     id: acceptance
     attributes:
       label: Acceptance criteria
@@ -60,10 +56,35 @@ body:
     validations:
       required: true
   - type: textarea
+    id: approach
+    attributes:
+      label: Proposed implementation approach
+      description: Files, modules, schema impacts, dependencies, and migration notes.
+    validations:
+      required: false
+  - type: checkboxes
+    id: local-first
+    attributes:
+      label: Local-first and scope checks
+      options:
+        - label: This work preserves local-first behavior.
+          required: true
+        - label: This work does not add telemetry or a HarvestGuard-operated outbound service by default.
+          required: true
+        - label: This work keeps observed evidence separate from inferred risk or priority.
+          required: true
+  - type: textarea
     id: testing
     attributes:
       label: Testing requirements
       description: Unit, integration, fixture, documentation, or manual validation requirements.
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation impact
+      description: Which docs, examples, roadmap notes, or user-facing claims must change? Use "None" if not applicable.
     validations:
       required: true
   - type: textarea

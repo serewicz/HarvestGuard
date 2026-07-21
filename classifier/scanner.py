@@ -6,6 +6,8 @@ from datetime import datetime
 import pandas as pd
 
 from classifier.patterns import CATEGORY_PATTERNS, SEVERE_CATEGORIES, is_valid_credit_card
+from finding_adapters import normalize_sensitive_data_df
+from findings import NormalizedFinding
 
 # Lightweight classification scan, not full-text indexing -- files above
 # this size are skipped rather than partially read.
@@ -98,3 +100,11 @@ def scan_filesystem_for_sensitive_data(path: str, max_depth: int = 3) -> pd.Data
             })
 
     return pd.DataFrame(results)
+
+
+def scan_filesystem_for_sensitive_data_findings(
+    path: str, max_depth: int = 3, scan_id: str | None = None
+) -> list[NormalizedFinding]:
+    return normalize_sensitive_data_df(
+        scan_filesystem_for_sensitive_data(path, max_depth=max_depth), scan_id=scan_id
+    )

@@ -1,6 +1,6 @@
 # Security Policy
 
-HarvestGuard scans filesystems and cloud storage for encryption status and sensitive-data risk. Because it can be run against production storage and with cloud credentials, its own security posture matters as much as the risks it reports on.
+HarvestGuard inventories cryptographic assets and collects evidence about encryption status and sensitive-data placement across supported filesystems and cloud storage. Because it can be run against production storage and with cloud credentials, its own security posture matters as much as the evidence it reports.
 
 ## Data handling
 

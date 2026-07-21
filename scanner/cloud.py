@@ -2,6 +2,9 @@ import boto3
 import pandas as pd
 from botocore.exceptions import ClientError
 
+from finding_adapters import normalize_s3_df
+from findings import NormalizedFinding
+
 
 def scan_s3_bucket(bucket_name: str, prefix: str = ""):
     """Scan S3 bucket for encryption status."""
@@ -28,3 +31,9 @@ def scan_s3_bucket(bucket_name: str, prefix: str = ""):
         print(f"Error scanning S3: {e}")
 
     return pd.DataFrame(results)
+
+
+def scan_s3_bucket_findings(
+    bucket_name: str, prefix: str = "", scan_id: str | None = None
+) -> list[NormalizedFinding]:
+    return normalize_s3_df(scan_s3_bucket(bucket_name, prefix=prefix), scan_id=scan_id)

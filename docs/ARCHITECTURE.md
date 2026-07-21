@@ -1,10 +1,11 @@
 # Architecture
 
-HarvestGuard is currently a small Python and Streamlit application with local
-filesystem, AWS S3, GCS, Azure Blob, sensitive-data classification, Semgrep-
-based code crypto analysis, dashboard, and risk-analysis modules. The target
-architecture keeps that implementation local-first while creating clearer
-boundaries for scanner growth, reports, and future operations.
+HarvestGuard is currently a small Python and Streamlit application for
+cryptographic asset inventory and evidence collection, with local filesystem,
+AWS S3, GCS, Azure Blob, sensitive-data classification, Semgrep-based code
+crypto analysis, dashboard, and risk-analysis modules. The target architecture
+keeps that implementation local-first while creating clearer boundaries for
+scanner growth, reports, and future operations.
 
 ## Target Flow
 
@@ -24,7 +25,8 @@ Scan adapters
 
 Scan adapters collect observed evidence from a specific source. Current adapter
 families include local filesystems, object storage metadata, local
-sensitive-data pattern scanning, and code crypto analysis.
+sensitive-data pattern scanning, code crypto analysis, and local
+cryptographic asset inventory.
 
 Adapters should:
 
@@ -37,7 +39,8 @@ Adapters should:
 ### Normalized Finding Model
 
 The normalized finding model is the contract between scanners and every
-downstream feature. It should distinguish:
+downstream feature. The current internal contract is documented in
+[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md). It distinguishes:
 
 - asset identity and source;
 - observed evidence;
@@ -46,6 +49,10 @@ downstream feature. It should distinguish:
 - derived exposure or risk fields;
 - immutable raw finding details;
 - separately mutable assessment fields.
+
+Assessment concepts such as business impact, severity, remediation cost,
+ownership, quantum risk, and executive priority are deliberately excluded from
+the normalized finding model.
 
 ### Local Evidence Store
 
@@ -59,13 +66,19 @@ and future drift comparison without requiring a server or external database.
 
 The CLI is the first stable user interface for scanner execution and export.
 The service layer should let the CLI, dashboard, and reports reuse the same
-scan and persistence paths.
+scan and persistence paths. The current CLI is documented in [CLI.md](CLI.md)
+and runs local scanners through normalized findings without adding storage,
+dashboard behavior, or assessment models.
 
 ### Built-in Dashboard and Reports
 
-The built-in dashboard is for local exploration and drill-down. Reports are for
-sharing findings with executive and technical audiences. Both must link summary
-claims back to technical evidence and show confidence where relevant.
+The built-in dashboard is for local exploration and drill-down. Current reports
+are evidence-only Markdown, JSON, and console outputs for sharing scanner
+observations with technical, security, advisory, and CTO audiences. These
+outputs contribute to the intended Technology Due Diligence Evidence Package.
+Reports must keep summary claims tied to observed findings and must not add
+risk scores, executive priority, remediation recommendations, ownership
+inference, or other assessment conclusions.
 
 ### Optional Prometheus and Grafana
 
@@ -89,6 +102,15 @@ and migration-difficulty models exist.
   counts, not matched values.
 - `code_analysis/` uses Semgrep with a vendored crypto rule set for local code
   crypto analysis.
+- `scanner/crypto_inventory.py` parses local certificate and key assets into
+  evidence-first inventory findings.
+- `findings.py` defines the versioned normalized finding model.
+- `finding_adapters.py` maps current scanner DataFrames into normalized
+  findings without changing existing scanner behavior.
+- `harvestguard.py` provides the unified local CLI entry point.
+- `reports.py` formats normalized findings into console summaries, JSON, and
+  professional Markdown evidence reports without changing the normalized
+  finding schema.
 - `analyzer/risk.py` contains a simple heuristic risk score.
 - `main.py` wires current scan types into Streamlit.
 - `tests/` covers local scanning, classifier behavior, code analysis, risk

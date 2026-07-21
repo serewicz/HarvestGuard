@@ -23,6 +23,11 @@ Before proposing work, read:
 
 ## Contribution Workflow
 
+GitHub Issues are the source of truth for all non-trivial implementation scope.
+Roadmap IDs such as `HG-006` are planning references; they help connect work to
+product direction, but they do not replace a GitHub Issue. If a roadmap item
+and an Issue disagree, pause and reconcile the Issue before implementation.
+
 Use this workflow for all non-trivial changes:
 
 1. **Issue:** Open or select a GitHub issue that describes the business purpose,
@@ -120,7 +125,8 @@ cosign sign --key cosign.key localhost:5000/harvestguard
 
 ## Where to Start
 
-The roadmap is the single source of truth:
+The roadmap is the strategic planning reference. GitHub Issues are the source of
+truth for implementation scope:
 
 - [Milestone 1: MVP - Trustworthy Scanner](docs/ROADMAP.md#milestone-1-mvp---trustworthy-scanner)
 - [Issue-ready specs for HG-001 through HG-007](docs/issues/)

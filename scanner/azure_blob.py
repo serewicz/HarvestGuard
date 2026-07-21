@@ -5,6 +5,9 @@ from azure.core.exceptions import AzureError
 from azure.identity import DefaultAzureCredential
 from azure.storage.blob import BlobServiceClient
 
+from finding_adapters import normalize_azure_blob_df
+from findings import NormalizedFinding
+
 
 def _encryption_status(blob) -> str:
     scope = getattr(blob, "encryption_scope", None)
@@ -43,3 +46,14 @@ def scan_azure_container(account_url: str, container_name: str, prefix: str = ""
         print(f"Error scanning Azure Blob: {e}")
 
     return pd.DataFrame(results)
+
+
+def scan_azure_container_findings(
+    account_url: str,
+    container_name: str,
+    prefix: str = "",
+    scan_id: str | None = None,
+) -> list[NormalizedFinding]:
+    return normalize_azure_blob_df(
+        scan_azure_container(account_url, container_name, prefix=prefix), scan_id=scan_id
+    )

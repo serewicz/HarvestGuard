@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting a bug. Do not include credentials, real secrets, raw sensitive data, or confidential target details.
+        Thanks for reporting a bug. GitHub Issues are HarvestGuard's source of truth for bug scope and acceptance criteria. Do not include credentials, real secrets, raw sensitive data, or confidential target details.
   - type: textarea
     id: summary
     attributes:
@@ -19,6 +19,30 @@ body:
     attributes:
       label: Expected behavior
       description: What should have happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What behavior should this bug fix include?
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What should this bug fix explicitly not change?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for the bug to be considered fixed?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
     validations:
       required: true
   - type: textarea
@@ -68,6 +92,31 @@ body:
       description: Logs, traceback, screenshots, or redacted sample output.
     validations:
       required: false
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing requirements
+      description: Regression, fixture, integration, documentation, or manual validation requirements.
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation impact
+      description: Which docs, examples, roadmap notes, or user-facing claims must change? Use "None" if not applicable.
+    validations:
+      required: true
+  - type: checkboxes
+    id: local-first
+    attributes:
+      label: Local-first and scope checks
+      options:
+        - label: The expected fix preserves local-first behavior.
+          required: true
+        - label: The expected fix does not add telemetry or a HarvestGuard-operated outbound service by default.
+          required: true
+        - label: The expected fix keeps observed evidence separate from inferred risk or priority.
+          required: true
   - type: textarea
     id: privacy
     attributes:
