@@ -11,9 +11,12 @@ on:
       - ".dockerignore"
       - "requirements.txt"
       - "main.py"
+      - "findings.py"
+      - "finding_adapters.py"
       - "scanner/**"
       - "analyzer/**"
       - "classifier/**"
+      - "code_analysis/**"
       - "dashboard/**"
       - ".github/workflows/container-build.yml"
   workflow_dispatch: {}
@@ -36,6 +39,10 @@ jobs:
         id: repo
         run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
+      - name: Set image reference
+        id: image
+        run: echo "ref=ghcr.io/${{ steps.repo.outputs.name }}:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -46,16 +53,75 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push image
-        id: build
+      - name: Build image (local only -- not pushed until the smoke test passes)
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          # Tagged only by commit SHA, deliberately never "latest" -- a
-          # mutable tag undermines the point of signing a specific,
-          # verifiable artifact.
-          tags: ghcr.io/${{ steps.repo.outputs.name }}:${{ github.sha }}
+          push: false
+          load: true
+          tags: ${{ steps.image.outputs.ref }}
+
+      - name: Runtime smoke test -- import check
+        # The health endpoint alone does NOT catch this class of bug: it
+        # only proves the web server process is alive, not that main.py's
+        # script executes successfully. Streamlit only actually runs the
+        # script once a real browser session connects over WebSocket -- a
+        # plain `curl /` never triggers it. That gap is exactly how a
+        # ModuleNotFoundError reachable from every scanner import shipped
+        # through this workflow with a fully green run: build, sign, and
+        # publish all succeeded because nothing ever imported main.py
+        # inside the image. Confirmed by testing this exact check against
+        # both the broken image (exit 1) and the fixed one (exit 0) before
+        # relying on it.
+        run: |
+          set -uo pipefail
+          IMAGE="${{ steps.image.outputs.ref }}"
+
+          if ! docker run --rm --entrypoint python "$IMAGE" -c "import main" > import_check.log 2>&1; then
+            echo "::error::main.py failed to import inside the container"
+            cat import_check.log
+            exit 1
+          fi
+          echo "main.py and all reachable scanner imports succeeded"
+
+      - name: Runtime smoke test -- container run + health endpoint
+        run: |
+          set -uo pipefail
+          IMAGE="${{ steps.image.outputs.ref }}"
+          NAME="hg-smoke-test"
+
+          docker run -d --name "$NAME" --read-only --tmpfs /tmp -p 8501:8501 "$IMAGE"
+
+          health_status=1
+          for i in $(seq 1 30); do
+            if [ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" != "true" ]; then
+              echo "::error::Container exited early"
+              break
+            fi
+            if curl -sf http://localhost:8501/_stcore/health >/dev/null 2>&1; then
+              echo "Health check passed after ${i}s"
+              health_status=0
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$health_status" -ne 0 ]; then
+            echo "::error::Container smoke test failed"
+            docker logs "$NAME" || true
+          fi
+
+          docker rm -f "$NAME" >/dev/null 2>&1 || true
+          exit "$health_status"
+
+      - name: Push image (only reached if the smoke test passed)
+        run: docker push "${{ steps.image.outputs.ref }}"
+
+      - name: Resolve pushed image digest
+        id: build
+        run: |
+          digest=$(docker buildx imagetools inspect "${{ steps.image.outputs.ref }}" --format '{{json .Manifest}}' | jq -r '.digest')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Install syft
         run: curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
