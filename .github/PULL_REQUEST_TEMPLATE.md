@@ -21,6 +21,13 @@ Fixes #
 - User-facing behavior changes:
 - Schema, report, or documentation impact:
 
+## Product Fit
+
+- Cryptographic inventory or evidence problem solved:
+- Impact on the Technology Due Diligence Evidence Package or standalone usability:
+- Existing mature tool considered for integration:
+- Explicit ADR-006 non-goal considered:
+
 ## Testing
 
 - [ ] `ruff check .` passes locally

@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Scanner changes can affect trust in HarvestGuard's evidence. GitHub Issues are the source of truth for implementation scope. Keep observed evidence separate from inferred risk, and do not include credentials, real secrets, raw sensitive data, or confidential target details.
+        Scanner changes can affect trust in HarvestGuard's evidence. GitHub Issues are the source of truth for implementation scope. Review docs/DECISIONS/ADR-006-product-boundary.md before proposing a new scanner category. Keep observed evidence separate from inferred risk, and do not include credentials, real secrets, raw sensitive data, or confidential target details.
   - type: input
     id: roadmap-reference
     attributes:
@@ -41,6 +41,18 @@ body:
     attributes:
       label: Evidence model
       description: What observed evidence, confidence, errors, and technical metadata should be returned?
+    validations:
+      required: true
+  - type: textarea
+    id: product-fit
+    attributes:
+      label: Product fit
+      description: Answer the ADR-006 feature-fit questions.
+      placeholder: |
+        What cryptographic inventory or evidence problem does this solve?
+        How does it improve the Technology Due Diligence Evidence Package or standalone usability?
+        Could this capability be integrated from an existing mature tool?
+        Which explicit non-goal was considered?
     validations:
       required: true
   - type: textarea

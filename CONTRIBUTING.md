@@ -7,6 +7,7 @@ should not need to redefine product direction before doing useful work.
 Before proposing work, read:
 
 - [Product Principles](docs/PRODUCT_PRINCIPLES.md)
+- [ADR-006: Product Boundary](docs/DECISIONS/ADR-006-product-boundary.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Architecture Decision Records](docs/DECISIONS/README.md)
@@ -50,6 +51,12 @@ Use this workflow for all non-trivial changes:
 
 Small typo or formatting fixes may skip the full proposal step, but they should
 still stay focused.
+
+Substantial feature proposals should explain which
+[product-boundary criterion](docs/DECISIONS/ADR-006-product-boundary.md) they
+satisfy, what cryptographic evidence they improve, why integration with an
+existing mature tool is insufficient, and how they avoid expanding
+HarvestGuard into an adjacent security category.
 
 ## Definition of Done
 

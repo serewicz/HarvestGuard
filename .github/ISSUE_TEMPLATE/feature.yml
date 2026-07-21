@@ -8,7 +8,7 @@ body:
       value: |
         GitHub Issues are HarvestGuard's source of truth for implementation scope. HG roadmap IDs may be referenced for planning, but this Issue controls the accepted scope for the PR.
 
-        Before proposing a feature, review docs/PRODUCT_PRINCIPLES.md, docs/ROADMAP.md, docs/ARCHITECTURE.md, and CONTRIBUTING.md.
+        Before proposing a feature, review docs/PRODUCT_PRINCIPLES.md, docs/DECISIONS/ADR-006-product-boundary.md, docs/ROADMAP.md, docs/ARCHITECTURE.md, and CONTRIBUTING.md.
   - type: input
     id: roadmap-reference
     attributes:
@@ -62,6 +62,18 @@ body:
       description: Files, modules, schema impacts, dependencies, and migration notes.
     validations:
       required: false
+  - type: textarea
+    id: product-fit
+    attributes:
+      label: Product fit
+      description: Answer the ADR-006 feature-fit questions.
+      placeholder: |
+        What cryptographic inventory or evidence problem does this solve?
+        How does it improve the Technology Due Diligence Evidence Package or standalone usability?
+        Could this capability be integrated from an existing mature tool?
+        Which explicit non-goal was considered?
+    validations:
+      required: true
   - type: checkboxes
     id: local-first
     attributes:
