@@ -1,10 +1,11 @@
 # Architecture
 
-HarvestGuard is currently a small Python and Streamlit application with local
-filesystem, AWS S3, GCS, Azure Blob, sensitive-data classification, Semgrep-
-based code crypto analysis, dashboard, and risk-analysis modules. The target
-architecture keeps that implementation local-first while creating clearer
-boundaries for scanner growth, reports, and future operations.
+HarvestGuard is currently a small Python and Streamlit application for
+cryptographic asset inventory and evidence collection, with local filesystem,
+AWS S3, GCS, Azure Blob, sensitive-data classification, Semgrep-based code
+crypto analysis, dashboard, and risk-analysis modules. The target architecture
+keeps that implementation local-first while creating clearer boundaries for
+scanner growth, reports, and future operations.
 
 ## Target Flow
 
@@ -73,10 +74,11 @@ dashboard behavior, or assessment models.
 
 The built-in dashboard is for local exploration and drill-down. Current reports
 are evidence-only Markdown, JSON, and console outputs for sharing scanner
-observations with technical, security, advisory, and CTO audiences. Reports must
-keep summary claims tied to observed findings and must not add risk scores,
-executive priority, remediation recommendations, ownership inference, or other
-assessment conclusions.
+observations with technical, security, advisory, and CTO audiences. These
+outputs contribute to the intended Technology Due Diligence Evidence Package.
+Reports must keep summary claims tied to observed findings and must not add
+risk scores, executive priority, remediation recommendations, ownership
+inference, or other assessment conclusions.
 
 ### Optional Prometheus and Grafana
 

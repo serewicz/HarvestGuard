@@ -4,32 +4,36 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.38%2B-FF4B4B)](https://streamlit.io/)
 
-**Open-source cryptographic inventory and quantum risk scanner for enterprise resilience.**
+**Open-source cryptographic asset inventory and evidence-collection tool for technology due diligence and future migration planning.**
 
 Built by [Timothy Serewicz](https://www.linkedin.com/in/serewicz/). Executive Technology Advisor & Fractional CTO.
 
 ## Why HarvestGuard?
 
-In M&A due diligence, PE/VC portfolio reviews, and enterprise technology decisions, undetected cryptographic weaknesses and **Harvest Now, Decrypt Later (HNDL)** risks can create massive liabilities, delay integrations, and destroy deal value.
+HarvestGuard inventories cryptographic assets today, providing evidence organizations can use to assess future migration planning as cryptographic standards evolve.
 
-HarvestGuard gives teams **fast, actionable visibility** into encryption posture across storage, clusters, and cloud environments—without weeks of manual effort or expensive enterprise tools.
+In M&A due diligence, PE/VC portfolio reviews, acquisition planning, and enterprise technology decisions, teams need defensible evidence about encryption posture, sensitive-data placement, and cryptographic assets before they can assess modernization or migration work.
+
+HarvestGuard gives teams **local, evidence-focused visibility** into implemented cryptographic posture across supported storage, cloud, source-code, and filesystem targets. Its outputs can contribute to a **Technology Due Diligence Evidence Package** for technology due diligence, executive assessment, acquisition review, integration planning, and cryptographic modernization planning.
+
+HarvestGuard is additive to tools organizations may already use for security operations, cloud security, asset management, vulnerability management, and governance. It is not a replacement for broad vulnerability-management, CSPM, GRC, SIEM, or security-operations platforms.
 
 ## Target Users & Use Cases
 
 - **M&A, IP Lawyers, PE/VC Firms**  
-  Quickly scan target company storage/cloud for encryption status, unencrypted sensitive data (IP, customer PII), and HNDL exposure. Many targets have poor inventory—this tool surfaces risks early.
+  Quickly scan target company storage/cloud for encryption status, unencrypted sensitive data (IP, customer PII), and HNDL exposure. Many targets have poor inventory—this tool surfaces evidence early.
 
-- **Deal Speed & Risk Mitigation**  
-  Pre-LOI or during DD, identify crypto debt that could delay integration or create liabilities (breaches, compliance failures post-quantum).
+- **Deal Speed & Planning Evidence**  
+  Pre-LOI or during DD, collect cryptographic evidence that can inform integration planning, modernization discussions, and follow-up advisory review.
 
-- **Valuation Impact**  
-  Quantify remediation costs/risks (e.g., “This $X dataset requires $Y migration effort”). Ties directly into board-level technology governance expectations.
+- **Executive Assessment**  
+  Give leaders a clearer evidence base for questions about cryptographic posture, long-lived data exposure, and future migration planning without claiming a complete quantum-readiness assessment.
 
 - **Ease of Use**  
   Free/open-source, self-hosted, or simple web-based assessment → low friction entry.
 
-- **Audit Trail** *(planned — see [docs/ROADMAP.md](docs/ROADMAP.md))*  
-  CBOM and professional-report export for legal/IP teams.
+- **Evidence Package** *(planned — see [docs/ROADMAP.md](docs/ROADMAP.md))*  
+  Current JSON and Markdown reports are evidence outputs; future work may package these into a broader Technology Due Diligence Evidence Package for legal, advisory, and executive review.
 
 ## Features (MVP)
 

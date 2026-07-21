@@ -7,11 +7,13 @@ implementation scope; `HG-###` IDs are roadmap references, not substitutes for
 Issues.
 
 HarvestGuard exists for M&A, PE/VC, legal, and enterprise technology diligence
-teams that need fast, trustworthy visibility into cryptographic posture,
-long-lived data exposure, and remediation priorities. It is not a general
-security scanner. The product stays focused on crypto-first evidence, local
-operation, defensible terminology, and reports that serve both executives and
-technical remediation owners.
+teams that need a focused cryptographic asset inventory and defensible evidence
+about cryptographic posture, long-lived data exposure, and future migration
+planning. It is not a general security scanner or a replacement for established
+enterprise security platforms. The product stays focused on crypto-first
+evidence, local operation, defensible terminology, and reports that support
+technical review, executive assessment, acquisition review, integration
+planning, and cryptographic modernization.
 
 ## Status Values
 
@@ -39,7 +41,8 @@ Blob scanning all do real encryption-status detection; the PII/secrets
 classifier, local cryptographic asset inventory scanner, and a Semgrep-based
 crypto code analysis scanner each ship as their own scan type. The unified CLI
 can produce console summaries, normalized JSON, and evidence-only Markdown
-reports. Pillar 2 (containers) is done except the k8s manifest — signed,
+reports that can contribute to a future Technology Due Diligence Evidence
+Package. Pillar 2 (containers) is done except the k8s manifest — signed,
 keylessly-attested images with an SBOM ship from CI. No CBOM/PDF export yet,
 no network-level crypto detection (TLS/cipher-suite scanning).
 
@@ -291,8 +294,8 @@ Key product constraints:
 ### HG-016
 
 - **Title:** HTML executive report
-- **Purpose:** Provide a polished local report for partners, GCs, boards, and
-  deal teams.
+- **Purpose:** Package report outputs into a polished local Technology Due
+  Diligence Evidence Package for partners, GCs, boards, and deal teams.
 - **Status:** Planned
 - **Milestone:** 2 - MVP+: Visual and Operational Experience
 - **Dependencies:** HG-007, HG-015

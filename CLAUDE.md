@@ -4,7 +4,31 @@ Context for Claude Code (or any fresh agent) picking up this repo.
 
 ## What this is
 
-Open-source cryptographic inventory and quantum-risk (Harvest-Now-Decrypt-Later) scanner. Streamlit app, Apache-2.0, Python 3.10+. Target users: M&A/PE/legal due-diligence teams assessing a target company's encryption and sensitive-data posture. Built by Timothy Serewicz.
+Open-source cryptographic asset inventory and evidence-collection tool for technology due diligence and future cryptographic migration planning. Streamlit app, Apache-2.0, Python 3.10+. Target users: M&A/PE/legal due-diligence teams assessing a target company's encryption posture, sensitive-data placement, and cryptographic evidence. HarvestGuard complements existing security, cloud, asset-management, vulnerability-management, and governance tooling; it does not replace those platforms. Built by Timothy Serewicz.
+
+## Product identity
+
+HarvestGuard is:
+
+- a focused cryptographic asset inventory and evidence-collection tool;
+- intended to support technology due diligence and executive assessment;
+- additive to existing enterprise security tooling.
+
+HarvestGuard is not:
+
+- a general-purpose vulnerability scanner;
+- a SIEM;
+- a CSPM platform;
+- a GRC platform;
+- an autonomous remediation product;
+- a replacement for established enterprise security platforms.
+
+When considering a change, ask: Does this change improve cryptographic asset
+inventory, evidence quality, the Technology Due Diligence Evidence Package, or
+standalone usability?
+
+Do not broaden the product merely because an adjacent capability is technically
+easy.
 
 ## Current state of the code
 
