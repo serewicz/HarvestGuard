@@ -1,7 +1,13 @@
 # Create GitHub Issues
 
-`gh` is the intended path for creating the first seven MVP issues from these
-specifications. Authenticate first:
+GitHub Issues are HarvestGuard's source of truth for non-trivial
+implementation scope. The `HG-###` documents in this directory are planning
+references and starter text; once a GitHub Issue exists, the Issue controls the
+accepted scope, out-of-scope boundaries, acceptance criteria, testing
+requirements, and review discussion.
+
+`gh` is the intended path for creating issues from these specifications.
+Authenticate first:
 
 ```bash
 gh auth login -h github.com
@@ -20,7 +26,8 @@ gh label create work:reporting --color C5DEF5 --description "Report and export w
 gh label create work:tests --color BFDADC --description "Test coverage work" --repo serewicz/HarvestGuard
 ```
 
-Before creating issues, check for duplicates:
+Before creating issues, check for duplicates. Prefer the GitHub Issue number in
+branches and PRs, and keep any `HG-###` reference as a roadmap link:
 
 ```bash
 gh issue list --repo serewicz/HarvestGuard --search "HG-001 in:title"
@@ -32,7 +39,7 @@ gh issue list --repo serewicz/HarvestGuard --search "HG-006 in:title"
 gh issue list --repo serewicz/HarvestGuard --search "HG-007 in:title"
 ```
 
-Create the first seven MVP issues:
+Create the first seven MVP issues if they do not already exist:
 
 ```bash
 gh issue create --repo serewicz/HarvestGuard --title "HG-001: Cryptographic Asset Inventory" --body-file docs/issues/HG-001-cryptographic-asset-inventory.md --label mvp --label priority:p1 --label work:scanner --label work:schema

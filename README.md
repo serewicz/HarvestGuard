@@ -121,7 +121,9 @@ templates scoped to exactly what each scanner calls.
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,
 test/lint commands, good first-contribution areas, and the contribution
-workflow. Product direction lives in [docs/ROADMAP.md](docs/ROADMAP.md),
+workflow. Non-trivial changes should start from a GitHub Issue; roadmap IDs are
+planning references, not substitutes for issue scope. Product direction lives
+in [docs/ROADMAP.md](docs/ROADMAP.md),
 [docs/PRODUCT_PRINCIPLES.md](docs/PRODUCT_PRINCIPLES.md), and
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

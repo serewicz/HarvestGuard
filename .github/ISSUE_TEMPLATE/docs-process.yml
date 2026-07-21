@@ -1,0 +1,80 @@
+name: Docs or process change
+description: Propose documentation, roadmap, governance, or contribution-process work.
+title: "[Docs/Process] "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for documentation, roadmap, governance, issue-template, PR-template, and contribution-process changes. GitHub Issues are the source of truth for implementation scope.
+  - type: input
+    id: roadmap-reference
+    attributes:
+      label: Roadmap reference
+      description: Optional HG roadmap ID or related roadmap section. Use "None" if this is not roadmap-linked.
+      placeholder: "HG-010, CONTRIBUTING.md, or None"
+    validations:
+      required: true
+  - type: textarea
+    id: purpose
+    attributes:
+      label: Purpose
+      description: What confusion, drift, or contributor/user need does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Which documents, templates, claims, or process paths should change?
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+      description: What product, scanner, dashboard, storage, scoring, or implementation behavior is excluded?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: What must be true for this docs/process change to be done?
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: testing
+    attributes:
+      label: Testing requirements
+      description: Link checks, template validation, lint/test expectations, or "Documentation-only; code tests not applicable."
+    validations:
+      required: true
+  - type: textarea
+    id: docs
+    attributes:
+      label: Documentation impact
+      description: Which docs or templates will be updated?
+    validations:
+      required: true
+  - type: checkboxes
+    id: local-first
+    attributes:
+      label: Local-first and scope checks
+      options:
+        - label: This change does not add telemetry or a HarvestGuard-operated outbound service by default.
+          required: true
+        - label: This change does not alter scanner, dashboard, storage, scoring, or product behavior.
+          required: true
+        - label: This change keeps observed evidence separate from inferred risk or priority.
+          required: true
+  - type: textarea
+    id: privacy
+    attributes:
+      label: Privacy and security considerations
+      description: Confirm whether any sensitive examples, credentials, paths, object names, or claims need redaction or adjustment.
+    validations:
+      required: true

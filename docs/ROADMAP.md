@@ -2,7 +2,9 @@
 
 This is the canonical product roadmap for HarvestGuard. It preserves the
 current product direction while organizing implementation work into stable,
-issue-ready milestones.
+issue-ready milestones. GitHub Issues are the source of truth for non-trivial
+implementation scope; `HG-###` IDs are roadmap references, not substitutes for
+Issues.
 
 HarvestGuard exists for M&A, PE/VC, legal, and enterprise technology diligence
 teams that need fast, trustworthy visibility into cryptographic posture,
@@ -21,15 +23,25 @@ technical remediation owners.
   implementation may not meet the item without review.
 - `Planned`: not implemented yet.
 
+## Roadmap IDs and Issues
+
+Use `HG-###` IDs to connect work to product direction, dependencies, and
+milestones. Use GitHub Issues to define the accepted implementation scope,
+out-of-scope boundaries, acceptance criteria, tests, documentation impact, and
+review discussion for each non-trivial change. When an Issue and roadmap text
+disagree, update or clarify the Issue before implementation and reconcile the
+roadmap as part of the docs impact.
+
 ## Current State
 
 Current state (as of this writing): local filesystem, AWS S3, GCS, and Azure
 Blob scanning all do real encryption-status detection; the PII/secrets
 classifier, local cryptographic asset inventory scanner, and a Semgrep-based
-crypto code analysis scanner each ship as their own scan type. Pillar 2
-(containers) is done except the k8s manifest — signed, keylessly-attested
-images with an SBOM ship from CI. No CBOM/PDF export yet, no network-level
-crypto detection (TLS/cipher-suite scanning).
+crypto code analysis scanner each ship as their own scan type. The unified CLI
+can produce console summaries, normalized JSON, and evidence-only Markdown
+reports. Pillar 2 (containers) is done except the k8s manifest — signed,
+keylessly-attested images with an SBOM ship from CI. No CBOM/PDF export yet,
+no network-level crypto detection (TLS/cipher-suite scanning).
 
 ## Direction
 
@@ -163,12 +175,14 @@ Key product constraints:
 - **Title:** JSON and Markdown reports
 - **Purpose:** Produce reviewable artifacts that can be shared with technical
   teams and imported into downstream diligence workflows.
-- **Status:** Planned
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-003, HG-004
 - **Acceptance criteria:** CLI can export normalized findings as JSON and a
   human-readable Markdown report; reports separate evidence from inference;
-  sensitive matched values are never written to reports.
+  sensitive matched values are never written to reports. Implemented in
+  `reports.py`, exposed through `harvestguard.py`, and documented in
+  `docs/CLI.md`.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/19
 
 ### HG-008
