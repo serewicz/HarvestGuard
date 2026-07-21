@@ -56,7 +56,8 @@ HarvestGuard gives teams **fast, actionable visibility** into encryption posture
   subject, expiration, fingerprint, confidence, and parsing errors. See
   [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Unified CLI** — runs local scanners through the normalized finding model
-  with summary, JSON, and Markdown output. See [docs/CLI.md](docs/CLI.md).
+  with summary, JSON, and professional Markdown report output. See
+  [docs/CLI.md](docs/CLI.md).
 - **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
   exposure scoring (High/Medium/Low) layered on top of encryption status.
 - **Streamlit dashboard** — pie/bar charts and a results table per scan.
@@ -95,6 +96,9 @@ streamlit run main.py
 
 # Or run a local CLI scan
 harvestguard scan ./tests/fixtures/crypto_inventory
+
+# Write a Markdown evidence report
+harvestguard scan ./tests/fixtures/crypto_inventory --markdown report.md
 ```
 
 ### Running in a container

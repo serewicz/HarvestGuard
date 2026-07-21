@@ -72,12 +72,17 @@ def test_scan_command_summary_output(tmp_path, capsys, monkeypatch):
 
     output = capsys.readouterr().out
     assert exit_code == 0
+    assert "HarvestGuard Scan Complete" in output
     assert "Files scanned: 2" in output
     assert "Certificates: 1" in output
     assert "Private Keys: 1" in output
+    assert "Encrypted Keys: 0" in output
+    assert "SSH Keys: 0" in output
+    assert "PKCS#12: 0" in output
     assert "Expired Certificates: 1" in output
     assert "Sensitive Files: 1" in output
     assert "Semgrep Findings: 1" in output
+    assert "Malformed Assets: 0" in output
     assert "Total Findings: 6" in output
 
 
@@ -106,8 +111,58 @@ def test_scan_command_markdown_output(tmp_path, capsys, monkeypatch):
     output = capsys.readouterr().out
     assert exit_code == 0
     assert "# HarvestGuard Scan Report" in output
-    assert "| Source | Asset Type | Location | Evidence | Confidence | Errors |" in output
-    assert "local_sensitive_data" in output
+    assert "## Executive Summary" in output
+    assert "## Detailed Findings" in output
+    assert (
+        "| Location | Asset Type | Algorithm | Key Size | Expiration | Issuer | "
+        "Subject | Fingerprint | Confidence | Observed Evidence | Errors |"
+    ) in output
+    assert str(tmp_path / "data.csv") in output
+
+
+def test_scan_command_markdown_writes_report_file(tmp_path, capsys, monkeypatch):
+    report_path = tmp_path / "report.md"
+    _patch_local_scanners(
+        monkeypatch,
+        {"crypto": [_finding("crypto_inventory", "PEM Certificate", str(tmp_path / "cert.pem"))]},
+    )
+
+    exit_code = harvestguard.main([
+        "scan",
+        str(tmp_path),
+        "--markdown",
+        str(report_path),
+        "--quiet",
+    ])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.out == ""
+    assert captured.err == ""
+    assert report_path.read_text(encoding="utf-8").startswith("# HarvestGuard Scan Report")
+
+
+def test_scan_command_json_writes_findings_file(tmp_path, capsys, monkeypatch):
+    output_path = tmp_path / "findings.json"
+    _patch_local_scanners(
+        monkeypatch,
+        {"crypto": [_finding("crypto_inventory", "PEM Certificate", str(tmp_path / "cert.pem"))]},
+    )
+
+    exit_code = harvestguard.main([
+        "scan",
+        str(tmp_path),
+        "--json",
+        str(output_path),
+        "--quiet",
+    ])
+
+    captured = capsys.readouterr()
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert captured.out == ""
+    assert captured.err == ""
+    assert payload[0]["source_type"] == "crypto_inventory"
 
 
 def test_scan_command_invalid_path_returns_usage_error(capsys):

@@ -71,9 +71,12 @@ dashboard behavior, or assessment models.
 
 ### Built-in Dashboard and Reports
 
-The built-in dashboard is for local exploration and drill-down. Reports are for
-sharing findings with executive and technical audiences. Both must link summary
-claims back to technical evidence and show confidence where relevant.
+The built-in dashboard is for local exploration and drill-down. Current reports
+are evidence-only Markdown, JSON, and console outputs for sharing scanner
+observations with technical, security, advisory, and CTO audiences. Reports must
+keep summary claims tied to observed findings and must not add risk scores,
+executive priority, remediation recommendations, ownership inference, or other
+assessment conclusions.
 
 ### Optional Prometheus and Grafana
 
@@ -103,6 +106,9 @@ and migration-difficulty models exist.
 - `finding_adapters.py` maps current scanner DataFrames into normalized
   findings without changing existing scanner behavior.
 - `harvestguard.py` provides the unified local CLI entry point.
+- `reports.py` formats normalized findings into console summaries, JSON, and
+  professional Markdown evidence reports without changing the normalized
+  finding schema.
 - `analyzer/risk.py` contains a simple heuristic risk score.
 - `main.py` wires current scan types into Streamlit.
 - `tests/` covers local scanning, classifier behavior, code analysis, risk

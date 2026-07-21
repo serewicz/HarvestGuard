@@ -30,7 +30,7 @@ python -m harvestguard scan ./target
 ## Usage
 
 ```bash
-harvestguard scan <path> [--summary] [--json] [--markdown] [--quiet] [--exclude <pattern>]
+harvestguard scan <path> [--summary] [--json [PATH]] [--markdown [PATH]] [--quiet] [--exclude <pattern>]
 ```
 
 The `scan` command runs current local scanners:
@@ -54,15 +54,24 @@ harvestguard scan ./target
 Example output:
 
 ```text
+HarvestGuard Scan Complete
+
 Files scanned: 412
+
+Findings
 
 Certificates: 18
 Private Keys: 5
+Encrypted Keys: 1
+SSH Keys: 2
+PKCS#12: 1
 Expired Certificates: 2
 Sensitive Files: 7
 Semgrep Findings: 4
+Malformed Assets: 1
+Errors: 0
 
-Total Findings: 36
+Total Findings: 39
 ```
 
 JSON normalized findings:
@@ -71,11 +80,36 @@ JSON normalized findings:
 harvestguard scan ./target --json --quiet
 ```
 
+Write JSON normalized findings to a file:
+
+```bash
+harvestguard scan ./target --json findings.json --quiet
+```
+
 Markdown report:
 
 ```bash
 harvestguard scan ./target --markdown --exclude "vendor/*"
 ```
+
+Write a professional Markdown evidence report:
+
+```bash
+harvestguard scan ./target --markdown report.md --exclude "vendor/*"
+```
+
+The Markdown report includes:
+
+- Executive Summary
+- Scan Information
+- Scanner Versions
+- Scope
+- Findings Summary
+- Finding Breakdown by Type
+- Detailed Findings
+- Errors and Warnings
+- Known Limitations
+- Appendix
 
 ## Exit Codes
 
@@ -87,7 +121,8 @@ harvestguard scan ./target --markdown --exclude "vendor/*"
 ## Output Notes
 
 JSON output serializes normalized findings from
-[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md). Markdown output is a simple
-evidence report suitable for copying into an issue or email. Neither output
-adds executive priority, risk scoring, remediation cost, ownership, persistence,
-or telemetry.
+[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md) without changing the schema.
+Markdown output is a professional evidence report suitable for attaching to an
+issue, email, or advisory note. It reports observed evidence only. It does not
+add executive priority, risk scoring, remediation recommendations, ownership,
+persistence, or telemetry.
