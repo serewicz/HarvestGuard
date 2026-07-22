@@ -18,13 +18,34 @@ def normalize_filesystem_df(
             location=row["Location"],
             scanner_name="filesystem",
             scanner_version="0.1.0",
-            observed_at=row.get("Modified"),
+            observed_at=row.get("Collected At"),
             evidence=f"Encryption status observed: {row.get('Encryption')}",
-            confidence=_confidence_for_encryption(row.get("Encryption")),
-            technical_metadata=_metadata(row, ["Size", "Modified", "Encryption", "Owner"]),
+            confidence=row.get("Confidence"),
+            confidence_rationale=row.get("Confidence Rationale"),
+            collection_method=row.get("Collection Method"),
+            collection_source=row.get("Collection Source"),
+            rule_id=row.get("Rule ID"),
+            verification_rationale=row.get("Verification Rationale"),
+            repeatable=row.get("Repeatable"),
+            ownership_signals=_filesystem_ownership_signals(row),
+            unknowns=row.get("Unknowns") or [],
+            limitations=row.get("Limitations") or [],
+            technical_metadata=_metadata(row, ["Size", "Modified", "Encryption"]),
         )
         for row in _records(df)
     ]
+
+
+def _filesystem_ownership_signals(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "uid": row.get("UID"),
+        "owner_name": row.get("Owner Name"),
+        "gid": row.get("GID"),
+        "group_name": row.get("Group Name"),
+        "mode_octal": row.get("Mode Octal"),
+        "permissions": row.get("Permissions"),
+        "acl_present": row.get("ACL Present"),
+    }
 
 
 def normalize_s3_df(df: pd.DataFrame, scan_id: str | None = None) -> list[NormalizedFinding]:
@@ -174,14 +195,3 @@ def _errors(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value if str(item)]
     return [part.strip() for part in str(value).split(";") if part.strip()]
-
-
-def _confidence_for_encryption(encryption: Any) -> str:
-    if encryption is None:
-        return "Low"
-    encryption_text = str(encryption)
-    if encryption_text == "Unknown":
-        return "Low"
-    if encryption_text.startswith("File-level"):
-        return "High"
-    return "Medium"

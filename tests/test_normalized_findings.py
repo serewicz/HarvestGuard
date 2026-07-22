@@ -59,7 +59,24 @@ def test_normalized_findings_do_not_include_assessment_fields():
             "Size": 12,
             "Modified": datetime(2026, 1, 1),
             "Encryption": "Unencrypted",
-            "Owner": 501,
+            "Confidence": "Medium",
+            "Confidence Rationale": "Volume-level fallback used.",
+            "UID": 501,
+            "Owner Name": "tim",
+            "GID": 20,
+            "Group Name": "staff",
+            "Mode Octal": "0644",
+            "Permissions": "-rw-r--r--",
+            "ACL Present": False,
+            "Rule ID": "volume_status:unencrypted",
+            "Verification Rationale": "Volume-level status applied.",
+            "Repeatable": True,
+            "Collection Method": "stat + leading-byte signature scan with volume-level fallback",
+            "Collection Source": "test-host",
+            "Collected At": datetime(2026, 1, 1),
+            "Unknowns": ["File-level encryption status cannot be established conclusively."],
+            "Limitations": [],
+            # Assessment data a scanner must not leak into the evidence layer.
             "Risk": "High",
         }]
     )
@@ -69,7 +86,17 @@ def test_normalized_findings_do_not_include_assessment_fields():
     assert "risk" not in finding
     assert "Risk" not in finding
     assert "Risk" not in finding["technical_metadata"]
+    assert "Risk" not in finding["ownership_signals"]
     assert finding["technical_metadata"]["Encryption"] == "Unencrypted"
+    assert finding["ownership_signals"] == {
+        "uid": 501,
+        "owner_name": "tim",
+        "gid": 20,
+        "group_name": "staff",
+        "mode_octal": "0644",
+        "permissions": "-rw-r--r--",
+        "acl_present": False,
+    }
 
 
 def test_filesystem_scanner_can_return_normalized_findings(tmp_path, monkeypatch):

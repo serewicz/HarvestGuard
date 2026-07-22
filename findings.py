@@ -36,16 +36,42 @@ class NormalizedFinding:
     scanner_version: str = "unknown"
     schema_version: str = SCHEMA_VERSION
     finding_id: str | None = None
+    # Confidence is confidence in the observation itself, never severity,
+    # priority, or business impact. The rationale explains what evidence
+    # quality produced that confidence level.
+    confidence_rationale: str | None = None
+    # Provenance: how this specific observation was collected, so it can be
+    # independently verified or reproduced.
+    collection_method: str | None = None
+    collection_source: str | None = None
+    rule_id: str | None = None
+    repeatable: bool | None = None
+    verification_rationale: str | None = None
+    # Technical ownership signals only (uid/gid/mode/etc.) -- never business
+    # ownership, department, or accountable-executive inference.
+    ownership_signals: dict[str, Any] = field(default_factory=dict)
+    # Distinct from `errors`: unknowns are things HarvestGuard cannot
+    # establish at all (e.g. business ownership from filesystem metadata);
+    # limitations are conditions that constrained this specific observation
+    # (e.g. permission denied, volume-level fallback used).
+    unknowns: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         observed_at = _normalize_timestamp(self.observed_at)
         metadata = _json_safe(self.technical_metadata)
         errors = [str(error) for error in self.errors if str(error)]
+        unknowns = [str(item) for item in self.unknowns if str(item)]
+        limitations = [str(item) for item in self.limitations if str(item)]
+        ownership_signals = _json_safe(self.ownership_signals)
         asset_name = self.asset_name or _asset_name_from_location(self.location)
 
         object.__setattr__(self, "observed_at", observed_at)
         object.__setattr__(self, "technical_metadata", metadata)
         object.__setattr__(self, "errors", errors)
+        object.__setattr__(self, "unknowns", unknowns)
+        object.__setattr__(self, "limitations", limitations)
+        object.__setattr__(self, "ownership_signals", ownership_signals)
         object.__setattr__(self, "asset_name", asset_name)
         if self.finding_id is None:
             object.__setattr__(self, "finding_id", self._generate_id())
@@ -63,6 +89,15 @@ class NormalizedFinding:
             "observed_at": self.observed_at,
             "evidence": self.evidence,
             "confidence": self.confidence,
+            "confidence_rationale": self.confidence_rationale,
+            "collection_method": self.collection_method,
+            "collection_source": self.collection_source,
+            "rule_id": self.rule_id,
+            "repeatable": self.repeatable,
+            "verification_rationale": self.verification_rationale,
+            "ownership_signals": _json_safe(self.ownership_signals),
+            "unknowns": list(self.unknowns),
+            "limitations": list(self.limitations),
             "errors": list(self.errors),
             "technical_metadata": _json_safe(self.technical_metadata),
             "schema_version": self.schema_version,
@@ -80,6 +115,15 @@ class NormalizedFinding:
             "scanner_version": self.scanner_version,
             "evidence": self.evidence,
             "confidence": self.confidence,
+            "confidence_rationale": self.confidence_rationale,
+            "collection_method": self.collection_method,
+            "collection_source": self.collection_source,
+            "rule_id": self.rule_id,
+            "repeatable": self.repeatable,
+            "verification_rationale": self.verification_rationale,
+            "ownership_signals": self.ownership_signals,
+            "unknowns": self.unknowns,
+            "limitations": self.limitations,
             "errors": self.errors,
             "technical_metadata": self.technical_metadata,
         }
@@ -119,6 +163,11 @@ def _json_safe(value: Any) -> Any:
         return _normalize_timestamp(value)
     if isinstance(value, datetime):
         return _normalize_timestamp(value)
+    # numpy scalars (e.g. int64/bool_ from a DataFrame round-trip via stat
+    # fields like uid/gid) aren't JSON-serializable directly; .item() converts
+    # to the equivalent native Python type without requiring a numpy import.
+    if hasattr(value, "item") and hasattr(value, "dtype"):
+        return _json_safe(value.item())
     if isinstance(value, float):
         if math.isnan(value) or math.isinf(value):
             return None
