@@ -1,2 +1,3 @@
 pytest>=8.3.0
 ruff>=0.6.0
+PyYAML>=6.0  # scripts/validate_agent_policy.py parses .agent-policy.yml; governance tooling only, not a runtime product dependency

@@ -5,12 +5,29 @@ name: Agent Orchestrator
 # push/pull_request CI this reuses the Python setup and dependency install
 # approach from.
 #
-# V2 adds a required issue_number input and reads that issue via `gh`, using
-# only the ephemeral, automatically-provided GITHUB_TOKEN (no secret added).
-# The issue body is untrusted, scanner-adjacent text: it is only ever piped
-# through `jq -r` and printed to the log below. It is never interpolated
-# into a `${{ }}` expression (the classic Actions script-injection vector)
-# and never passed to eval/sh, so nothing in it can execute as a command.
+# V2 added a required issue_number input and reads that issue via `gh`,
+# using only the ephemeral, automatically-provided GITHUB_TOKEN (no secret
+# added).
+#
+# V2.5 added a policy gate: .agent-policy.yml (see docs/AGENT_CONTRACT.md for
+# the human-readable contract it implements) must exist, parse as YAML, and
+# satisfy a small set of required values before anything else runs.
+#
+# This revision moves that gate into a committed, tested script
+# (scripts/validate_agent_policy.py) instead of inline YAML, which needs
+# PyYAML installed to run. That's a deliberate tradeoff: dependency install
+# now happens before the policy gate (it didn't in V2.5, which used a
+# throwaway `pip install pyyaml` just for the check). The invariant that
+# actually matters is preserved -- the gate still runs, and still must pass,
+# before issue retrieval, any future AI invocation, or any repository
+# mutation. "Install dependencies" is ordinary environment setup, not any of
+# those things.
+#
+# It also wraps issue title/body/state/URL -- untrusted, attacker-controlled
+# text, since anyone who can open an issue controls it -- in GitHub's
+# `::stop-commands::` mechanism before printing, so nothing in an issue can
+# be interpreted as a workflow command (e.g. `::add-mask::...` or a forged
+# `::error::`) in the log.
 on:
   workflow_dispatch:
     inputs:
@@ -31,6 +48,21 @@ jobs:
       - name: Check out repo
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Validate agent policy
+        run: python scripts/validate_agent_policy.py .agent-policy.yml
+
       - name: Validate issue number input
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -44,7 +76,7 @@ jobs:
             exit 1
           fi
 
-      - name: Retrieve and print issue
+      - name: Retrieve issue
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -57,15 +89,39 @@ jobs:
             exit 1
           fi
 
-          echo "::group::Issue #$ISSUE_NUMBER"
-          echo "Issue number: $(jq -r '.number' issue.json)"
+      - name: Print issue safely
+        run: |
+          set -euo pipefail
+          # Issue number is server-assigned by GitHub, not attacker text, so
+          # it's safe to use in a real (unfenced) workflow command below.
+          ISSUE_NUM="$(jq -r '.number' issue.json)"
+          echo "::group::Issue #$ISSUE_NUM"
+
+          # Title/body/state/URL are untrusted, attacker-controlled text --
+          # anyone who can open an issue controls them. GitHub Actions
+          # interprets any log line of the form "::name::value" as a
+          # workflow command; printing untrusted text naively would let an
+          # issue body forge one (e.g. "::add-mask::..." or a fake
+          # "::error::..."). `::stop-commands::<token>` is GitHub's
+          # documented mechanism for exactly this: workflow-command parsing
+          # is disabled until the matching "::<token>::" line is seen. The
+          # token is generated here at runtime (uuidgen), so it cannot be
+          # predicted or reproduced from issue content. `::group::` /
+          # `::endgroup::` deliberately stay outside this fence -- they are
+          # legitimate commands we still want interpreted, which
+          # stop-commands would otherwise suppress along with everything
+          # else.
+          STOP_TOKEN="$(uuidgen)"
+          echo "::stop-commands::$STOP_TOKEN"
+
+          echo "Issue number: $ISSUE_NUM"
           echo "Title: $(jq -r '.title' issue.json)"
           echo "State: $(jq -r '.state' issue.json)"
           echo "URL: $(jq -r '.url' issue.json)"
           echo "Body:"
-          # Untrusted text, printed as plain log output only -- see the
-          # workflow-level comment above for why this is safe.
           jq -r '.body // "(no body)"' issue.json
+
+          echo "::$STOP_TOKEN::"
           echo "::endgroup::"
 
           rm -f issue.json issue.err
@@ -76,18 +132,6 @@ jobs:
           echo "Commit SHA: ${{ github.sha }}"
           echo "Triggering actor: ${{ github.actor }}"
           echo "Git ref: ${{ github.ref }}"
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
 
       - name: Lint with ruff
         run: ruff check .
