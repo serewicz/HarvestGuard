@@ -1,0 +1,62 @@
+# Machine-readable counterpart to docs/AGENT_CONTRACT.md. The two must not
+# contradict each other; the contract is authoritative until reconciled.
+version: 1
+
+authority:
+  merge_to_main: human_only
+  product_boundary_changes: human_only
+  architecture_changes: human_only
+  security_tradeoffs: human_only
+  workflow_changes: human_only
+  secrets_changes: human_only
+  repository_settings_changes: human_only
+  destructive_operations: human_only
+
+agents:
+  builder:
+    provider: claude
+    role: builder
+    repository_write: feature_branch_only
+    max_fix_cycles: 2
+
+  reviewer:
+    provider: codex
+    role: principal_reviewer
+    repository_write: false
+    max_review_cycles: 2
+
+  security_reviewer:
+    provider: grok
+    role: ciso_qa
+    repository_write: false
+    max_review_cycles: 1
+
+security:
+  allow_customer_data_to_external_models: false
+  allow_raw_scan_results_to_external_models: false
+  allow_agents_to_manage_credentials: false
+  log_secret_values: false
+
+review:
+  require_exact_pr_sha: true
+  require_ci_green: true
+  require_principal_review: true
+  max_automated_correction_cycles: 2
+
+  security_review_required_paths:
+    - "scanner/**"
+    - "classifier/**"
+    - "code_analysis/**"
+    - "Dockerfile"
+    - "requirements*"
+    - ".github/**"
+    - "deploy/**"
+
+cost:
+  enforce_cycle_limits: true
+  require_human_on_budget_exhaustion: true
+  track_usage: true
+
+merge:
+  automatic: false
+  human_approval_required: true

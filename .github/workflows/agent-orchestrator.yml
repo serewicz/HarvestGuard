@@ -11,6 +11,11 @@ name: Agent Orchestrator
 # through `jq -r` and printed to the log below. It is never interpolated
 # into a `${{ }}` expression (the classic Actions script-injection vector)
 # and never passed to eval/sh, so nothing in it can execute as a command.
+#
+# V2.5 adds a policy gate: .agent-policy.yml (see docs/AGENT_CONTRACT.md for
+# the human-readable contract it implements) must exist, parse as YAML, and
+# satisfy a small set of required values before the workflow does anything
+# else -- dependency install and tests never run if the gate fails.
 on:
   workflow_dispatch:
     inputs:
@@ -30,6 +35,73 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+
+      - name: Validate agent policy
+        run: |
+          set -euo pipefail
+
+          if [ ! -f .agent-policy.yml ]; then
+            echo "::error::.agent-policy.yml is missing. Refusing to run without an agent policy in place."
+            exit 1
+          fi
+
+          # A minimal, transient install used only to parse the policy file
+          # itself -- distinct from, and gating, the project's own
+          # requirements.txt/requirements-dev.txt installed later.
+          python3 -m pip install --quiet pyyaml
+
+          python3 - <<'PYEOF'
+          import sys
+
+          import yaml
+
+          try:
+              with open(".agent-policy.yml") as f:
+                  policy = yaml.safe_load(f)
+          except yaml.YAMLError as exc:
+              print(f"::error::.agent-policy.yml is not valid YAML: {exc}")
+              sys.exit(1)
+
+          if not isinstance(policy, dict):
+              print("::error::.agent-policy.yml did not parse to a mapping.")
+              sys.exit(1)
+
+          def get(path):
+              node = policy
+              for key in path.split("."):
+                  if not isinstance(node, dict) or key not in node:
+                      return None
+                  node = node[key]
+              return node
+
+          # Required minimum: no-autonomous-merge and no-external-model
+          # customer-data leakage are the two guarantees this workflow's own
+          # governance depends on -- see docs/AGENT_CONTRACT.md's "Merge
+          # contract" and "External data" sections.
+          checks = {
+              "merge.automatic": (get("merge.automatic"), False),
+              "merge.human_approval_required": (get("merge.human_approval_required"), True),
+              "security.allow_customer_data_to_external_models": (
+                  get("security.allow_customer_data_to_external_models"), False
+              ),
+          }
+
+          failures = [
+              f"{path}: expected {expected!r}, got {actual!r}"
+              for path, (actual, expected) in checks.items()
+              if actual is not expected
+          ]
+
+          if failures:
+              print("::error::.agent-policy.yml failed required checks:")
+              for failure in failures:
+                  print(f"::error::  {failure}")
+              sys.exit(1)
+
+          print("Agent policy validated:")
+          for path, (actual, _expected) in checks.items():
+              print(f"  {path} = {actual}")
+          PYEOF
 
       - name: Validate issue number input
         env:
