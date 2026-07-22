@@ -4,11 +4,24 @@ name: Agent Orchestrator
 # secrets, no AI API calls -- see .github/workflows/ci.yml for the normal
 # push/pull_request CI this reuses the Python setup and dependency install
 # approach from.
+#
+# V2 adds a required issue_number input and reads that issue via `gh`, using
+# only the ephemeral, automatically-provided GITHUB_TOKEN (no secret added).
+# The issue body is untrusted, scanner-adjacent text: it is only ever piped
+# through `jq -r` and printed to the log below. It is never interpolated
+# into a `${{ }}` expression (the classic Actions script-injection vector)
+# and never passed to eval/sh, so nothing in it can execute as a command.
 on:
   workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "GitHub issue number to process"
+        required: true
+        type: number
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   orchestrate:
@@ -17,6 +30,45 @@ jobs:
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+
+      - name: Validate issue number input
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          if [ -z "${ISSUE_NUMBER:-}" ]; then
+            echo "::error::issue_number input was not provided."
+            exit 1
+          fi
+          if ! [[ "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::issue_number must be a positive integer, got: $ISSUE_NUMBER"
+            exit 1
+          fi
+
+      - name: Retrieve and print issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! gh issue view "$ISSUE_NUMBER" --repo "$REPO" \
+              --json number,title,state,url,body > issue.json 2> issue.err; then
+            echo "::error::Unable to retrieve issue #$ISSUE_NUMBER from $REPO (it may not exist, or may not be readable with issues: read)."
+            cat issue.err
+            exit 1
+          fi
+
+          echo "::group::Issue #$ISSUE_NUMBER"
+          echo "Issue number: $(jq -r '.number' issue.json)"
+          echo "Title: $(jq -r '.title' issue.json)"
+          echo "State: $(jq -r '.state' issue.json)"
+          echo "URL: $(jq -r '.url' issue.json)"
+          echo "Body:"
+          # Untrusted text, printed as plain log output only -- see the
+          # workflow-level comment above for why this is safe.
+          jq -r '.body // "(no body)"' issue.json
+          echo "::endgroup::"
+
+          rm -f issue.json issue.err
 
       - name: Print run context
         run: |
