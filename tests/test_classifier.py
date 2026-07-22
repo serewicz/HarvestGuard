@@ -35,6 +35,41 @@ def test_classify_text_ignores_plain_prose():
     assert counts == {}
 
 
+def _fake_slack_token() -> str:
+    """A Slack-token-shaped value (matches SLACK_TOKEN_RE) built from
+    separate pieces at import/call time, not as one matchable literal.
+
+    GitHub push protection (and most secret scanners) scan the raw text of
+    committed files for exactly this shape -- xox[baprs]-... -- regardless
+    of whether the value is real. Concatenating clearly-fake, non-random
+    segments means no single string in this file's source ever matches the
+    pattern, so this test proves the production regex still works without
+    committing anything a scanner would flag. See
+    demo/sample_target/sensitive/leaked_config.env's header comment for the
+    incident this addresses.
+    """
+    return "-".join(["xoxb", "FAKE0000000000", "TESTONLYNOTREAL"])
+
+
+def _fake_github_token() -> str:
+    """Same technique as _fake_slack_token(), for GitHub's gh[pousr]_... shape."""
+    return "ghp_" + "FAKE0000000000TESTONLYNOTREALVALUE00"
+
+
+def test_classify_text_detects_slack_token_shape_without_a_literal_in_source():
+    token = _fake_slack_token()
+    assert token.startswith("xoxb-")  # sanity check the helper built the expected shape
+    counts = classify_text(f"SLACK_TOKEN={token}")
+    assert counts.get("Slack Token") == 1
+
+
+def test_classify_text_detects_github_token_shape_without_a_literal_in_source():
+    token = _fake_github_token()
+    assert token.startswith("ghp_")
+    counts = classify_text(f"GITHUB_TOKEN={token}")
+    assert counts.get("GitHub Token") == 1
+
+
 def test_credit_card_luhn_validates_real_number_not_arbitrary_digits():
     assert is_valid_credit_card("4111 1111 1111 1111") is True  # known-valid test Visa number
     assert is_valid_credit_card("1234 5678 9012 3456") is False  # fails Luhn
