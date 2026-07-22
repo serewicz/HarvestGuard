@@ -338,16 +338,55 @@ def test_finding_id_differs_for_different_rule_id():
     assert a.finding_id != b.finding_id
 
 
-def test_finding_id_differs_for_different_evidence():
+def test_finding_id_unaffected_by_evidence_wording():
+    # Human-readable wording changes must not churn ids -- evidence is the
+    # prose description, rule_id is the machine-stable observation type.
     a = _finding(evidence="Encryption status observed: File-level (OpenSSL)")
-    b = _finding(evidence="Encryption status observed: Unencrypted")
-    assert a.finding_id != b.finding_id
+    b = _finding(evidence="Totally different human-readable phrasing of the same finding")
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_schema_version():
+    # Schema-format changes must not churn logical Finding ids.
+    a = _finding(schema_version="1.0.0")
+    b = _finding(schema_version="2.0.0")
+    assert a.finding_id == b.finding_id
 
 
 def test_finding_id_differs_for_different_location():
     a = _finding(location="/tmp/one.pem")
     b = _finding(location="/tmp/two.pem")
     assert a.finding_id != b.finding_id
+
+
+def test_finding_id_differs_for_different_identity_key():
+    a = _finding(identity_key="fingerprint-a")
+    b = _finding(identity_key="fingerprint-b")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_differs_when_identity_key_present_vs_absent():
+    a = _finding(identity_key=None)
+    b = _finding(identity_key="fingerprint-a")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_stable_for_same_identity_key_across_equivalent_scans():
+    early = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    late = datetime(2099, 6, 1, tzinfo=timezone.utc)
+    a = _finding(identity_key="fingerprint-a", observed_at=early)
+    b = _finding(identity_key="fingerprint-a", observed_at=late)
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_identity_key_is_not_a_business_field():
+    # identity_key must not leak into user-facing fields -- it's a pure
+    # technical discriminator, not a recommendation/business concept.
+    finding = _finding(identity_key="deadbeef")
+    payload = finding.to_dict()
+    assert payload["identity_key"] == "deadbeef"
+    assert "recommendation" not in payload
+    assert "business" not in json.dumps(payload).lower()
 
 
 # --- recursive immutability --------------------------------------------------
@@ -382,6 +421,90 @@ def test_unknowns_limitations_errors_cannot_be_mutated_in_place():
         finding.limitations.append("d")
     with pytest.raises(AttributeError):
         finding.errors.append("d")
+
+
+def _self_signed_cert_pem(common_name: str) -> bytes:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 1, 1, tzinfo=timezone.utc))
+        .not_valid_after(datetime(2030, 1, 1, tzinfo=timezone.utc))
+        .sign(key, hashes.SHA256())
+    )
+    return cert.public_bytes(serialization.Encoding.PEM)
+
+
+def test_pkcs12_bundle_with_multiple_certificates_has_unique_finding_ids():
+    # Regression test for a confirmed collision: bundle.p12 has a container
+    # certificate and an additional certificate with identical evidence text
+    # ("PKCS#12 ... certificate parsed"), the same location, asset_type, and
+    # scanner_name, and no rule_id -- only the fingerprint-derived
+    # identity_key distinguishes them.
+    findings = scan_crypto_inventory_findings(str(FIXTURE_DIR / "bundle.p12"))
+    cert_findings = [f for f in findings if f.asset_type == "PKCS#12 Certificate"]
+
+    assert len(cert_findings) == 2
+    assert cert_findings[0].identity_key is not None
+    assert cert_findings[0].identity_key != cert_findings[1].identity_key
+    assert len({f.finding_id for f in findings}) == len(findings)
+
+
+def test_pem_file_with_multiple_certificates_has_unique_finding_ids(tmp_path):
+    bundle = tmp_path / "chain.pem"
+    bundle.write_bytes(
+        _self_signed_cert_pem("cert-a.harvestguard.test")
+        + _self_signed_cert_pem("cert-b.harvestguard.test")
+    )
+
+    findings = scan_crypto_inventory_findings(str(bundle))
+    cert_findings = [f for f in findings if f.asset_type == "PEM Certificate"]
+
+    assert len(cert_findings) == 2
+    # Both certs share source_type/asset_type/location/scanner_name/rule_id;
+    # only identity_key (the fingerprint) disambiguates them.
+    assert cert_findings[0].rule_id == cert_findings[1].rule_id is None
+    assert cert_findings[0].identity_key != cert_findings[1].identity_key
+    assert cert_findings[0].finding_id != cert_findings[1].finding_id
+
+
+def test_pem_multi_certificate_finding_ids_stable_across_equivalent_scans(tmp_path):
+    bundle = tmp_path / "chain.pem"
+    bundle.write_bytes(
+        _self_signed_cert_pem("cert-a.harvestguard.test")
+        + _self_signed_cert_pem("cert-b.harvestguard.test")
+    )
+
+    first = {f.identity_key: f.finding_id for f in scan_crypto_inventory_findings(str(bundle))}
+    second = {f.identity_key: f.finding_id for f in scan_crypto_inventory_findings(str(bundle))}
+
+    assert first == second
+
+
+def test_code_analysis_same_line_multiple_rules_have_unique_finding_ids(monkeypatch):
+    # Regression test for a confirmed collision: a single line can match two
+    # independent semgrep rules (DES.new(key, DES.MODE_ECB) matches both
+    # weak-cipher-des and weak-cipher-ecb-mode), producing identical
+    # source_type/asset_type/location/scanner_name with no rule_id set.
+    df = pd.DataFrame([
+        {"Location": "/repo/cipher.py:3", "Rule": "weak-cipher-des", "Message": "DES is weak"},
+        {"Location": "/repo/cipher.py:3", "Rule": "weak-cipher-ecb-mode", "Message": "ECB is weak"},
+    ])
+
+    findings = normalize_code_analysis_df(df)
+
+    assert findings[0].location == findings[1].location
+    assert findings[0].rule_id != findings[1].rule_id
+    assert findings[0].finding_id != findings[1].finding_id
 
 
 def test_frozen_structures_still_serialize_to_plain_json_types():

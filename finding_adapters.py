@@ -152,6 +152,12 @@ def normalize_code_analysis_df(
             scanner_version="0.1.0",
             evidence=f"Semgrep rule matched: {row.get('Rule')}",
             confidence="High",
+            # Location alone (file:line) is not always a unique identity: two
+            # independent semgrep rules can legitimately match the same line
+            # (e.g. `DES.new(key, DES.MODE_ECB)` matches both weak-cipher-des
+            # and weak-cipher-ecb-mode). rule_id -- already computed by the
+            # scanner as the semgrep check id -- disambiguates them.
+            rule_id=row.get("Rule"),
             technical_metadata=_metadata(row, ["Rule", "Message"]),
         )
         for row in _records(df)
@@ -174,6 +180,16 @@ def normalize_crypto_inventory_df(
             evidence=row.get("Evidence", ""),
             confidence=row.get("Confidence", "Low"),
             errors=_errors(row.get("Errors")),
+            # location alone doesn't distinguish two certificates/keys parsed
+            # from the same PKCS#12 or PEM file -- both share source_type,
+            # asset_type, location, scanner_name, and rule_id (unset).
+            # Fingerprint is already computed by the scanner for every
+            # successfully-parsed certificate/key and is a stable, content-
+            # derived value, so it's a natural identity_key. Left unset (None)
+            # for findings without one (e.g. malformed/undecryptable blocks),
+            # matching identity_key's "when present" contract rather than
+            # fabricating a discriminator that isn't there.
+            identity_key=row.get("Fingerprint") or None,
             technical_metadata=_metadata(
                 row,
                 [

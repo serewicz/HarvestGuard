@@ -57,6 +57,17 @@ class NormalizedFinding:
     # (e.g. permission denied, volume-level fallback used).
     unknowns: list[str] = field(default_factory=list)
     limitations: list[str] = field(default_factory=list)
+    # Optional, scanner-supplied technical discriminator for when
+    # source_type/asset_type/location/scanner_name/rule_id alone don't
+    # distinguish two logically separate findings -- e.g. two certificates
+    # parsed from the same PKCS#12 or PEM file share every one of those
+    # fields. Must be stable across equivalent repeated scans and derived
+    # only from the observation itself (a cryptographic fingerprint is the
+    # canonical example) -- never from timestamps, confidence, ownership
+    # signals, unknowns/limitations, or other mutable environment metadata.
+    # Purely a technical identity discriminator: never a recommendation or
+    # business concept.
+    identity_key: str | None = None
 
     def __post_init__(self) -> None:
         observed_at = _normalize_timestamp(self.observed_at)
@@ -127,6 +138,7 @@ class NormalizedFinding:
             # already flattened above. New provenance fields can grow here
             # without perturbing the flat keys existing callers depend on.
             "provenance": self.provenance.to_dict(),
+            "identity_key": self.identity_key,
             "ownership_signals": _json_safe(self.ownership_signals),
             "unknowns": list(self.unknowns),
             "limitations": list(self.limitations),
@@ -136,39 +148,43 @@ class NormalizedFinding:
         }
 
     def _generate_id(self) -> str:
-        """Finding identity is deliberately narrow.
+        """Finding identity is deliberately narrow: a small, logical identity,
+        not "most of the object".
 
         It must survive re-scanning the same unchanged asset even when
         volatile facts differ between runs (a touched mtime, a chmod, a
-        different collection host, a resolved-vs-unresolved owner name,
-        a slightly reworded confidence rationale) -- none of those mean the
-        *finding* changed. It must still change whenever the logical finding
-        itself changes.
+        different collection host, a resolved-vs-unresolved owner name, a
+        slightly reworded confidence rationale or evidence sentence) -- none
+        of those mean the *finding* changed. It must still change whenever
+        the logical finding itself changes, including when two logically
+        separate findings would otherwise share every other identity field
+        (e.g. two certificates parsed from the same PKCS#12/PEM file --
+        identity_key exists precisely for this case).
 
-        Included (the canonical identity): schema_version (the contract
-        version), source_type, asset_type, location (the stable asset
-        identifier), scanner_name, rule_id (which detection path fired), and
-        evidence (the canonical observed claim -- "what was found").
+        Included (the canonical identity): source_type, asset_type, location
+        (the stable asset identifier), scanner_name, rule_id (which
+        detection path fired, or the equivalent machine-stable observation
+        type), and identity_key when the scanner supplied one.
 
-        Deliberately excluded: scan_id, scanner_version, observed_at
-        (collection timestamp), collection_source (collection environment),
-        confidence and confidence_rationale, ownership_signals, unknowns,
-        limitations, errors, and technical_metadata (size, mtime, mode, and
-        other scanner-observed detail). All of these can legitimately differ
-        between two scans of the exact same logical finding without the
-        finding itself having changed; scanner_version is excluded too so a
-        version bump alone (no change in what was actually detected) doesn't
-        invalidate every existing id.
+        Deliberately excluded: schema_version and evidence (human-readable
+        wording and schema-format changes must not churn ids -- if the
+        identity algorithm itself ever needs an incompatible redesign, that
+        should be an explicit id-algorithm/version concept, not
+        schema_version), scan_id, scanner_version, observed_at (collection
+        timestamp), collection_source (collection environment), confidence
+        and confidence_rationale, ownership_signals, unknowns, limitations,
+        errors, and technical_metadata (size, mtime, mode, and other
+        scanner-observed detail).
         """
         payload = {
-            "schema_version": self.schema_version,
             "source_type": self.source_type,
             "asset_type": self.asset_type,
             "location": self.location,
             "scanner_name": self.scanner_name,
             "rule_id": self.rule_id,
-            "evidence": self.evidence,
         }
+        if self.identity_key is not None:
+            payload["identity_key"] = self.identity_key
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
 

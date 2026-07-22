@@ -18,19 +18,36 @@ belong to later layers and must not be mixed into normalized findings.
   Its input is deliberately narrow -- a small canonical identity, not "most of
   the object" -- so the id survives re-scanning the same unchanged asset even
   when volatile facts differ between runs:
-  - **Included**: `schema_version`, `source_type`, `asset_type`, `location`
-    (the stable asset identifier), `scanner_name`, `rule_id` (which detection
-    path fired), and `evidence` (the canonical observed claim -- "what was
-    found").
-  - **Excluded**: `scan_id`, `scanner_version`, `observed_at` (collection
+  - **Included**: `source_type`, `asset_type`, `location` (the stable asset
+    identifier), `scanner_name`, `rule_id` (which detection path fired, or the
+    equivalent machine-stable observation type), and `identity_key` when the
+    scanner supplied one.
+  - **Excluded**: `schema_version` and `evidence` -- human-readable wording
+    changes and schema-format changes must not churn ids. (If the identity
+    algorithm itself ever needs an incompatible redesign, that should be an
+    explicit id-algorithm/version concept, not `schema_version`.) Also
+    excluded: `scan_id`, `scanner_version`, `observed_at` (collection
     timestamp), `collection_source` (collection environment), `confidence`
     and `confidence_rationale`, `ownership_signals`, `unknowns`,
     `limitations`, `errors`, and `technical_metadata` (size, mtime, mode, and
     other scanner-observed detail). A touched mtime, a `chmod`, scanning from
-    a different machine, or a resolved-vs-unresolved owner name must not
-    change a finding's identity.
+    a different machine, a reworded evidence sentence, or a
+    resolved-vs-unresolved owner name must not change a finding's identity.
   - See `NormalizedFinding._generate_id()` in `findings.py` for the exact
     payload.
+- `identity_key` (optional): a scanner-supplied technical discriminator for
+  when `source_type`/`asset_type`/`location`/`scanner_name`/`rule_id` alone
+  don't distinguish two logically separate findings -- e.g. two certificates
+  parsed from the same PKCS#12 or PEM file share every one of those fields.
+  Must be stable across equivalent repeated scans and derived only from the
+  observation itself (a cryptographic fingerprint is the canonical example)
+  -- never from timestamps, confidence, ownership signals, unknowns/
+  limitations, or other mutable environment metadata. Purely a technical
+  identity discriminator, never a recommendation or business concept. Used by
+  `crypto_inventory` (certificate/key fingerprint); unnecessary for scanners
+  where `location` is already unique per finding (filesystem, S3, GCS, Azure,
+  the sensitive-data classifier) or where `rule_id` already disambiguates
+  (code analysis -- see below).
 - `source_type`: scanner source family, such as `local_filesystem`, `aws_s3`,
   `gcs`, `azure_blob`, `local_sensitive_data`, `code_analysis`, or
   `crypto_inventory`.
@@ -144,6 +161,31 @@ Legacy DataFrame columns that represent assessment, such as `Risk`, are not
 copied into normalized findings. Existing scanner DataFrame behavior is
 preserved for compatibility, but the normalized model remains evidence-only.
 
+## Identity per scanner
+
+Each scanner adapter is responsible for supplying enough of `rule_id`/
+`identity_key` for its own findings to be distinguishable, since `evidence`
+and `technical_metadata` are excluded from `finding_id`. As of this writing:
+
+- **Filesystem, S3, GCS, Azure Blob, sensitive-data classifier**: `location`
+  is already unique per finding within a scan (one row per file/object), so
+  neither `rule_id` disambiguation tricks nor `identity_key` are needed
+  beyond what filesystem already sets for its own confidence/provenance
+  purposes.
+- **Code analysis**: `rule_id` is set to the semgrep check id. `location`
+  alone (`file:line`) is not always unique -- two independent rules can
+  match the same line (e.g. `DES.new(key, DES.MODE_ECB)` matches both
+  `weak-cipher-des` and `weak-cipher-ecb-mode`) -- confirmed by an existing
+  test fixture, not a hypothetical.
+- **Crypto inventory**: `identity_key` is set to the already-computed
+  certificate/key fingerprint when one exists. `location` alone is not
+  unique here either -- multiple certificates can be parsed from one PKCS#12
+  or PEM file with identical `source_type`/`asset_type`/`location`/
+  `scanner_name` and no `rule_id` -- confirmed by the `bundle.p12` fixture
+  (container + additional certificate). Findings without a computed
+  fingerprint (malformed/undecryptable blocks) do not get an `identity_key`;
+  see "Remaining identity risks" below.
+
 ## Immutability
 
 `NormalizedFinding` is a frozen dataclass, but `frozen=True` alone only stops
@@ -166,3 +208,20 @@ missing/NaN values become `null`.
 
 The model uses `schema_version = "1.0.0"`. Future changes should increment the
 schema version when they change field meaning or required structure.
+`schema_version` is deliberately excluded from `finding_id` -- see "Required
+Fields" above.
+
+## Remaining identity risks
+
+- **Crypto inventory, malformed/undecryptable blocks without a fingerprint**:
+  a certificate or key that fails to parse (e.g. two malformed PEM blocks in
+  the same file, or an encrypted private key with no passphrase available)
+  has no fingerprint to use as `identity_key`. Two such findings of the same
+  malformed sub-type in the same file would still collide on `finding_id`.
+  Not currently exercised by any fixture; would need a distinguishing
+  `identity_key` derived from something other than a successful parse (e.g.
+  a hash of the raw PEM block bytes) if it becomes a real scenario.
+- **Code analysis, same rule matching the same line twice**: `rule_id` (the
+  semgrep check id) disambiguates *different* rules on the same line, but
+  semgrep does not currently emit two results for the same rule at the same
+  location, so this isn't a demonstrated gap -- noted for completeness only.
