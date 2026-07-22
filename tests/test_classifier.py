@@ -56,6 +56,11 @@ def _fake_github_token() -> str:
     return "ghp_" + "FAKE0000000000TESTONLYNOTREALVALUE00"
 
 
+def _fake_aws_access_key() -> str:
+    """Same technique as _fake_slack_token(), for AWS's AKIA/ASIA + 16 chars shape."""
+    return "AKIA" + "FAKE0000FAKE0000"
+
+
 def test_classify_text_detects_slack_token_shape_without_a_literal_in_source():
     token = _fake_slack_token()
     assert token.startswith("xoxb-")  # sanity check the helper built the expected shape
@@ -68,6 +73,14 @@ def test_classify_text_detects_github_token_shape_without_a_literal_in_source():
     assert token.startswith("ghp_")
     counts = classify_text(f"GITHUB_TOKEN={token}")
     assert counts.get("GitHub Token") == 1
+
+
+def test_classify_text_detects_aws_access_key_shape_without_a_literal_in_source():
+    key = _fake_aws_access_key()
+    assert key.startswith("AKIA")
+    assert len(key) == 20  # AKIA + 16 chars, matching AWS_ACCESS_KEY_RE exactly
+    counts = classify_text(f"aws_access_key_id = {key}")
+    assert counts.get("AWS Access Key") == 1
 
 
 def test_credit_card_luhn_validates_real_number_not_arbitrary_digits():
