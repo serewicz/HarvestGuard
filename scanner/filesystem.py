@@ -333,10 +333,12 @@ def _observe_regular_file(
         limitations.append("ACL presence could not be portably determined on this platform.")
 
     return {
+        "Asset Type": "file",
         "Location": full_path,
         "Size": lst.st_size,
         "Modified": datetime.fromtimestamp(lst.st_mtime, tz=timezone.utc),
         "Encryption": encryption,
+        "Evidence": f"Encryption status observed: {encryption}",
         "Rule ID": rule_id,
         "Verification Rationale": verification_rationale,
         "Confidence": confidence,
@@ -365,10 +367,12 @@ def _degraded_record(
     stat'd). Never silently drop the entry -- record what happened instead.
     """
     return {
+        "Asset Type": "file",
         "Location": full_path,
         "Size": None,
         "Modified": None,
         "Encryption": "Unknown",
+        "Evidence": "Encryption status could not be observed; file metadata was inaccessible.",
         "Rule ID": "metadata_unavailable",
         "Verification Rationale": (
             "File metadata could not be read, so encryption status could not be observed."
@@ -398,6 +402,95 @@ def _degraded_record(
     }
 
 
+def _directory_traversal_error_record(
+    dir_path: str, collected_at: datetime, collection_source: str, exc: OSError
+) -> dict:
+    """A Finding for a directory os.walk could not list at all (e.g.
+    permission denied). Coverage gaps are reported explicitly rather than
+    silently treated as "no findings beneath this directory" -- no file-level
+    observations are fabricated for whatever the directory might contain.
+    """
+    return {
+        "Asset Type": "directory",
+        "Location": dir_path,
+        "Size": None,
+        "Modified": None,
+        "Encryption": None,
+        "Evidence": "Directory could not be traversed; its contents were not inspected.",
+        "Rule ID": "directory_traversal_error",
+        "Verification Rationale": f"os.walk reported {type(exc).__name__} listing this directory.",
+        "Confidence": "High",
+        "Confidence Rationale": (
+            "The traversal failure itself was directly observed; this is not "
+            "an inference about the directory's contents."
+        ),
+        "Repeatable": False,
+        "UID": None,
+        "Owner Name": None,
+        "GID": None,
+        "Group Name": None,
+        "Mode Octal": None,
+        "Permissions": None,
+        "ACL Present": None,
+        "Unknowns": [
+            "Encryption status of files beneath this directory cannot be "
+            "established because the directory could not be traversed.",
+        ],
+        "Limitations": [f"{type(exc).__name__}: {exc.strerror or exc}"],
+        "Collection Method": _COLLECTION_METHOD,
+        "Collection Source": collection_source,
+        "Collected At": collected_at,
+    }
+
+
+def _max_depth_limitation_record(
+    dir_path: str, collected_at: datetime, collection_source: str, max_depth: int
+) -> dict:
+    """A Finding marking a directory that exists but was not descended into
+    because it is beyond the configured scan depth boundary. Distinct from
+    _directory_traversal_error_record: this is an intentional, deterministic
+    configuration boundary, not a scanner error.
+    """
+    return {
+        "Asset Type": "directory",
+        "Location": dir_path,
+        "Size": None,
+        "Modified": None,
+        "Encryption": None,
+        "Evidence": (
+            f"Directory was not inspected because it exceeds the configured "
+            f"scan depth boundary (max_depth={max_depth})."
+        ),
+        "Rule ID": "max_depth_boundary",
+        "Verification Rationale": (
+            f"This directory's depth exceeds the configured max_depth={max_depth}."
+        ),
+        "Confidence": "High",
+        "Confidence Rationale": (
+            "The depth boundary is a configured scan parameter, directly "
+            "known rather than inferred."
+        ),
+        "Repeatable": True,
+        "UID": None,
+        "Owner Name": None,
+        "GID": None,
+        "Group Name": None,
+        "Mode Octal": None,
+        "Permissions": None,
+        "ACL Present": None,
+        "Unknowns": [
+            "Encryption status of files beneath this directory cannot be "
+            "established because it was outside the configured scan depth boundary.",
+        ],
+        "Limitations": [
+            f"Not inspected: scan depth boundary (max_depth={max_depth}) reached.",
+        ],
+        "Collection Method": _COLLECTION_METHOD,
+        "Collection Source": collection_source,
+        "Collected At": collected_at,
+    }
+
+
 def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
     """Hardened filesystem scan producing the full evidence record behind a
     trustworthy normalized Finding: provenance, confidence rationale,
@@ -409,18 +502,47 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
     symlink can read data outside the intended scan root. A permission
     failure or a file that disappears mid-scan still produces a Finding with
     a limitation, rather than silently vanishing from the results.
-    """
-    records = []
-    volume_status = _detect_volume_encryption(_volume_root(path))
-    collection_source = platform.node() or "local"
 
-    for root, dirs, files in os.walk(path, followlinks=False):
+    Coverage gaps are also reported explicitly rather than silently treated
+    as "no findings": a directory os.walk cannot list at all produces a
+    directory-level Finding with a limitation (see
+    _directory_traversal_error_record), and a directory that exists but sits
+    beyond max_depth produces a distinct directory-level Finding noting the
+    configured boundary (see _max_depth_limitation_record). Neither
+    fabricates file-level observations for what might be underneath.
+    """
+    records: list[dict] = []
+    volume_status = _detect_volume_encryption(_volume_root(path))
+    # Describes the scanned target, not the machine running the scan --
+    # collection_source must not leak workstation identity, and the same
+    # target scanned from two different machines should be recognizable as
+    # the same source.
+    collection_source = os.path.abspath(path)
+
+    def _on_walk_error(exc: OSError) -> None:
+        records.append(
+            _directory_traversal_error_record(
+                exc.filename or path, datetime.now(timezone.utc), collection_source, exc
+            )
+        )
+
+    for root, dirs, files in os.walk(path, onerror=_on_walk_error, followlinks=False):
         depth = root.count(os.sep) - path.count(os.sep)
+
+        if depth >= max_depth and dirs:
+            for subdir in dirs:
+                records.append(
+                    _max_depth_limitation_record(
+                        os.path.join(root, subdir),
+                        datetime.now(timezone.utc),
+                        collection_source,
+                        max_depth,
+                    )
+                )
+        if depth >= max_depth:
+            dirs[:] = []
         if depth > max_depth:
-            dirs[:] = []
             continue
-        if depth == max_depth:
-            dirs[:] = []
 
         for name in files:
             full_path = os.path.join(root, name)

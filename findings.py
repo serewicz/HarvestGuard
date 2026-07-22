@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import pandas as pd
@@ -59,11 +60,15 @@ class NormalizedFinding:
 
     def __post_init__(self) -> None:
         observed_at = _normalize_timestamp(self.observed_at)
-        metadata = _json_safe(self.technical_metadata)
-        errors = [str(error) for error in self.errors if str(error)]
-        unknowns = [str(item) for item in self.unknowns if str(item)]
-        limitations = [str(item) for item in self.limitations if str(item)]
-        ownership_signals = _json_safe(self.ownership_signals)
+        # Recursively frozen (MappingProxyType/tuple) so `frozen=True` on this
+        # dataclass can't be bypassed by mutating a nested dict/list in place
+        # after construction. _json_safe() runs first to normalize numpy
+        # scalars/timestamps/NaN into plain values before freezing.
+        metadata = _freeze(_json_safe(self.technical_metadata))
+        errors = tuple(str(error) for error in self.errors if str(error))
+        unknowns = tuple(str(item) for item in self.unknowns if str(item))
+        limitations = tuple(str(item) for item in self.limitations if str(item))
+        ownership_signals = _freeze(_json_safe(self.ownership_signals))
         asset_name = self.asset_name or _asset_name_from_location(self.location)
 
         object.__setattr__(self, "observed_at", observed_at)
@@ -75,6 +80,29 @@ class NormalizedFinding:
         object.__setattr__(self, "asset_name", asset_name)
         if self.finding_id is None:
             object.__setattr__(self, "finding_id", self._generate_id())
+
+    @property
+    def provenance(self) -> "Provenance":
+        """Typed, read-only view over this Finding's provenance fields.
+
+        Additive convenience only: the underlying flat fields (scanner_name,
+        scanner_version, collection_method, collection_source, rule_id,
+        observed_at, repeatable, verification_rationale) are unchanged, so
+        every existing adapter call site keeps constructing NormalizedFinding
+        exactly as before. This gives callers that want structured access a
+        single `finding.provenance` object instead of reading each flat field
+        individually.
+        """
+        return Provenance(
+            scanner_name=self.scanner_name,
+            scanner_version=self.scanner_version,
+            collection_method=self.collection_method,
+            source=self.collection_source,
+            rule_id=self.rule_id,
+            collected_at=self.observed_at,
+            repeatable=self.repeatable,
+            verification_rationale=self.verification_rationale,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +123,10 @@ class NormalizedFinding:
             "rule_id": self.rule_id,
             "repeatable": self.repeatable,
             "verification_rationale": self.verification_rationale,
+            # Additive: a nested, typed view of the same provenance fields
+            # already flattened above. New provenance fields can grow here
+            # without perturbing the flat keys existing callers depend on.
+            "provenance": self.provenance.to_dict(),
             "ownership_signals": _json_safe(self.ownership_signals),
             "unknowns": list(self.unknowns),
             "limitations": list(self.limitations),
@@ -104,31 +136,74 @@ class NormalizedFinding:
         }
 
     def _generate_id(self) -> str:
+        """Finding identity is deliberately narrow.
+
+        It must survive re-scanning the same unchanged asset even when
+        volatile facts differ between runs (a touched mtime, a chmod, a
+        different collection host, a resolved-vs-unresolved owner name,
+        a slightly reworded confidence rationale) -- none of those mean the
+        *finding* changed. It must still change whenever the logical finding
+        itself changes.
+
+        Included (the canonical identity): schema_version (the contract
+        version), source_type, asset_type, location (the stable asset
+        identifier), scanner_name, rule_id (which detection path fired), and
+        evidence (the canonical observed claim -- "what was found").
+
+        Deliberately excluded: scan_id, scanner_version, observed_at
+        (collection timestamp), collection_source (collection environment),
+        confidence and confidence_rationale, ownership_signals, unknowns,
+        limitations, errors, and technical_metadata (size, mtime, mode, and
+        other scanner-observed detail). All of these can legitimately differ
+        between two scans of the exact same logical finding without the
+        finding itself having changed; scanner_version is excluded too so a
+        version bump alone (no change in what was actually detected) doesn't
+        invalidate every existing id.
+        """
         payload = {
             "schema_version": self.schema_version,
-            "scan_id": self.scan_id,
             "source_type": self.source_type,
             "asset_type": self.asset_type,
             "location": self.location,
-            "asset_name": self.asset_name,
             "scanner_name": self.scanner_name,
-            "scanner_version": self.scanner_version,
-            "evidence": self.evidence,
-            "confidence": self.confidence,
-            "confidence_rationale": self.confidence_rationale,
-            "collection_method": self.collection_method,
-            "collection_source": self.collection_source,
             "rule_id": self.rule_id,
-            "repeatable": self.repeatable,
-            "verification_rationale": self.verification_rationale,
-            "ownership_signals": self.ownership_signals,
-            "unknowns": self.unknowns,
-            "limitations": self.limitations,
-            "errors": self.errors,
-            "technical_metadata": self.technical_metadata,
+            "evidence": self.evidence,
         }
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """Typed grouping of a Finding's provenance fields.
+
+    NormalizedFinding keeps these as flat fields (see its docstring) for
+    backward compatibility with every existing scanner adapter's constructor
+    call; this type exists so callers that want structured access can use
+    `finding.provenance` instead of reading each flat field individually,
+    without requiring a wider migration of adapters in this change.
+    """
+
+    scanner_name: str
+    scanner_version: str
+    collection_method: str | None
+    source: str | None
+    rule_id: str | None
+    collected_at: str | datetime | None
+    repeatable: bool | None
+    verification_rationale: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scanner_name": self.scanner_name,
+            "scanner_version": self.scanner_version,
+            "collection_method": self.collection_method,
+            "source": self.source,
+            "rule_id": self.rule_id,
+            "collected_at": self.collected_at,
+            "repeatable": self.repeatable,
+            "verification_rationale": self.verification_rationale,
+        }
 
 
 def findings_to_dicts(findings: list[NormalizedFinding]) -> list[dict[str, Any]]:
@@ -154,10 +229,25 @@ def _asset_name_from_location(location: str) -> str | None:
     return name or None
 
 
-def _json_safe(value: Any) -> Any:
+def _freeze(value: Any) -> Any:
+    """Recursively convert dict/list/set into immutable equivalents so a
+    frozen dataclass's `frozen=True` can't be bypassed by mutating a nested
+    structure in place (e.g. `finding.technical_metadata["x"] = "y"` or
+    `finding.unknowns.append(...)`).
+    """
     if isinstance(value, dict):
+        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(v) for v in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze(v) for v in value)
+    return value
+
+
+def _json_safe(value: Any) -> Any:
+    if isinstance(value, (dict, MappingProxyType)):
         return {str(k): _json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, (list, tuple, set, frozenset)):
         return [_json_safe(v) for v in value]
     if isinstance(value, pd.Timestamp):
         return _normalize_timestamp(value)

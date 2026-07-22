@@ -10,30 +10,40 @@ from findings import NormalizedFinding
 def normalize_filesystem_df(
     df: pd.DataFrame, scan_id: str | None = None
 ) -> list[NormalizedFinding]:
-    return [
-        NormalizedFinding(
-            scan_id=scan_id,
-            source_type="local_filesystem",
-            asset_type="file",
-            location=row["Location"],
-            scanner_name="filesystem",
-            scanner_version="0.1.0",
-            observed_at=row.get("Collected At"),
-            evidence=f"Encryption status observed: {row.get('Encryption')}",
-            confidence=row.get("Confidence"),
-            confidence_rationale=row.get("Confidence Rationale"),
-            collection_method=row.get("Collection Method"),
-            collection_source=row.get("Collection Source"),
-            rule_id=row.get("Rule ID"),
-            verification_rationale=row.get("Verification Rationale"),
-            repeatable=row.get("Repeatable"),
-            ownership_signals=_filesystem_ownership_signals(row),
-            unknowns=row.get("Unknowns") or [],
-            limitations=row.get("Limitations") or [],
-            technical_metadata=_metadata(row, ["Size", "Modified", "Encryption"]),
-        )
-        for row in _records(df)
-    ]
+    return [_filesystem_finding_from_row(row, scan_id) for row in _records(df)]
+
+
+def _filesystem_finding_from_row(
+    row: dict[str, Any], scan_id: str | None
+) -> NormalizedFinding:
+    # "directory" rows are coverage-limitation findings (unreadable
+    # directory, or a directory beyond the configured max_depth boundary)
+    # -- they never have file-level metadata to report, unlike "file" rows.
+    asset_type = row.get("Asset Type", "file")
+    is_file = asset_type == "file"
+    return NormalizedFinding(
+        scan_id=scan_id,
+        source_type="local_filesystem",
+        asset_type=asset_type,
+        location=row["Location"],
+        scanner_name="filesystem",
+        scanner_version="0.1.0",
+        observed_at=row.get("Collected At"),
+        evidence=row.get("Evidence"),
+        confidence=row.get("Confidence"),
+        confidence_rationale=row.get("Confidence Rationale"),
+        collection_method=row.get("Collection Method"),
+        collection_source=row.get("Collection Source"),
+        rule_id=row.get("Rule ID"),
+        verification_rationale=row.get("Verification Rationale"),
+        repeatable=row.get("Repeatable"),
+        ownership_signals=_filesystem_ownership_signals(row) if is_file else {},
+        unknowns=row.get("Unknowns") or [],
+        limitations=row.get("Limitations") or [],
+        technical_metadata=(
+            _metadata(row, ["Size", "Modified", "Encryption"]) if is_file else {}
+        ),
+    )
 
 
 def _filesystem_ownership_signals(row: dict[str, Any]) -> dict[str, Any]:

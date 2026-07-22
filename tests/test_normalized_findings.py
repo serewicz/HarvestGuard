@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import code_analysis.scanner as code_scanner
 import scanner.azure_blob as azure_scanner
@@ -267,3 +268,165 @@ def test_crypto_inventory_adapter_preserves_scanner_specific_metadata():
     assert finding["technical_metadata"]["Algorithm"] == "RSA"
     assert finding["technical_metadata"]["Fingerprint"] == "abc123"
     assert finding["errors"] == []
+
+
+# --- finding_id: canonical identity -----------------------------------------
+
+
+def _finding(**overrides):
+    base = dict(
+        source_type="local_filesystem",
+        asset_type="file",
+        location="/tmp/example.pem",
+        scanner_name="filesystem",
+        scanner_version="0.1.0",
+        evidence="Encryption status observed: File-level (OpenSSL)",
+        confidence="High",
+        rule_id="file_signature:file_level_openssl",
+    )
+    base.update(overrides)
+    return NormalizedFinding(**base)
+
+
+def test_finding_id_stable_across_equivalent_construction():
+    assert _finding().finding_id == _finding().finding_id
+
+
+def test_finding_id_unaffected_by_scan_id():
+    assert _finding(scan_id="scan-a").finding_id == _finding(scan_id="scan-b").finding_id
+
+
+def test_finding_id_unaffected_by_observed_at():
+    a = _finding(observed_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    b = _finding(observed_at=datetime(2099, 1, 1, tzinfo=timezone.utc))
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_collection_source():
+    a = _finding(collection_source="host-a")
+    b = _finding(collection_source="host-b")
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_confidence_and_rationale():
+    a = _finding(confidence="High", confidence_rationale="a")
+    b = _finding(confidence="Low", confidence_rationale="b")
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_ownership_signals():
+    a = _finding(ownership_signals={"uid": 501, "mode_octal": "0644"})
+    b = _finding(ownership_signals={"uid": 0, "mode_octal": "0600"})
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_unknowns_and_limitations():
+    a = _finding(unknowns=["x"], limitations=["permission denied"])
+    b = _finding(unknowns=[], limitations=[])
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_technical_metadata():
+    a = _finding(technical_metadata={"Size": 12, "Modified": "2026-01-01T00:00:00+00:00"})
+    b = _finding(technical_metadata={"Size": 999, "Modified": "2099-01-01T00:00:00+00:00"})
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_differs_for_different_rule_id():
+    a = _finding(rule_id="file_signature:file_level_openssl")
+    b = _finding(rule_id="volume_status:unencrypted")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_differs_for_different_evidence():
+    a = _finding(evidence="Encryption status observed: File-level (OpenSSL)")
+    b = _finding(evidence="Encryption status observed: Unencrypted")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_differs_for_different_location():
+    a = _finding(location="/tmp/one.pem")
+    b = _finding(location="/tmp/two.pem")
+    assert a.finding_id != b.finding_id
+
+
+# --- recursive immutability --------------------------------------------------
+
+
+def test_technical_metadata_nested_structures_are_immutable():
+    finding = _finding(technical_metadata={"nested": {"a": [1, 2, 3]}})
+
+    with pytest.raises(TypeError):
+        finding.technical_metadata["nested"] = "mutated"
+    with pytest.raises(TypeError):
+        finding.technical_metadata["nested"]["a"] = "mutated"
+    with pytest.raises(TypeError):
+        finding.technical_metadata["nested"]["a"][0] = 99
+
+
+def test_ownership_signals_nested_structures_are_immutable():
+    finding = _finding(ownership_signals={"uid": 501, "mode_octal": "0644"})
+
+    with pytest.raises(TypeError):
+        finding.ownership_signals["uid"] = 0
+
+
+def test_unknowns_limitations_errors_cannot_be_mutated_in_place():
+    finding = _finding(
+        unknowns=["a"], limitations=["b"], errors=["c"],
+    )
+
+    with pytest.raises(AttributeError):
+        finding.unknowns.append("d")
+    with pytest.raises(AttributeError):
+        finding.limitations.append("d")
+    with pytest.raises(AttributeError):
+        finding.errors.append("d")
+
+
+def test_frozen_structures_still_serialize_to_plain_json_types():
+    finding = _finding(
+        technical_metadata={"nested": {"a": [1, 2, 3]}},
+        ownership_signals={"uid": 501},
+        unknowns=["u1"],
+        limitations=["l1"],
+        errors=["e1"],
+    )
+
+    payload = finding.to_dict()
+
+    assert payload["technical_metadata"] == {"nested": {"a": [1, 2, 3]}}
+    assert isinstance(payload["technical_metadata"]["nested"]["a"], list)
+    assert payload["ownership_signals"] == {"uid": 501}
+    assert payload["unknowns"] == ["u1"]
+    assert isinstance(payload["unknowns"], list)
+    json.dumps(payload)  # must not raise
+
+
+# --- typed Provenance ---------------------------------------------------------
+
+
+def test_provenance_property_mirrors_flat_fields_without_changing_constructor():
+    finding = _finding(
+        collection_method="stat + signature scan",
+        collection_source="/tmp",
+        rule_id="file_signature:file_level_openssl",
+        repeatable=True,
+        verification_rationale="Signature matched.",
+    )
+
+    provenance = finding.provenance
+
+    assert provenance.scanner_name == finding.scanner_name
+    assert provenance.scanner_version == finding.scanner_version
+    assert provenance.collection_method == finding.collection_method
+    assert provenance.source == finding.collection_source
+    assert provenance.rule_id == finding.rule_id
+    assert provenance.repeatable == finding.repeatable
+    assert provenance.verification_rationale == finding.verification_rationale
+
+    payload = finding.to_dict()
+    assert payload["provenance"] == provenance.to_dict()
+    # Flat keys remain for existing callers alongside the new nested view.
+    assert payload["collection_method"] == finding.collection_method
+    assert payload["rule_id"] == finding.rule_id
