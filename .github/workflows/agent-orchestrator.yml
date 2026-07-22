@@ -1,0 +1,44 @@
+name: Agent Orchestrator
+
+# Manual-only, read-only supervised run. No repository-write permissions, no
+# secrets, no AI API calls -- see .github/workflows/ci.yml for the normal
+# push/pull_request CI this reuses the Python setup and dependency install
+# approach from.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  orchestrate:
+    name: Agent Orchestrator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Print run context
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Triggering actor: ${{ github.actor }}"
+          echo "Git ref: ${{ github.ref }}"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check .
+
+      - name: Run tests
+        run: pytest -v
