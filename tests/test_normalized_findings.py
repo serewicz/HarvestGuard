@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import code_analysis.scanner as code_scanner
 import scanner.azure_blob as azure_scanner
@@ -59,7 +60,24 @@ def test_normalized_findings_do_not_include_assessment_fields():
             "Size": 12,
             "Modified": datetime(2026, 1, 1),
             "Encryption": "Unencrypted",
-            "Owner": 501,
+            "Confidence": "Medium",
+            "Confidence Rationale": "Volume-level fallback used.",
+            "UID": 501,
+            "Owner Name": "tim",
+            "GID": 20,
+            "Group Name": "staff",
+            "Mode Octal": "0644",
+            "Permissions": "-rw-r--r--",
+            "ACL Present": False,
+            "Rule ID": "volume_status:unencrypted",
+            "Verification Rationale": "Volume-level status applied.",
+            "Repeatable": True,
+            "Collection Method": "stat + leading-byte signature scan with volume-level fallback",
+            "Collection Source": "test-host",
+            "Collected At": datetime(2026, 1, 1),
+            "Unknowns": ["File-level encryption status cannot be established conclusively."],
+            "Limitations": [],
+            # Assessment data a scanner must not leak into the evidence layer.
             "Risk": "High",
         }]
     )
@@ -69,7 +87,17 @@ def test_normalized_findings_do_not_include_assessment_fields():
     assert "risk" not in finding
     assert "Risk" not in finding
     assert "Risk" not in finding["technical_metadata"]
+    assert "Risk" not in finding["ownership_signals"]
     assert finding["technical_metadata"]["Encryption"] == "Unencrypted"
+    assert finding["ownership_signals"] == {
+        "uid": 501,
+        "owner_name": "tim",
+        "gid": 20,
+        "group_name": "staff",
+        "mode_octal": "0644",
+        "permissions": "-rw-r--r--",
+        "acl_present": False,
+    }
 
 
 def test_filesystem_scanner_can_return_normalized_findings(tmp_path, monkeypatch):
@@ -240,3 +268,288 @@ def test_crypto_inventory_adapter_preserves_scanner_specific_metadata():
     assert finding["technical_metadata"]["Algorithm"] == "RSA"
     assert finding["technical_metadata"]["Fingerprint"] == "abc123"
     assert finding["errors"] == []
+
+
+# --- finding_id: canonical identity -----------------------------------------
+
+
+def _finding(**overrides):
+    base = dict(
+        source_type="local_filesystem",
+        asset_type="file",
+        location="/tmp/example.pem",
+        scanner_name="filesystem",
+        scanner_version="0.1.0",
+        evidence="Encryption status observed: File-level (OpenSSL)",
+        confidence="High",
+        rule_id="file_signature:file_level_openssl",
+    )
+    base.update(overrides)
+    return NormalizedFinding(**base)
+
+
+def test_finding_id_stable_across_equivalent_construction():
+    assert _finding().finding_id == _finding().finding_id
+
+
+def test_finding_id_unaffected_by_scan_id():
+    assert _finding(scan_id="scan-a").finding_id == _finding(scan_id="scan-b").finding_id
+
+
+def test_finding_id_unaffected_by_observed_at():
+    a = _finding(observed_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    b = _finding(observed_at=datetime(2099, 1, 1, tzinfo=timezone.utc))
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_collection_source():
+    a = _finding(collection_source="host-a")
+    b = _finding(collection_source="host-b")
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_confidence_and_rationale():
+    a = _finding(confidence="High", confidence_rationale="a")
+    b = _finding(confidence="Low", confidence_rationale="b")
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_ownership_signals():
+    a = _finding(ownership_signals={"uid": 501, "mode_octal": "0644"})
+    b = _finding(ownership_signals={"uid": 0, "mode_octal": "0600"})
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_unknowns_and_limitations():
+    a = _finding(unknowns=["x"], limitations=["permission denied"])
+    b = _finding(unknowns=[], limitations=[])
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_technical_metadata():
+    a = _finding(technical_metadata={"Size": 12, "Modified": "2026-01-01T00:00:00+00:00"})
+    b = _finding(technical_metadata={"Size": 999, "Modified": "2099-01-01T00:00:00+00:00"})
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_differs_for_different_rule_id():
+    a = _finding(rule_id="file_signature:file_level_openssl")
+    b = _finding(rule_id="volume_status:unencrypted")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_unaffected_by_evidence_wording():
+    # Human-readable wording changes must not churn ids -- evidence is the
+    # prose description, rule_id is the machine-stable observation type.
+    a = _finding(evidence="Encryption status observed: File-level (OpenSSL)")
+    b = _finding(evidence="Totally different human-readable phrasing of the same finding")
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_schema_version():
+    # Schema-format changes must not churn logical Finding ids.
+    a = _finding(schema_version="1.0.0")
+    b = _finding(schema_version="2.0.0")
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_differs_for_different_location():
+    a = _finding(location="/tmp/one.pem")
+    b = _finding(location="/tmp/two.pem")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_differs_for_different_identity_key():
+    a = _finding(identity_key="fingerprint-a")
+    b = _finding(identity_key="fingerprint-b")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_differs_when_identity_key_present_vs_absent():
+    a = _finding(identity_key=None)
+    b = _finding(identity_key="fingerprint-a")
+    assert a.finding_id != b.finding_id
+
+
+def test_finding_id_stable_for_same_identity_key_across_equivalent_scans():
+    early = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    late = datetime(2099, 6, 1, tzinfo=timezone.utc)
+    a = _finding(identity_key="fingerprint-a", observed_at=early)
+    b = _finding(identity_key="fingerprint-a", observed_at=late)
+    assert a.finding_id == b.finding_id
+
+
+def test_finding_id_unaffected_by_identity_key_is_not_a_business_field():
+    # identity_key must not leak into user-facing fields -- it's a pure
+    # technical discriminator, not a recommendation/business concept.
+    finding = _finding(identity_key="deadbeef")
+    payload = finding.to_dict()
+    assert payload["identity_key"] == "deadbeef"
+    assert "recommendation" not in payload
+    assert "business" not in json.dumps(payload).lower()
+
+
+# --- recursive immutability --------------------------------------------------
+
+
+def test_technical_metadata_nested_structures_are_immutable():
+    finding = _finding(technical_metadata={"nested": {"a": [1, 2, 3]}})
+
+    with pytest.raises(TypeError):
+        finding.technical_metadata["nested"] = "mutated"
+    with pytest.raises(TypeError):
+        finding.technical_metadata["nested"]["a"] = "mutated"
+    with pytest.raises(TypeError):
+        finding.technical_metadata["nested"]["a"][0] = 99
+
+
+def test_ownership_signals_nested_structures_are_immutable():
+    finding = _finding(ownership_signals={"uid": 501, "mode_octal": "0644"})
+
+    with pytest.raises(TypeError):
+        finding.ownership_signals["uid"] = 0
+
+
+def test_unknowns_limitations_errors_cannot_be_mutated_in_place():
+    finding = _finding(
+        unknowns=["a"], limitations=["b"], errors=["c"],
+    )
+
+    with pytest.raises(AttributeError):
+        finding.unknowns.append("d")
+    with pytest.raises(AttributeError):
+        finding.limitations.append("d")
+    with pytest.raises(AttributeError):
+        finding.errors.append("d")
+
+
+def _self_signed_cert_pem(common_name: str) -> bytes:
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(datetime(2026, 1, 1, tzinfo=timezone.utc))
+        .not_valid_after(datetime(2030, 1, 1, tzinfo=timezone.utc))
+        .sign(key, hashes.SHA256())
+    )
+    return cert.public_bytes(serialization.Encoding.PEM)
+
+
+def test_pkcs12_bundle_with_multiple_certificates_has_unique_finding_ids():
+    # Regression test for a confirmed collision: bundle.p12 has a container
+    # certificate and an additional certificate with identical evidence text
+    # ("PKCS#12 ... certificate parsed"), the same location, asset_type, and
+    # scanner_name, and no rule_id -- only the fingerprint-derived
+    # identity_key distinguishes them.
+    findings = scan_crypto_inventory_findings(str(FIXTURE_DIR / "bundle.p12"))
+    cert_findings = [f for f in findings if f.asset_type == "PKCS#12 Certificate"]
+
+    assert len(cert_findings) == 2
+    assert cert_findings[0].identity_key is not None
+    assert cert_findings[0].identity_key != cert_findings[1].identity_key
+    assert len({f.finding_id for f in findings}) == len(findings)
+
+
+def test_pem_file_with_multiple_certificates_has_unique_finding_ids(tmp_path):
+    bundle = tmp_path / "chain.pem"
+    bundle.write_bytes(
+        _self_signed_cert_pem("cert-a.harvestguard.test")
+        + _self_signed_cert_pem("cert-b.harvestguard.test")
+    )
+
+    findings = scan_crypto_inventory_findings(str(bundle))
+    cert_findings = [f for f in findings if f.asset_type == "PEM Certificate"]
+
+    assert len(cert_findings) == 2
+    # Both certs share source_type/asset_type/location/scanner_name/rule_id;
+    # only identity_key (the fingerprint) disambiguates them.
+    assert cert_findings[0].rule_id == cert_findings[1].rule_id is None
+    assert cert_findings[0].identity_key != cert_findings[1].identity_key
+    assert cert_findings[0].finding_id != cert_findings[1].finding_id
+
+
+def test_pem_multi_certificate_finding_ids_stable_across_equivalent_scans(tmp_path):
+    bundle = tmp_path / "chain.pem"
+    bundle.write_bytes(
+        _self_signed_cert_pem("cert-a.harvestguard.test")
+        + _self_signed_cert_pem("cert-b.harvestguard.test")
+    )
+
+    first = {f.identity_key: f.finding_id for f in scan_crypto_inventory_findings(str(bundle))}
+    second = {f.identity_key: f.finding_id for f in scan_crypto_inventory_findings(str(bundle))}
+
+    assert first == second
+
+
+def test_code_analysis_same_line_multiple_rules_have_unique_finding_ids(monkeypatch):
+    # Regression test for a confirmed collision: a single line can match two
+    # independent semgrep rules (DES.new(key, DES.MODE_ECB) matches both
+    # weak-cipher-des and weak-cipher-ecb-mode), producing identical
+    # source_type/asset_type/location/scanner_name with no rule_id set.
+    df = pd.DataFrame([
+        {"Location": "/repo/cipher.py:3", "Rule": "weak-cipher-des", "Message": "DES is weak"},
+        {"Location": "/repo/cipher.py:3", "Rule": "weak-cipher-ecb-mode", "Message": "ECB is weak"},
+    ])
+
+    findings = normalize_code_analysis_df(df)
+
+    assert findings[0].location == findings[1].location
+    assert findings[0].rule_id != findings[1].rule_id
+    assert findings[0].finding_id != findings[1].finding_id
+
+
+def test_frozen_structures_still_serialize_to_plain_json_types():
+    finding = _finding(
+        technical_metadata={"nested": {"a": [1, 2, 3]}},
+        ownership_signals={"uid": 501},
+        unknowns=["u1"],
+        limitations=["l1"],
+        errors=["e1"],
+    )
+
+    payload = finding.to_dict()
+
+    assert payload["technical_metadata"] == {"nested": {"a": [1, 2, 3]}}
+    assert isinstance(payload["technical_metadata"]["nested"]["a"], list)
+    assert payload["ownership_signals"] == {"uid": 501}
+    assert payload["unknowns"] == ["u1"]
+    assert isinstance(payload["unknowns"], list)
+    json.dumps(payload)  # must not raise
+
+
+# --- typed Provenance ---------------------------------------------------------
+
+
+def test_provenance_property_mirrors_flat_fields_without_changing_constructor():
+    finding = _finding(
+        collection_method="stat + signature scan",
+        collection_source="/tmp",
+        rule_id="file_signature:file_level_openssl",
+        repeatable=True,
+        verification_rationale="Signature matched.",
+    )
+
+    provenance = finding.provenance
+
+    assert provenance.scanner_name == finding.scanner_name
+    assert provenance.scanner_version == finding.scanner_version
+    assert provenance.collection_method == finding.collection_method
+    assert provenance.source == finding.collection_source
+    assert provenance.rule_id == finding.rule_id
+    assert provenance.repeatable == finding.repeatable
+    assert provenance.verification_rationale == finding.verification_rationale
+
+    payload = finding.to_dict()
+    assert payload["provenance"] == provenance.to_dict()
+    # Flat keys remain for existing callers alongside the new nested view.
+    assert payload["collection_method"] == finding.collection_method
+    assert payload["rule_id"] == finding.rule_id

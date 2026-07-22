@@ -10,21 +10,52 @@ from findings import NormalizedFinding
 def normalize_filesystem_df(
     df: pd.DataFrame, scan_id: str | None = None
 ) -> list[NormalizedFinding]:
-    return [
-        NormalizedFinding(
-            scan_id=scan_id,
-            source_type="local_filesystem",
-            asset_type="file",
-            location=row["Location"],
-            scanner_name="filesystem",
-            scanner_version="0.1.0",
-            observed_at=row.get("Modified"),
-            evidence=f"Encryption status observed: {row.get('Encryption')}",
-            confidence=_confidence_for_encryption(row.get("Encryption")),
-            technical_metadata=_metadata(row, ["Size", "Modified", "Encryption", "Owner"]),
-        )
-        for row in _records(df)
-    ]
+    return [_filesystem_finding_from_row(row, scan_id) for row in _records(df)]
+
+
+def _filesystem_finding_from_row(
+    row: dict[str, Any], scan_id: str | None
+) -> NormalizedFinding:
+    # "directory" rows are coverage-limitation findings (unreadable
+    # directory, or a directory beyond the configured max_depth boundary)
+    # -- they never have file-level metadata to report, unlike "file" rows.
+    asset_type = row.get("Asset Type", "file")
+    is_file = asset_type == "file"
+    return NormalizedFinding(
+        scan_id=scan_id,
+        source_type="local_filesystem",
+        asset_type=asset_type,
+        location=row["Location"],
+        scanner_name="filesystem",
+        scanner_version="0.1.0",
+        observed_at=row.get("Collected At"),
+        evidence=row.get("Evidence"),
+        confidence=row.get("Confidence"),
+        confidence_rationale=row.get("Confidence Rationale"),
+        collection_method=row.get("Collection Method"),
+        collection_source=row.get("Collection Source"),
+        rule_id=row.get("Rule ID"),
+        verification_rationale=row.get("Verification Rationale"),
+        repeatable=row.get("Repeatable"),
+        ownership_signals=_filesystem_ownership_signals(row) if is_file else {},
+        unknowns=row.get("Unknowns") or [],
+        limitations=row.get("Limitations") or [],
+        technical_metadata=(
+            _metadata(row, ["Size", "Modified", "Encryption"]) if is_file else {}
+        ),
+    )
+
+
+def _filesystem_ownership_signals(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "uid": row.get("UID"),
+        "owner_name": row.get("Owner Name"),
+        "gid": row.get("GID"),
+        "group_name": row.get("Group Name"),
+        "mode_octal": row.get("Mode Octal"),
+        "permissions": row.get("Permissions"),
+        "acl_present": row.get("ACL Present"),
+    }
 
 
 def normalize_s3_df(df: pd.DataFrame, scan_id: str | None = None) -> list[NormalizedFinding]:
@@ -121,6 +152,12 @@ def normalize_code_analysis_df(
             scanner_version="0.1.0",
             evidence=f"Semgrep rule matched: {row.get('Rule')}",
             confidence="High",
+            # Location alone (file:line) is not always a unique identity: two
+            # independent semgrep rules can legitimately match the same line
+            # (e.g. `DES.new(key, DES.MODE_ECB)` matches both weak-cipher-des
+            # and weak-cipher-ecb-mode). rule_id -- already computed by the
+            # scanner as the semgrep check id -- disambiguates them.
+            rule_id=row.get("Rule"),
             technical_metadata=_metadata(row, ["Rule", "Message"]),
         )
         for row in _records(df)
@@ -143,6 +180,16 @@ def normalize_crypto_inventory_df(
             evidence=row.get("Evidence", ""),
             confidence=row.get("Confidence", "Low"),
             errors=_errors(row.get("Errors")),
+            # location alone doesn't distinguish two certificates/keys parsed
+            # from the same PKCS#12 or PEM file -- both share source_type,
+            # asset_type, location, scanner_name, and rule_id (unset).
+            # Fingerprint is already computed by the scanner for every
+            # successfully-parsed certificate/key and is a stable, content-
+            # derived value, so it's a natural identity_key. Left unset (None)
+            # for findings without one (e.g. malformed/undecryptable blocks),
+            # matching identity_key's "when present" contract rather than
+            # fabricating a discriminator that isn't there.
+            identity_key=row.get("Fingerprint") or None,
             technical_metadata=_metadata(
                 row,
                 [
@@ -174,14 +221,3 @@ def _errors(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(item) for item in value if str(item)]
     return [part.strip() for part in str(value).split(";") if part.strip()]
-
-
-def _confidence_for_encryption(encryption: Any) -> str:
-    if encryption is None:
-        return "Low"
-    encryption_text = str(encryption)
-    if encryption_text == "Unknown":
-        return "Low"
-    if encryption_text.startswith("File-level"):
-        return "High"
-    return "Medium"
