@@ -94,6 +94,29 @@ def test_build_job_declares_outputs_publish_depends_on(build_job):
     assert "base_sha" in build_job["outputs"]
 
 
+def test_build_job_branch_output_references_the_branch_step(build_job):
+    # Regression test: the "branch" step is what actually computes and
+    # emits the branch name; a prior version wired the job-level output to
+    # steps.set_outputs.outputs.branch instead, a step that never wrote a
+    # "branch" key to $GITHUB_OUTPUT, so the output silently resolved to
+    # an empty string.
+    assert build_job["outputs"]["branch"] == "${{ steps.branch.outputs.branch }}"
+
+
+def test_branch_step_actually_emits_branch_to_github_output(build_job):
+    branch_step = next(s for s in build_job["steps"] if s.get("id") == "branch")
+    assert branch_step["name"] == "Determine implementation branch name"
+    assert 'echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"' in branch_step["run"]
+
+
+def test_publish_job_consumes_build_branch_output(publish_job):
+    combined = _all_run_text(publish_job)
+    assert "${{ needs.build.outputs.branch }}" in combined or any(
+        step.get("env", {}).get("BRANCH") == "${{ needs.build.outputs.branch }}"
+        for step in publish_job["steps"]
+    )
+
+
 def test_claude_code_action_runs_only_in_build(build_job, publish_job):
     assert any("claude-code-action" in u for u in _all_uses(build_job))
     assert not any("claude-code-action" in u for u in _all_uses(publish_job))

@@ -82,7 +82,7 @@ jobs:
       issues: read
     outputs:
       status: ${{ steps.set_outputs.outputs.status }}
-      branch: ${{ steps.set_outputs.outputs.branch }}
+      branch: ${{ steps.branch.outputs.branch }}
       base_sha: ${{ steps.set_outputs.outputs.base_sha }}
     steps:
       - name: Check out repo
