@@ -93,9 +93,10 @@ def test_scan_s3_bucket_findings_returns_findings_on_success(mock_client):
 
 
 @patch("scanner.cloud.boto3.client")
-def test_scan_s3_bucket_ignores_per_object_client_error(mock_client):
-    # A per-object head_object failure is not a scan-level failure: the object
-    # is skipped, but the scan still succeeds (no CloudScanError).
+def test_scan_s3_bucket_records_per_object_client_error(mock_client):
+    # A per-object head_object failure (e.g. AccessDenied) is a coverage gap:
+    # the object is skipped from results, but the failure is recorded so a
+    # caller can tell an incomplete scan from an empty bucket.
     client = MagicMock()
     client.list_objects_v2.return_value = {
         "Contents": [{"Key": "data.txt", "Size": 10, "LastModified": "2026-01-01"}]
@@ -103,6 +104,23 @@ def test_scan_s3_bucket_ignores_per_object_client_error(mock_client):
     client.head_object.side_effect = ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject")
     mock_client.return_value = client
 
-    findings = scan_s3_bucket_findings("my-bucket")
+    errors: list[str] = []
+    df = scan_s3_bucket("my-bucket", errors=errors)
 
-    assert findings == []
+    assert df.empty
+    assert errors and "s3://my-bucket/data.txt" in errors[0]
+
+
+@patch("scanner.cloud.boto3.client")
+def test_scan_s3_bucket_findings_raises_on_per_object_client_error(mock_client):
+    # The findings wrapper must not return empty/exit clean when head_object
+    # coverage failed: it propagates the coverage gap as a CloudScanError.
+    client = MagicMock()
+    client.list_objects_v2.return_value = {
+        "Contents": [{"Key": "data.txt", "Size": 10, "LastModified": "2026-01-01"}]
+    }
+    client.head_object.side_effect = ClientError({"Error": {"Code": "AccessDenied"}}, "HeadObject")
+    mock_client.return_value = client
+
+    with pytest.raises(CloudScanError):
+        scan_s3_bucket_findings("my-bucket")

@@ -435,6 +435,29 @@ def test_scan_type_s3_swallowed_failure_no_fail_on_error_exits_zero(capsys, monk
     assert json.loads(captured.out) == []
 
 
+def test_scan_type_s3_per_object_access_denied_exits_error(capsys, monkeypatch):
+    # Regression: a per-object head_object AccessDenied is a coverage gap, not a
+    # clean scan. The CLI must surface it as a nonzero exit rather than emitting
+    # an empty finding set and exiting 0.
+    from botocore.exceptions import ClientError
+
+    client = MagicMock()
+    client.list_objects_v2.return_value = {
+        "Contents": [{"Key": "data.txt", "Size": 10, "LastModified": "2026-01-01"}]
+    }
+    client.head_object.side_effect = ClientError(
+        {"Error": {"Code": "AccessDenied"}}, "HeadObject"
+    )
+    monkeypatch.setattr("scanner.cloud.boto3.client", lambda *a, **k: client)
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--json", "--quiet"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    # stdout stays valid JSON; the coverage failure is not silently dropped.
+    assert json.loads(captured.out) == []
+
+
 def test_scan_type_azure_invalid_target_is_usage_error(capsys):
     exit_code = harvestguard.main(["scan", "no-slash", "--type", "azure", "--json"])
 

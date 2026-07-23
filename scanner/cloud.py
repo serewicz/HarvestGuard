@@ -11,12 +11,22 @@ def scan_s3_bucket(bucket_name: str, prefix: str = "", errors: list[str] | None 
     """Scan S3 bucket for encryption status.
 
     A scan-level failure (auth/provider error) is swallowed so the Streamlit
-    dashboard degrades to an empty result. When ``errors`` is provided, the
-    failure is recorded there instead of printed, so a caller (the CLI) can
-    distinguish a failed scan from an empty bucket and report it explicitly.
+    dashboard degrades to an empty result. A per-object ``head_object`` failure
+    (for example AccessDenied on a single key) is also recorded, because it is a
+    coverage gap: the object's encryption status is unknown and its finding is
+    missing, so an empty or partial result would otherwise look like a clean
+    scan. When ``errors`` is provided, failures are recorded there instead of
+    printed, so a caller (the CLI) can distinguish a failed or incomplete scan
+    from an empty bucket and report it explicitly.
     """
     s3 = boto3.client('s3')
     results = []
+
+    def _record(message: str) -> None:
+        if errors is None:
+            print(message)
+        else:
+            errors.append(message)
 
     try:
         response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
@@ -32,14 +42,10 @@ def scan_s3_bucket(bucket_name: str, prefix: str = "", errors: list[str] | None 
                     "Encryption": enc_status,
                     "Risk": "Low" if enc_status != "None" else "High"
                 })
-            except ClientError:
-                pass
+            except ClientError as e:
+                _record(f"Error reading encryption status for s3://{bucket_name}/{key}: {e}")
     except Exception as e:
-        message = f"Error scanning S3: {e}"
-        if errors is None:
-            print(message)
-        else:
-            errors.append(message)
+        _record(f"Error scanning S3: {e}")
 
     return pd.DataFrame(results)
 
