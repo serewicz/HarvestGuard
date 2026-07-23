@@ -69,5 +69,12 @@ def scan_s3_bucket_findings(
     errors: list[str] = []
     df = scan_s3_bucket(bucket_name, prefix=prefix, errors=errors)
     if errors:
-        raise CloudScanError("; ".join(errors))
+        # Still a failure (the caller exits nonzero), but the findings
+        # gathered before the failure ride along on the exception instead
+        # of being discarded -- a later object/page failing must not erase
+        # the evidence already collected.
+        raise CloudScanError(
+            "; ".join(errors),
+            partial_findings=normalize_s3_df(df, scan_id=scan_id),
+        )
     return normalize_s3_df(df, scan_id=scan_id)

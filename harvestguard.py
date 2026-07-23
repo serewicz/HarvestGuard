@@ -264,6 +264,19 @@ def _run_scanners(
             findings.extend(scanner())
         except Exception as exc:
             scanner_errors.append(f"{scanner_name}: {exc}")
+            # A scanner that failed partway through may still have collected
+            # valid findings (CloudScanError.partial_findings). Keep them:
+            # the run still exits nonzero via scanner_errors, but evidence
+            # gathered before the failure is not discarded.
+            partial = getattr(exc, "partial_findings", ())
+            if partial:
+                findings.extend(partial)
+                if not quiet:
+                    print(
+                        f"Note: keeping {len(partial)} finding(s) {scanner_name} "
+                        "collected before it failed.",
+                        file=sys.stderr,
+                    )
             if not quiet:
                 print(f"Warning: {scanner_name} scanner failed: {exc}", file=sys.stderr)
     return findings

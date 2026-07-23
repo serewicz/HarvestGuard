@@ -15,4 +15,15 @@ class CloudScanError(RuntimeError):
     The ``*_findings`` wrappers therefore collect any swallowed scan-level
     error and raise this exception so callers (the CLI) can surface the
     failure via a nonzero exit code while keeping structured output valid.
+
+    ``partial_findings`` carries whatever findings were successfully
+    collected before the failure. A failure partway through a scan (a later
+    page, a later object) must not discard the evidence already gathered:
+    callers surface the error AND keep these findings -- the failure stays
+    a failure (nonzero exit), but valid partial results still appear in the
+    output rather than silently vanishing.
     """
+
+    def __init__(self, message: str, partial_findings=()):
+        super().__init__(message)
+        self.partial_findings = tuple(partial_findings)

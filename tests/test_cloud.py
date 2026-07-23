@@ -155,3 +155,55 @@ def test_scan_s3_bucket_findings_raises_on_per_object_client_error(mock_client):
 
     with pytest.raises(CloudScanError):
         scan_s3_bucket_findings("my-bucket")
+
+
+def _mixed_result_client():
+    """Page 1 yields one good finding; fetching page 2 hits an auth failure."""
+    client = MagicMock()
+    client.list_objects_v2.side_effect = [
+        {
+            "Contents": [{"Key": "good.txt", "Size": 10, "LastModified": "2026-01-01"}],
+            "IsTruncated": True,
+            "NextContinuationToken": "token-1",
+        },
+        ClientError({"Error": {"Code": "ExpiredToken"}}, "ListObjectsV2"),
+    ]
+    client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+    return client
+
+
+@patch("scanner.cloud.boto3.client")
+def test_mixed_result_scan_keeps_partial_findings_on_the_exception(mock_client):
+    # A later-page provider/auth failure is still a failure -- but the
+    # finding collected from page 1 must ride along on the exception, not
+    # be discarded with it.
+    mock_client.return_value = _mixed_result_client()
+
+    with pytest.raises(CloudScanError) as exc_info:
+        scan_s3_bucket_findings("my-bucket")
+
+    partial = exc_info.value.partial_findings
+    assert len(partial) == 1
+    assert partial[0].location == "s3://my-bucket/good.txt"
+    assert "ExpiredToken" in str(exc_info.value)
+
+
+@patch("scanner.cloud.boto3.client")
+def test_cli_mixed_result_keeps_partials_and_still_exits_nonzero(mock_client, capsys):
+    # End-to-end through the CLI (only boto3 stubbed): the valid page-1
+    # finding appears in parseable JSON stdout, scanner_errors reflects the
+    # page-2 failure, and the exit code is the scanner-error code -- the
+    # failure is surfaced, not silently converted to success.
+    import json
+
+    import harvestguard
+
+    mock_client.return_value = _mixed_result_client()
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--json", "--quiet"])
+
+    captured = capsys.readouterr()
+    assert exit_code == harvestguard.EXIT_SCAN_ERROR
+    payload = json.loads(captured.out)  # stdout stays machine-readable
+    locations = [f["location"] for f in payload]
+    assert "s3://my-bucket/good.txt" in locations
