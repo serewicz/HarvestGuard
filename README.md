@@ -94,8 +94,10 @@ evidence and must remain traceable back to it.
   containers, and JKS header evidence) with algorithm, key size, issuer,
   subject, expiration, fingerprint, confidence, and parsing errors. See
   [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
-- **Unified CLI** — runs local scanners through the normalized finding model
-  with summary, JSON, and professional Markdown report output. See
+- **Unified CLI** — runs any scan type (local filesystem, cryptographic
+  inventory, sensitive-data, code analysis, and S3/GCS/Azure Blob) through the
+  normalized finding model, with summary, JSON, and professional Markdown
+  report output and automation-friendly exit codes. See
   [docs/CLI.md](docs/CLI.md).
 - **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
   exposure scoring (High/Medium/Low) layered on top of encryption status.
@@ -133,8 +135,12 @@ pip install -e .
 # Run the dashboard
 streamlit run main.py
 
-# Or run a local CLI scan
+# Or run a local CLI scan (all local scanners)
 harvestguard scan ./tests/fixtures/crypto_inventory
+
+# Run a single scan type, or a cloud scan (uses provider default credentials)
+harvestguard scan ./tests/fixtures/crypto_inventory --type sensitive-data --json
+harvestguard scan my-bucket --type s3 --json findings.json
 
 # Write a Markdown evidence report
 harvestguard scan ./tests/fixtures/crypto_inventory --markdown report.md

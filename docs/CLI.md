@@ -1,8 +1,9 @@
 # HarvestGuard CLI
 
-HarvestGuard's unified CLI runs local scanners through the normalized finding
-model. It does not add storage, dashboard functionality, risk scoring, or
-executive reporting.
+HarvestGuard's unified CLI runs the same scanners as the Streamlit dashboard
+through the normalized finding model, from the command line, for repeatable
+diligence and CI workflows. It does not add storage, dashboard functionality,
+risk scoring, or executive reporting.
 
 ## Installation
 
@@ -30,25 +31,60 @@ python -m harvestguard scan ./target
 ## Usage
 
 ```bash
-harvestguard scan <path> [--summary] [--json [PATH]] [--markdown [PATH]] [--quiet] [--exclude <pattern>]
+harvestguard scan <target> [--type <type>] [--summary] [--json [PATH]] [--markdown [PATH]]
+                           [--max-depth N] [--prefix <prefix>] [--fail-on <policy>]
+                           [--quiet] [--exclude <pattern>]
 ```
 
-The `scan` command runs current local scanners:
+The `--type` option selects which scanner to run (default `all`):
 
-- local filesystem encryption evidence
-- cryptographic asset inventory
-- sensitive-data category detection
-- local Semgrep crypto code analysis
+| `--type`           | Target             | Scanner                              |
+| ------------------ | ------------------ | ------------------------------------ |
+| `all` *(default)*  | local path         | all local scanners below             |
+| `filesystem`       | local path         | local filesystem encryption evidence |
+| `crypto-inventory` | local path         | cryptographic asset inventory        |
+| `sensitive-data`   | local path         | sensitive-data category detection    |
+| `code-analysis`    | local path         | local Semgrep crypto code analysis   |
+| `s3`               | bucket name        | AWS S3 object encryption status      |
+| `gcs`              | bucket name        | GCS object encryption status         |
+| `azure-blob`       | `account/container`| Azure Blob encryption status         |
 
-Cloud scanners remain available through their scanner modules. The first CLI
-command intentionally accepts a local path only.
+Cloud scans (`s3`, `gcs`, `azure-blob`) use each provider SDK's default
+credential resolution — the same credentials the dashboard uses. No credentials
+are read from CLI arguments.
+
+`--max-depth` bounds directory recursion for the depth-aware local scans
+(`all`, `filesystem`, `sensitive-data`). `--prefix` restricts a cloud scan to
+objects/blobs under a key prefix. The two options are mutually exclusive with
+each other's scan types and are rejected with a clear message when combined
+with an incompatible `--type`.
 
 ## Examples
 
-Default summary:
+Default summary (all local scanners):
 
 ```bash
 harvestguard scan ./target
+```
+
+Run a single local scan type:
+
+```bash
+harvestguard scan ./target --type sensitive-data --json --quiet
+```
+
+Scan a cloud bucket/container (uses provider default credentials):
+
+```bash
+harvestguard scan my-bucket --type s3 --prefix reports/ --json findings.json
+harvestguard scan my-bucket --type gcs --json --quiet
+harvestguard scan mystorageacct/mycontainer --type azure-blob --json --quiet
+```
+
+Bound local recursion depth:
+
+```bash
+harvestguard scan ./target --type filesystem --max-depth 1 --summary
 ```
 
 Example output:
@@ -113,10 +149,24 @@ The Markdown report includes:
 
 ## Exit Codes
 
-- `0`: scan completed without scanner-level failures.
-- `1`: at least one scanner failed, but other recoverable scanner results were
-  returned.
-- `2`: invalid CLI usage, such as a path that does not exist.
+Exit codes distinguish invalid input from scan-execution problems so callers can
+automate follow-up:
+
+- `0`: scan completed without triggering the failure policy.
+- `1`: the `--fail-on` policy was triggered (see below).
+- `2`: invalid CLI usage — unknown arguments, a local path that does not exist,
+  a malformed `azure-blob` target, an incompatible option/`--type` combination,
+  or an output file that could not be written.
+
+The `--fail-on` policy controls when a completed scan exits `1`:
+
+- `error` *(default)*: exit `1` if any scanner failed, otherwise `0`.
+- `findings`: exit `1` if any findings were emitted or any scanner failed.
+- `never`: always exit `0` once the input is valid (invalid input still `2`).
+
+A single scanner failing does not abort the run: remaining scanners still
+execute and their findings are reported, with the failure recorded as a scanner
+warning in the summary and Markdown report.
 
 ## Output Notes
 
