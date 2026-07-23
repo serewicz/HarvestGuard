@@ -94,8 +94,9 @@ evidence and must remain traceable back to it.
   containers, and JKS header evidence) with algorithm, key size, issuer,
   subject, expiration, fingerprint, confidence, and parsing errors. See
   [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
-- **Unified CLI** — runs local scanners through the normalized finding model
-  with summary, JSON, and professional Markdown report output. See
+- **Unified CLI** — runs any local or cloud scanner (`--type`) through the
+  normalized finding model with summary, JSON, and professional Markdown
+  report output, plus automation-friendly exit codes. See
   [docs/CLI.md](docs/CLI.md).
 - **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
   exposure scoring (High/Medium/Low) layered on top of encryption status.
@@ -138,6 +139,12 @@ harvestguard scan ./tests/fixtures/crypto_inventory
 
 # Write a Markdown evidence report
 harvestguard scan ./tests/fixtures/crypto_inventory --markdown report.md
+
+# Run a specific scan type and emit JSON (see docs/CLI.md for all --type values)
+harvestguard scan ./tests/fixtures/crypto_inventory --type crypto-inventory --json
+
+# Scan cloud storage (uses provider SDK credential defaults)
+harvestguard scan my-bucket --type s3 --json findings.json
 ```
 
 ### Running in a container

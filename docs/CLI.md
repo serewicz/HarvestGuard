@@ -1,8 +1,8 @@
 # HarvestGuard CLI
 
-HarvestGuard's unified CLI runs local scanners through the normalized finding
-model. It does not add storage, dashboard functionality, risk scoring, or
-executive reporting.
+HarvestGuard's unified CLI runs the existing local and cloud scanners through
+the normalized finding model. It does not add new scanners, storage, dashboard
+functionality, risk scoring, or executive reporting.
 
 ## Installation
 
@@ -30,18 +30,36 @@ python -m harvestguard scan ./target
 ## Usage
 
 ```bash
-harvestguard scan <path> [--summary] [--json [PATH]] [--markdown [PATH]] [--quiet] [--exclude <pattern>]
+harvestguard scan <target> [--type <scan-type>] [--max-depth N] [--prefix PREFIX] \
+  [--summary] [--json [PATH]] [--markdown [PATH]] [--quiet] [--exclude <pattern>]
 ```
 
-The `scan` command runs current local scanners:
+`--type` selects which scanner runs (default: `all`):
 
-- local filesystem encryption evidence
-- cryptographic asset inventory
-- sensitive-data category detection
-- local Semgrep crypto code analysis
+| Scan type | Target | Scanner |
+| --- | --- | --- |
+| `all` (default) | local path | every local scanner below |
+| `filesystem` | local path | local filesystem encryption evidence |
+| `crypto-inventory` | local path | cryptographic asset inventory |
+| `sensitive-data` | local path | sensitive-data category detection |
+| `code-analysis` | local path | local Semgrep crypto code analysis |
+| `s3` | bucket name | AWS S3 object encryption status |
+| `gcs` | bucket name | GCS object encryption status |
+| `azure-blob` | `account/container` | Azure Blob encryption status |
 
-Cloud scanners remain available through their scanner modules. The first CLI
-command intentionally accepts a local path only.
+For local scan types `TARGET` is a file or directory path; for cloud scan
+types it is a bucket or container reference. Azure Blob targets use the form
+`account/container`; the CLI assembles the
+`https://<account>.blob.core.windows.net` endpoint for you.
+
+`--max-depth` limits directory recursion for the `filesystem` and
+`sensitive-data` scans (default `3`); it is ignored by scan types that do not
+walk directories. `--prefix` filters objects/blobs for the cloud scan types
+and is ignored for local scans.
+
+Cloud scans use the provider SDK credential defaults (for example the AWS,
+Google Cloud, or Azure credential chains). No credentials are read from CLI
+arguments, and the CLI never enables telemetry.
 
 ## Examples
 
@@ -98,6 +116,30 @@ Write a professional Markdown evidence report:
 harvestguard scan ./target --markdown report.md --exclude "vendor/*"
 ```
 
+Run only the sensitive-data scanner, limiting recursion depth:
+
+```bash
+harvestguard scan ./target --type sensitive-data --max-depth 2 --json
+```
+
+Scan an S3 bucket (using the AWS SDK credential chain), filtered by prefix:
+
+```bash
+harvestguard scan my-bucket --type s3 --prefix data/ --json findings.json
+```
+
+Scan a GCS bucket:
+
+```bash
+harvestguard scan my-bucket --type gcs --json
+```
+
+Scan an Azure Blob container:
+
+```bash
+harvestguard scan mystorageaccount/mycontainer --type azure-blob --json
+```
+
 The Markdown report includes:
 
 - Executive Summary
@@ -114,9 +156,11 @@ The Markdown report includes:
 ## Exit Codes
 
 - `0`: scan completed without scanner-level failures.
-- `1`: at least one scanner failed, but other recoverable scanner results were
-  returned.
-- `2`: invalid CLI usage, such as a path that does not exist.
+- `1`: a scanner failed during execution (for example a cloud scanner raised an
+  error). Any recoverable results are still emitted.
+- `2`: invalid CLI usage, such as an unknown `--type`, a negative
+  `--max-depth`, a local path that does not exist, a malformed Azure Blob
+  target, or an output file that could not be written.
 
 ## Output Notes
 
