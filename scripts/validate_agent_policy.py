@@ -163,10 +163,13 @@ def validate(policy: dict[str, Any]) -> list[str]:
     if missing_roles:
         failures.append(f"Missing required agent role(s): {', '.join(missing_roles)}")
 
+    # Ceiling raised from 2 to 3 with Tim's explicit authorization (the
+    # orchestrator's three-cycle correction loop; see docs/AGENT_CONTRACT.md
+    # "Cost governance", updated in the same change).
     cycles = _get(policy, "review.max_automated_correction_cycles")
-    if not _is_strict_int(cycles) or cycles > 2:
+    if not _is_strict_int(cycles) or cycles > 3:
         failures.append(
-            f"review.max_automated_correction_cycles: expected an integer <= 2, got {cycles!r}"
+            f"review.max_automated_correction_cycles: expected an integer <= 3, got {cycles!r}"
         )
 
     return failures

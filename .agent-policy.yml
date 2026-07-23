@@ -17,13 +17,13 @@ agents:
     provider: claude
     role: builder
     repository_write: feature_branch_only
-    max_fix_cycles: 2
+    max_fix_cycles: 3
 
   reviewer:
     provider: codex
     role: principal_reviewer
     repository_write: false
-    max_review_cycles: 2
+    max_review_cycles: 3
 
   security_reviewer:
     provider: grok
@@ -41,7 +41,7 @@ review:
   require_exact_pr_sha: true
   require_ci_green: true
   require_principal_review: true
-  max_automated_correction_cycles: 2
+  max_automated_correction_cycles: 3
 
   security_review_required_paths:
     - "scanner/**"

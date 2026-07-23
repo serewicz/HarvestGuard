@@ -60,7 +60,7 @@ def _valid_policy() -> dict:
             "require_exact_pr_sha": True,
             "require_ci_green": True,
             "require_principal_review": True,
-            "max_automated_correction_cycles": 2,
+            "max_automated_correction_cycles": 3,
             "security_review_required_paths": ["scanner/**"],
         },
         "cost": {
@@ -177,8 +177,8 @@ def test_require_exact_pr_sha_false_fails():
 
 
 # 13. correction cycles >2 fails
-def test_max_automated_correction_cycles_above_two_fails():
-    policy = _set(_valid_policy(), "review.max_automated_correction_cycles", 3)
+def test_max_automated_correction_cycles_above_three_fails():
+    policy = _set(_valid_policy(), "review.max_automated_correction_cycles", 4)
     failures = validate(policy)
     assert any("max_automated_correction_cycles" in f for f in failures)
 
