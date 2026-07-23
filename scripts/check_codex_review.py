@@ -23,7 +23,11 @@ place this is currently invoked from.
 main() intentionally never prints the arbitrary model-generated text in
 `blockers`/`important`/`follow_up`/`summary` -- only counts and the status/
 SHA. The full text is preserved in the workflow's uploaded review artifact,
-not the Actions run log.
+not the Actions run log. The same rule applies to *malformed* output:
+validation errors name the field and the expected constraint (plus at most
+the actual Python type name), never the field's value or repr -- a
+malformed field is still model-controlled text, and an error message is
+still a log line.
 """
 
 from __future__ import annotations
@@ -76,24 +80,40 @@ def check_schema(review: dict[str, Any]) -> list[str]:
         # than produce a wall of misleading "missing" noise.
         return [f"Missing required field(s): {', '.join(missing)}"]
 
+    # Failure messages below name only the field, the expected constraint,
+    # and at most the actual Python type name -- never the value itself or
+    # its repr. Malformed or not, these fields are model-controlled text,
+    # and these messages land in the Actions run log.
     failures: list[str] = []
 
     status = review.get("status")
     if status not in VALID_STATUSES:
-        failures.append(f"status: expected one of {VALID_STATUSES}, got {status!r}")
+        failures.append(
+            f"status: must be one of {VALID_STATUSES}, got type {type(status).__name__}"
+        )
 
     reviewed_sha = review.get("reviewed_sha")
     if not isinstance(reviewed_sha, str) or not reviewed_sha.strip():
-        failures.append(f"reviewed_sha: expected a non-empty string, got {reviewed_sha!r}")
+        failures.append(
+            f"reviewed_sha: must be a non-empty string, got type {type(reviewed_sha).__name__}"
+        )
 
     for field in LIST_FIELDS:
         value = review.get(field)
-        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-            failures.append(f"{field}: expected a list of strings, got {value!r}")
+        if not isinstance(value, list):
+            failures.append(f"{field}: must be a list of strings, got type {type(value).__name__}")
+        elif not all(isinstance(item, str) for item in value):
+            bad_types = sorted({type(item).__name__ for item in value if not isinstance(item, str)})
+            failures.append(
+                f"{field}: must be a list of strings, "
+                f"got a list containing non-string type(s): {', '.join(bad_types)}"
+            )
 
     summary = review.get("summary")
     if not isinstance(summary, str) or not summary.strip():
-        failures.append("summary: expected a non-empty string")
+        failures.append(
+            f"summary: must be a non-empty string, got type {type(summary).__name__}"
+        )
 
     return failures
 
@@ -106,11 +126,14 @@ def check_ready_to_merge(review: dict[str, Any], expected_sha: str) -> list[str]
     ready to proceed. FOLLOW_UP items never block."""
     failures: list[str] = []
 
+    # The expected SHA is workflow-controlled (from needs.publish.outputs)
+    # and safe to print; the review's own reviewed_sha is model-controlled
+    # arbitrary text and is deliberately not echoed back.
     reviewed_sha = review.get("reviewed_sha")
     if reviewed_sha != expected_sha:
         failures.append(
-            f"reviewed_sha mismatch: expected {expected_sha!r}, got {reviewed_sha!r} -- "
-            "Codex must review the exact PR head SHA."
+            f"reviewed_sha mismatch: expected {expected_sha!r}, got a value that does not "
+            "match -- Codex must review the exact PR head SHA."
         )
 
     status = review.get("status")
@@ -153,9 +176,16 @@ def main(argv: list[str] | None = None) -> int:
     # printed to the run log -- never the arbitrary model-generated text in
     # blockers/important/follow_up/summary. That full text is preserved in
     # the uploaded review artifact instead (see the workflow's "Upload
-    # Codex review artifact" step), not the Actions log.
+    # Codex review artifact" step), not the Actions log. status is safe to
+    # print here (schema just constrained it to the three known enum
+    # values); reviewed_sha is only schema-checked to be a non-empty
+    # string, so it's still arbitrary model text unless it matches the
+    # workflow-controlled expected SHA -- print it only in that case.
     print(f"Codex review status: {review['status']}")
-    print(f"Reviewed SHA: {review['reviewed_sha']}")
+    if review["reviewed_sha"] == expected_sha:
+        print(f"Reviewed SHA: {review['reviewed_sha']}")
+    else:
+        print("Reviewed SHA: (does not match the expected PR head SHA)")
     print(f"Blockers: {len(review['blockers'])}")
     print(f"Important: {len(review['important'])}")
     print(f"Follow-up: {len(review['follow_up'])}")

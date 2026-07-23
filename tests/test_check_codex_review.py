@@ -296,3 +296,82 @@ def test_main_requires_two_arguments(capsys):
     rc = main([])
     assert rc == 2
     assert "usage" in capsys.readouterr().out
+
+
+# --- Malformed model-controlled values must never reach the run log ---------
+#
+# Validation error messages may name the field, the expected constraint, and
+# the actual Python *type* -- never the value itself. A malformed field is
+# still model-controlled text, and an error message is still a log line.
+
+MARKER = "LEAKED_MODEL_TEXT_MARKER_deadbeef"
+
+
+def _run_main_and_capture(tmp_path, capsys, review: dict) -> tuple[int, str]:
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(review))
+    rc = main([str(path), SHA])
+    captured = capsys.readouterr()
+    return rc, captured.out + captured.err
+
+
+def test_malformed_blockers_value_is_not_echoed(tmp_path, capsys):
+    rc, out = _run_main_and_capture(tmp_path, capsys, _valid_review(blockers=MARKER))
+    assert rc != 0
+    assert MARKER not in out
+    assert "blockers" in out
+
+
+def test_non_string_blocker_items_are_not_echoed(tmp_path, capsys):
+    rc, out = _run_main_and_capture(
+        tmp_path, capsys, _valid_review(blockers=[{"text": MARKER}, 42])
+    )
+    assert rc != 0
+    assert MARKER not in out
+    assert "non-string type" in out
+
+
+def test_malformed_important_value_is_not_echoed(tmp_path, capsys):
+    rc, out = _run_main_and_capture(tmp_path, capsys, _valid_review(important=MARKER))
+    assert rc != 0
+    assert MARKER not in out
+    assert "important" in out
+
+
+def test_malformed_follow_up_value_is_not_echoed(tmp_path, capsys):
+    rc, out = _run_main_and_capture(tmp_path, capsys, _valid_review(follow_up={"note": MARKER}))
+    assert rc != 0
+    assert MARKER not in out
+    assert "follow_up" in out
+
+
+def test_malformed_summary_value_is_not_echoed(tmp_path, capsys):
+    rc, out = _run_main_and_capture(tmp_path, capsys, _valid_review(summary=[MARKER]))
+    assert rc != 0
+    assert MARKER not in out
+    assert "summary" in out
+
+
+def test_malformed_status_value_is_not_echoed(tmp_path, capsys):
+    rc, out = _run_main_and_capture(tmp_path, capsys, _valid_review(status=MARKER))
+    assert rc != 0
+    assert MARKER not in out
+    assert "status" in out
+
+
+def test_malformed_reviewed_sha_value_is_not_echoed(tmp_path, capsys):
+    rc, out = _run_main_and_capture(tmp_path, capsys, _valid_review(reviewed_sha=[MARKER]))
+    assert rc != 0
+    assert MARKER not in out
+    assert "reviewed_sha" in out
+
+
+def test_mismatched_reviewed_sha_string_is_not_echoed(tmp_path, capsys):
+    # Schema-valid (a non-empty string) but wrong -- both the mismatch error
+    # and the "Reviewed SHA:" metadata line must not echo the model's value;
+    # only the workflow-controlled expected SHA may appear.
+    rc, out = _run_main_and_capture(tmp_path, capsys, _valid_review(reviewed_sha=MARKER))
+    assert rc != 0
+    assert MARKER not in out
+    assert "reviewed_sha mismatch" in out
+    assert SHA in out  # the expected (workflow-controlled) SHA is fine to print
