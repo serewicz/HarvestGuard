@@ -298,12 +298,11 @@ def test_review_job_validates_result_against_exact_pr_head_sha(review_job):
     assert validate_step["env"]["PR_HEAD_SHA"] == "${{ needs.publish.outputs.pr_head_sha }}"
 
 
-def test_codex_review_runs_after_validate_ci_checks(review_job):
+def test_codex_review_runs_before_validate_step(review_job):
     names = [s.get("name") for s in review_job["steps"]]
     codex_index = next(
         i for i, s in enumerate(review_job["steps"]) if "codex-action" in s.get("uses", "")
     )
-    assert names.index("Wait for required CI checks on the PR") < codex_index
     assert codex_index < names.index("Validate Codex review result")
 
 
@@ -328,4 +327,57 @@ def test_review_job_uploads_result_as_artifact_and_does_not_post_to_pr(review_jo
     assert any(u.startswith("actions/upload-artifact") for u in _all_uses(review_job))
     combined = _all_run_text(review_job)
     assert "gh pr comment" not in combined
-    assert "gh api" not in combined
+
+
+# --- CI gating hardening: fail closed on the exact PR head SHA -------------
+
+WAIT_STEP_NAME = "Wait for required CI checks on the exact PR head SHA"
+
+
+def test_ci_wait_step_uses_the_committed_required_ci_checker(review_job):
+    wait_step = next(s for s in review_job["steps"] if s.get("name") == WAIT_STEP_NAME)
+    assert "scripts/check_required_ci.py" in wait_step["run"]
+    assert "$PR_HEAD_SHA" in wait_step["run"]
+    assert wait_step["env"]["PR_HEAD_SHA"] == "${{ needs.publish.outputs.pr_head_sha }}"
+
+
+def test_ci_wait_step_fetches_check_runs_for_the_exact_sha_not_the_pr(review_job):
+    wait_step = next(s for s in review_job["steps"] if s.get("name") == WAIT_STEP_NAME)
+    # Regression guard: the earlier version used `gh pr checks`, which
+    # reflects the PR's *current* head, not necessarily the SHA this job
+    # actually checked out and is about to hand to Codex.
+    assert "commits/$PR_HEAD_SHA/check-runs" in wait_step["run"]
+    assert "gh pr checks" not in wait_step["run"]
+
+
+def test_ci_wait_step_is_bounded(review_job):
+    wait_step = next(s for s in review_job["steps"] if s.get("name") == WAIT_STEP_NAME)
+    assert "MAX_WAIT_SECONDS" in wait_step["run"]
+    assert "Timed out" in wait_step["run"]
+
+
+def test_ci_wait_step_precedes_codex_invocation(review_job):
+    names = [s.get("name") for s in review_job["steps"]]
+    codex_index = next(
+        i for i, s in enumerate(review_job["steps"]) if "codex-action" in s.get("uses", "")
+    )
+    assert names.index(WAIT_STEP_NAME) < codex_index
+
+
+# --- Codex step hardening ---------------------------------------------------
+
+
+def test_codex_step_sets_drop_sudo_safety_strategy_explicitly(review_job):
+    codex_step = next(s for s in review_job["steps"] if "codex-action" in s.get("uses", ""))
+    assert codex_step["with"]["safety-strategy"] == "drop-sudo"
+
+
+# --- Review artifact preserved even when validation fails closed -----------
+
+
+def test_upload_review_artifact_step_runs_even_on_failure(review_job):
+    upload_step = next(
+        s for s in review_job["steps"] if s.get("name") == "Upload Codex review artifact"
+    )
+    assert upload_step["if"] == "always()"
+    assert upload_step["with"]["if-no-files-found"] == "ignore"

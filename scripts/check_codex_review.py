@@ -1,17 +1,29 @@
 #!/usr/bin/env python3
-"""Validate the Codex Principal Reviewer's structured output.
+"""Validate the Codex Principal Reviewer's structured output, in two
+distinct stages:
 
-Reads the review JSON Codex wrote (path given as argv[1]) and checks it
-against the expected PR head SHA (given as argv[2]). Exit code 0 means the
-review is well-formed AND actually reviewed the exact commit the workflow
-checked out -- both matter: a well-formed review of the wrong commit is as
-useless as a malformed one, so `reviewed_sha` mismatching the expected SHA
-is treated as a hard failure, not a warning.
+1. check_schema() -- is the output well-formed at all (required fields
+   present, correctly typed, status a recognized enum value)? This says
+   nothing about whether the review itself is good news.
 
-This is read-only validation only -- it never modifies the repository,
-never comments on or mutates the PR, and has no merge/approve path. See
+2. check_ready_to_merge() -- given a well-formed review, is it actually a
+   clean, exact-SHA APPROVED verdict? This fails closed: BLOCKERS,
+   NEEDS_HUMAN, any non-empty `blockers`, any non-empty `important`, or a
+   `reviewed_sha` that doesn't exactly match the expected PR head SHA are
+   all treated as "not ready", not merely logged as a mixed result.
+   FOLLOW_UP items never block -- they are valid observations that belong
+   in separate work, not reasons to hold up this PR.
+
+Exit code 0 requires both stages to pass. This is read-only validation
+only -- it never modifies the repository, never comments on or mutates the
+PR, and has no merge/approve path. See
 .github/workflows/agent-orchestrator.yml's `review` job, which is the only
 place this is currently invoked from.
+
+main() intentionally never prints the arbitrary model-generated text in
+`blockers`/`important`/`follow_up`/`summary` -- only counts and the status/
+SHA. The full text is preserved in the workflow's uploaded review artifact,
+not the Actions run log.
 """
 
 from __future__ import annotations
@@ -54,9 +66,10 @@ def load_review(path: str | Path) -> dict[str, Any]:
     return review
 
 
-def check(review: dict[str, Any], expected_sha: str) -> list[str]:
-    """Return violation reasons; an empty list means the review is valid and
-    reviewed the expected commit."""
+def check_schema(review: dict[str, Any]) -> list[str]:
+    """Return shape-validity violations; an empty list means the review is
+    well-formed. Says nothing about whether the verdict itself is good news
+    -- see check_ready_to_merge() for that."""
     missing = [field for field in REQUIRED_FIELDS if field not in review]
     if missing:
         # Every other check below reads these fields -- bail out rather
@@ -70,11 +83,8 @@ def check(review: dict[str, Any], expected_sha: str) -> list[str]:
         failures.append(f"status: expected one of {VALID_STATUSES}, got {status!r}")
 
     reviewed_sha = review.get("reviewed_sha")
-    if reviewed_sha != expected_sha:
-        failures.append(
-            f"reviewed_sha mismatch: expected {expected_sha!r}, got {reviewed_sha!r} -- "
-            "Codex must review the exact PR head SHA."
-        )
+    if not isinstance(reviewed_sha, str) or not reviewed_sha.strip():
+        failures.append(f"reviewed_sha: expected a non-empty string, got {reviewed_sha!r}")
 
     for field in LIST_FIELDS:
         value = review.get(field)
@@ -84,6 +94,36 @@ def check(review: dict[str, Any], expected_sha: str) -> list[str]:
     summary = review.get("summary")
     if not isinstance(summary, str) or not summary.strip():
         failures.append("summary: expected a non-empty string")
+
+    return failures
+
+
+def check_ready_to_merge(review: dict[str, Any], expected_sha: str) -> list[str]:
+    """Return merge-readiness violations for a review already known to be
+    schema-valid. Fails closed: only an exact-SHA APPROVED review with no
+    blockers and no important findings counts as ready. BLOCKERS and
+    NEEDS_HUMAN are legitimate, well-formed outcomes -- they just aren't
+    ready to proceed. FOLLOW_UP items never block."""
+    failures: list[str] = []
+
+    reviewed_sha = review.get("reviewed_sha")
+    if reviewed_sha != expected_sha:
+        failures.append(
+            f"reviewed_sha mismatch: expected {expected_sha!r}, got {reviewed_sha!r} -- "
+            "Codex must review the exact PR head SHA."
+        )
+
+    status = review.get("status")
+    if status != "APPROVED":
+        failures.append(f"status is {status!r}, not APPROVED")
+
+    blockers = review.get("blockers") or []
+    if blockers:
+        failures.append(f"blockers is non-empty ({len(blockers)} item(s))")
+
+    important = review.get("important") or []
+    if important:
+        failures.append(f"important is non-empty ({len(important)} item(s))")
 
     return failures
 
@@ -102,26 +142,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"::error::{exc}")
         return 1
 
-    failures = check(review, expected_sha)
-    if failures:
-        print(f"::error::Codex review {path} failed validation:")
-        for failure in failures:
+    schema_failures = check_schema(review)
+    if schema_failures:
+        print(f"::error::Codex review {path} is not well-formed:")
+        for failure in schema_failures:
             print(f"::error::  {failure}")
         return 1
 
-    print(f"Codex review valid: {path}")
-    print(f"  status: {review['status']}")
-    print(f"  reviewed_sha: {review['reviewed_sha']}")
-    print(f"  blockers ({len(review['blockers'])}):")
-    for item in review["blockers"]:
-        print(f"    - {item}")
-    print(f"  important ({len(review['important'])}):")
-    for item in review["important"]:
-        print(f"    - {item}")
-    print(f"  follow_up ({len(review['follow_up'])}):")
-    for item in review["follow_up"]:
-        print(f"    - {item}")
-    print(f"  summary: {review['summary']}")
+    # Schema is valid from here on. Only concise structured metadata is
+    # printed to the run log -- never the arbitrary model-generated text in
+    # blockers/important/follow_up/summary. That full text is preserved in
+    # the uploaded review artifact instead (see the workflow's "Upload
+    # Codex review artifact" step), not the Actions log.
+    print(f"Codex review status: {review['status']}")
+    print(f"Reviewed SHA: {review['reviewed_sha']}")
+    print(f"Blockers: {len(review['blockers'])}")
+    print(f"Important: {len(review['important'])}")
+    print(f"Follow-up: {len(review['follow_up'])}")
+
+    ready_failures = check_ready_to_merge(review, expected_sha)
+    if ready_failures:
+        print("::error::Codex review is not ready to proceed:")
+        for failure in ready_failures:
+            print(f"::error::  {failure}")
+        return 1
+
+    print("Codex review is APPROVED for the exact PR head SHA with no blockers or important items.")
     return 0
 
 

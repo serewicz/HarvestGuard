@@ -1,13 +1,19 @@
 """Tests for scripts/check_codex_review.py, the gate between the Codex
 Principal Reviewer step and the rest of the `review` job in
 .github/workflows/agent-orchestrator.yml.
+
+check_schema() covers shape/well-formedness only. check_ready_to_merge()
+covers the fail-closed merge-readiness decision on top of an already
+schema-valid review. main() wires both together and never prints the
+arbitrary model-generated text (blockers/important/follow_up/summary) to
+the run log -- only counts and status/SHA.
 """
 
 from __future__ import annotations
 
 import json
 
-from scripts.check_codex_review import check, load_review, main
+from scripts.check_codex_review import check_ready_to_merge, check_schema, load_review, main
 
 SHA = "deadbeefcafefeed0000000000000000000000"
 
@@ -25,127 +31,118 @@ def _valid_review(**overrides) -> dict:
     return review
 
 
-def test_approved_review_of_expected_sha_passes():
-    assert check(_valid_review(), SHA) == []
+# --- check_schema(): shape/well-formedness only -----------------------------
 
 
-def test_blockers_status_still_passes_validation_when_sha_matches():
-    # Validation here is about well-formedness + exact-SHA match, not about
-    # whether the verdict itself was APPROVED -- BLOCKERS is a legitimate,
-    # valid outcome the workflow log/artifact should still faithfully record.
-    review = _valid_review(status="BLOCKERS", blockers=["Missing input validation on X."])
-    assert check(review, SHA) == []
+def test_schema_valid_for_approved_blockers_and_needs_human_alike():
+    # Schema validity is orthogonal to the verdict -- all three statuses are
+    # well-formed reviews.
+    assert check_schema(_valid_review(status="APPROVED")) == []
+    assert check_schema(_valid_review(status="BLOCKERS", blockers=["x"])) == []
+    assert check_schema(_valid_review(status="NEEDS_HUMAN")) == []
 
 
-def test_needs_human_status_still_passes_validation_when_sha_matches():
-    review = _valid_review(status="NEEDS_HUMAN", summary="Ambiguous product-boundary question.")
-    assert check(review, SHA) == []
-
-
-def test_unrecognized_status_fails():
-    reasons = check(_valid_review(status="LGTM"), SHA)
+def test_schema_unrecognized_status_fails():
+    reasons = check_schema(_valid_review(status="LGTM"))
     assert reasons
     assert any("status" in r for r in reasons)
 
 
-def test_reviewed_sha_mismatch_fails():
-    reasons = check(_valid_review(reviewed_sha="0" * 40), SHA)
-    assert reasons
-    assert any("reviewed_sha mismatch" in r for r in reasons)
-
-
-def test_reviewed_sha_missing_fails():
+def test_schema_missing_reviewed_sha_fails():
     review = _valid_review()
     del review["reviewed_sha"]
-    reasons = check(review, SHA)
+    reasons = check_schema(review)
     assert reasons
     assert any("Missing required field" in r and "reviewed_sha" in r for r in reasons)
 
 
-def test_missing_top_level_field_fails():
+def test_schema_empty_reviewed_sha_fails():
+    reasons = check_schema(_valid_review(reviewed_sha=""))
+    assert reasons
+    assert any("reviewed_sha" in r for r in reasons)
+
+
+def test_schema_missing_top_level_field_fails():
     review = _valid_review()
     del review["summary"]
-    reasons = check(review, SHA)
+    reasons = check_schema(review)
     assert reasons
     assert any("summary" in r for r in reasons)
 
 
-def test_blockers_not_a_list_of_strings_fails():
-    reasons = check(_valid_review(blockers="not a list"), SHA)
+def test_schema_blockers_not_a_list_of_strings_fails():
+    reasons = check_schema(_valid_review(blockers="not a list"))
     assert reasons
     assert any("blockers" in r for r in reasons)
 
 
-def test_blockers_with_non_string_items_fails():
-    reasons = check(_valid_review(blockers=[{"nested": "object"}]), SHA)
+def test_schema_blockers_with_non_string_items_fails():
+    reasons = check_schema(_valid_review(blockers=[{"nested": "object"}]))
     assert reasons
     assert any("blockers" in r for r in reasons)
 
 
-def test_empty_summary_fails():
-    reasons = check(_valid_review(summary=""), SHA)
+def test_schema_empty_summary_fails():
+    reasons = check_schema(_valid_review(summary=""))
     assert reasons
     assert any("summary" in r for r in reasons)
 
 
-def test_missing_result_file_fails_via_main(tmp_path, capsys):
-    rc = main([str(tmp_path / "does-not-exist.json"), SHA])
-    assert rc == 1
-    assert "::error::" in capsys.readouterr().out
+# --- check_ready_to_merge(): fail-closed merge-readiness decision ----------
 
 
-def test_empty_result_file_fails_via_main(tmp_path, capsys):
-    empty = tmp_path / "empty.json"
-    empty.write_text("")
-    rc = main([str(empty), SHA])
-    assert rc == 1
-    assert "empty" in capsys.readouterr().out
+def test_approved_with_empty_blockers_and_important_is_ready():
+    assert check_ready_to_merge(_valid_review(), SHA) == []
 
 
-def test_malformed_json_fails_via_main(tmp_path, capsys):
-    bad = tmp_path / "bad.json"
-    bad.write_text("{not valid json")
-    rc = main([str(bad), SHA])
-    assert rc == 1
-    assert "not valid JSON" in capsys.readouterr().out
+def test_approved_with_follow_up_only_is_still_ready():
+    review = _valid_review(follow_up=["a", "b", "c"])
+    assert check_ready_to_merge(review, SHA) == []
 
 
-def test_non_object_json_fails_via_main(tmp_path, capsys):
-    bad = tmp_path / "list.json"
-    bad.write_text("[1, 2, 3]")
-    rc = main([str(bad), SHA])
-    assert rc == 1
-    assert "JSON object" in capsys.readouterr().out
+def test_blockers_status_is_not_ready():
+    review = _valid_review(status="BLOCKERS", blockers=["Missing input validation on X."])
+    reasons = check_ready_to_merge(review, SHA)
+    assert reasons
+    assert any("not APPROVED" in r for r in reasons)
 
 
-def test_main_proceeds_for_valid_review_and_prints_summary(tmp_path, capsys):
-    review_path = tmp_path / "review.json"
-    review_path.write_text(json.dumps(_valid_review()))
-
-    rc = main([str(review_path), SHA])
-
-    out = capsys.readouterr().out
-    assert rc == 0
-    assert "Codex review valid" in out
-    assert SHA in out
+def test_needs_human_status_is_not_ready():
+    review = _valid_review(status="NEEDS_HUMAN")
+    reasons = check_ready_to_merge(review, SHA)
+    assert reasons
+    assert any("not APPROVED" in r for r in reasons)
 
 
-def test_main_fails_for_sha_mismatch_without_traceback(tmp_path, capsys):
-    review_path = tmp_path / "review.json"
-    review_path.write_text(json.dumps(_valid_review(reviewed_sha="wrongsha")))
-
-    rc = main([str(review_path), SHA])
-
-    out = capsys.readouterr().out
-    assert rc == 1
-    assert "::error::" in out
-    assert "reviewed_sha mismatch" in out
+def test_approved_with_a_blocker_is_not_ready():
+    # A malformed self-report where status says APPROVED but blockers is
+    # non-empty must still fail closed, not be trusted at face value.
+    review = _valid_review(status="APPROVED", blockers=["Should have been BLOCKERS."])
+    reasons = check_ready_to_merge(review, SHA)
+    assert reasons
+    assert any("blockers is non-empty" in r for r in reasons)
 
 
-def test_main_requires_two_arguments(capsys):
-    rc = main([])
-    assert rc == 2
-    assert "usage" in capsys.readouterr().out
+def test_approved_with_an_important_finding_is_not_ready():
+    review = _valid_review(status="APPROVED", important=["Should be fixed before merge."])
+    reasons = check_ready_to_merge(review, SHA)
+    assert reasons
+    assert any("important is non-empty" in r for r in reasons)
+
+
+def test_reviewed_sha_mismatch_is_not_ready():
+    reasons = check_ready_to_merge(_valid_review(reviewed_sha="0" * 40), SHA)
+    assert reasons
+    assert any("reviewed_sha mismatch" in r for r in reasons)
+
+
+def test_wrong_sha_and_approved_status_both_reported():
+    review = _valid_review(status="BLOCKERS", blockers=["x"], reviewed_sha="0" * 40)
+    reasons = check_ready_to_merge(review, SHA)
+    assert len(reasons) >= 2
+
+
+# --- load_review(): file-loading edge cases ---------------------------------
 
 
 def test_load_review_missing_file_raises():
@@ -166,3 +163,136 @@ def test_load_review_non_mapping_raises(tmp_path):
     bad.write_text('"just a string"')
     with pytest.raises(ReviewError, match="JSON object"):
         load_review(bad)
+
+
+# --- main(): end-to-end exit codes and log-redaction ------------------------
+
+
+def test_main_approved_empty_blockers_and_important_exits_zero(tmp_path, capsys):
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(_valid_review()))
+
+    rc = main([str(path), SHA])
+
+    assert rc == 0
+    assert "APPROVED" in capsys.readouterr().out
+
+
+def test_main_blockers_status_exits_nonzero(tmp_path, capsys):
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(_valid_review(status="BLOCKERS", blockers=["Real issue."])))
+
+    rc = main([str(path), SHA])
+
+    assert rc != 0
+    assert "::error::" in capsys.readouterr().out
+
+
+def test_main_needs_human_status_exits_nonzero(tmp_path, capsys):
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(_valid_review(status="NEEDS_HUMAN")))
+
+    rc = main([str(path), SHA])
+
+    assert rc != 0
+    assert "::error::" in capsys.readouterr().out
+
+
+def test_main_approved_with_blocker_exits_nonzero(tmp_path, capsys):
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(_valid_review(status="APPROVED", blockers=["Shouldn't be here."])))
+
+    rc = main([str(path), SHA])
+
+    assert rc != 0
+
+
+def test_main_approved_with_important_exits_nonzero(tmp_path, capsys):
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(_valid_review(status="APPROVED", important=["Shouldn't be here."])))
+
+    rc = main([str(path), SHA])
+
+    assert rc != 0
+
+
+def test_main_approved_with_follow_up_only_exits_zero(tmp_path, capsys):
+    path = tmp_path / "review.json"
+    path.write_text(json.dumps(_valid_review(follow_up=["Nice to have."])))
+
+    rc = main([str(path), SHA])
+
+    assert rc == 0
+
+
+def test_main_does_not_print_blocker_important_or_summary_text(tmp_path, capsys):
+    # The whole point of the log-redaction requirement: arbitrary
+    # Codex-generated prose must never land in the Actions run log, even on
+    # a failing (BLOCKERS) run -- only counts/status/SHA.
+    secret_blocker_text = "UNIQUE_BLOCKER_TEXT_MARKER_1234"
+    secret_summary_text = "UNIQUE_SUMMARY_TEXT_MARKER_5678"
+    path = tmp_path / "review.json"
+    path.write_text(
+        json.dumps(
+            _valid_review(
+                status="BLOCKERS",
+                blockers=[secret_blocker_text],
+                summary=secret_summary_text,
+            )
+        )
+    )
+
+    main([str(path), SHA])
+
+    out = capsys.readouterr().out
+    assert secret_blocker_text not in out
+    assert secret_summary_text not in out
+    assert "Blockers: 1" in out
+
+
+def test_main_missing_result_file_fails_via_main(tmp_path, capsys):
+    rc = main([str(tmp_path / "does-not-exist.json"), SHA])
+    assert rc == 1
+    assert "::error::" in capsys.readouterr().out
+
+
+def test_main_empty_result_file_fails_via_main(tmp_path, capsys):
+    empty = tmp_path / "empty.json"
+    empty.write_text("")
+    rc = main([str(empty), SHA])
+    assert rc == 1
+    assert "empty" in capsys.readouterr().out
+
+
+def test_main_malformed_json_fails_via_main(tmp_path, capsys):
+    bad = tmp_path / "bad.json"
+    bad.write_text("{not valid json")
+    rc = main([str(bad), SHA])
+    assert rc == 1
+    assert "not valid JSON" in capsys.readouterr().out
+
+
+def test_main_non_object_json_fails_via_main(tmp_path, capsys):
+    bad = tmp_path / "list.json"
+    bad.write_text("[1, 2, 3]")
+    rc = main([str(bad), SHA])
+    assert rc == 1
+    assert "JSON object" in capsys.readouterr().out
+
+
+def test_main_fails_for_sha_mismatch_without_traceback(tmp_path, capsys):
+    review_path = tmp_path / "review.json"
+    review_path.write_text(json.dumps(_valid_review(reviewed_sha="0" * 40)))
+
+    rc = main([str(review_path), SHA])
+
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "::error::" in out
+    assert "reviewed_sha mismatch" in out
+
+
+def test_main_requires_two_arguments(capsys):
+    rc = main([])
+    assert rc == 2
+    assert "usage" in capsys.readouterr().out
