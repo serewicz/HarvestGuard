@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 import harvestguard
 from findings import NormalizedFinding
 
@@ -29,7 +31,7 @@ def _patch_local_scanners(monkeypatch, findings_by_scanner):
     monkeypatch.setattr(
         harvestguard,
         "scan_filesystem_findings",
-        lambda path: findings_by_scanner.get("filesystem", []),
+        lambda path, max_depth=3, scan_id=None: findings_by_scanner.get("filesystem", []),
     )
     monkeypatch.setattr(
         harvestguard,
@@ -39,7 +41,7 @@ def _patch_local_scanners(monkeypatch, findings_by_scanner):
     monkeypatch.setattr(
         harvestguard,
         "scan_filesystem_for_sensitive_data_findings",
-        lambda path: findings_by_scanner.get("sensitive", []),
+        lambda path, max_depth=3, scan_id=None: findings_by_scanner.get("sensitive", []),
     )
     monkeypatch.setattr(
         harvestguard,
@@ -201,7 +203,9 @@ def test_scan_command_scanner_failure_continues(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
         harvestguard,
         "scan_filesystem_findings",
-        lambda path: [_finding("local_filesystem", "file", str(tmp_path / "file.txt"))],
+        lambda path, max_depth=3, scan_id=None: [
+            _finding("local_filesystem", "file", str(tmp_path / "file.txt"))
+        ],
     )
     monkeypatch.setattr(
         harvestguard,
@@ -211,7 +215,7 @@ def test_scan_command_scanner_failure_continues(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
         harvestguard,
         "scan_filesystem_for_sensitive_data_findings",
-        lambda path: [],
+        lambda path, max_depth=3, scan_id=None: [],
     )
     monkeypatch.setattr(
         harvestguard,
@@ -236,3 +240,231 @@ def test_scan_command_progress_is_suppressed_by_quiet(tmp_path, capsys, monkeypa
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.err == ""
+
+
+# --- Argument parsing -----------------------------------------------------
+
+
+def test_build_parser_scan_defaults():
+    parser = harvestguard.build_parser()
+
+    args = parser.parse_args(["scan", "target"])
+
+    assert args.command == "scan"
+    assert args.type == "all"
+    assert args.max_depth == 3
+    assert args.prefix == ""
+    assert args.fail_on_error is True
+    assert args.exclude == []
+
+
+def test_build_parser_scan_type_and_options():
+    parser = harvestguard.build_parser()
+
+    args = parser.parse_args(
+        ["scan", "my-bucket", "--type", "s3", "--prefix", "logs/", "--no-fail-on-error"]
+    )
+
+    assert args.type == "s3"
+    assert args.prefix == "logs/"
+    assert args.fail_on_error is False
+
+
+def test_scan_invalid_type_is_usage_error(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        harvestguard.main(["scan", "target", "--type", "not-a-type"])
+
+    assert excinfo.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_scan_negative_max_depth_is_usage_error(tmp_path, capsys):
+    exit_code = harvestguard.main(["scan", str(tmp_path), "--max-depth", "-1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "--max-depth" in captured.err
+
+
+# --- Scan-type selection --------------------------------------------------
+
+
+def test_scan_type_filesystem_runs_only_selected_scanner(tmp_path, capsys, monkeypatch):
+    called: list[str] = []
+
+    def recorder(name, result):
+        def _scanner(*args, **kwargs):
+            called.append(name)
+            return result
+
+        return _scanner
+
+    monkeypatch.setattr(
+        harvestguard,
+        "scan_filesystem_findings",
+        recorder("filesystem", [_finding("local_filesystem", "file", str(tmp_path / "a.txt"))]),
+    )
+    monkeypatch.setattr(harvestguard, "scan_crypto_inventory_findings", recorder("crypto", []))
+    monkeypatch.setattr(
+        harvestguard, "scan_filesystem_for_sensitive_data_findings", recorder("sensitive", [])
+    )
+    monkeypatch.setattr(
+        harvestguard, "scan_source_for_crypto_usage_findings", recorder("code", [])
+    )
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "filesystem", "--json", "--quiet"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert called == ["filesystem"]
+    assert len(payload) == 1
+    assert payload[0]["source_type"] == "local_filesystem"
+
+
+def test_scan_type_filesystem_passes_max_depth(tmp_path, capsys, monkeypatch):
+    captured: dict[str, int] = {}
+
+    def fake_filesystem(path, max_depth=3, scan_id=None):
+        captured["max_depth"] = max_depth
+        return []
+
+    monkeypatch.setattr(harvestguard, "scan_filesystem_findings", fake_filesystem)
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "filesystem", "--max-depth", "5", "--json", "--quiet"]
+    )
+
+    assert exit_code == 0
+    assert captured["max_depth"] == 5
+
+
+# --- Cloud scan types (mocked) --------------------------------------------
+
+
+def test_scan_type_s3_invokes_s3_scanner(capsys, monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake_s3(bucket_name, prefix=""):
+        captured["bucket"] = bucket_name
+        captured["prefix"] = prefix
+        return [_finding("aws_s3", "object", f"s3://{bucket_name}/data.txt")]
+
+    monkeypatch.setattr(harvestguard, "scan_s3_bucket_findings", fake_s3)
+
+    exit_code = harvestguard.main(
+        ["scan", "my-bucket", "--type", "s3", "--prefix", "logs/", "--json", "--quiet"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured == {"bucket": "my-bucket", "prefix": "logs/"}
+    assert payload[0]["source_type"] == "aws_s3"
+
+
+def test_scan_type_gcs_invokes_gcs_scanner(capsys, monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake_gcs(bucket_name, prefix=""):
+        captured["bucket"] = bucket_name
+        captured["prefix"] = prefix
+        return [_finding("gcs", "object", f"gs://{bucket_name}/data.txt")]
+
+    monkeypatch.setattr(harvestguard, "scan_gcs_bucket_findings", fake_gcs)
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "gcs", "--json", "--quiet"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured == {"bucket": "my-bucket", "prefix": ""}
+    assert payload[0]["source_type"] == "gcs"
+
+
+def test_scan_type_azure_invokes_azure_scanner(capsys, monkeypatch):
+    captured: dict[str, str] = {}
+
+    def fake_azure(account_url, container_name, prefix=""):
+        captured["account_url"] = account_url
+        captured["container"] = container_name
+        captured["prefix"] = prefix
+        return [_finding("azure_blob", "blob", f"{account_url}/{container_name}/x")]
+
+    monkeypatch.setattr(harvestguard, "scan_azure_container_findings", fake_azure)
+
+    exit_code = harvestguard.main(
+        ["scan", "acct/container", "--type", "azure", "--json", "--quiet"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert captured["account_url"] == "https://acct.blob.core.windows.net"
+    assert captured["container"] == "container"
+    assert payload[0]["source_type"] == "azure_blob"
+
+
+def test_scan_type_azure_invalid_target_is_usage_error(capsys):
+    exit_code = harvestguard.main(["scan", "no-slash", "--type", "azure", "--json"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "account-name/container-name" in captured.err
+
+
+# --- Failure behavior -----------------------------------------------------
+
+
+def test_scan_no_fail_on_error_exits_zero(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        harvestguard,
+        "scan_filesystem_findings",
+        lambda path, max_depth=3, scan_id=None: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    monkeypatch.setattr(
+        harvestguard,
+        "scan_crypto_inventory_findings",
+        lambda path, exclude_patterns=None: [],
+    )
+    monkeypatch.setattr(
+        harvestguard, "scan_filesystem_for_sensitive_data_findings", lambda *a, **k: []
+    )
+    monkeypatch.setattr(harvestguard, "scan_source_for_crypto_usage_findings", lambda *a, **k: [])
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--summary", "--quiet", "--no-fail-on-error"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "Scanner Warnings:" in output
+
+
+# --- Smoke tests over real temporary files --------------------------------
+
+
+def test_scan_filesystem_smoke_over_temp_files(tmp_path, capsys):
+    (tmp_path / "notes.txt").write_text("hello world", encoding="utf-8")
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "filesystem", "--json", "--quiet"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert isinstance(payload, list)
+    assert any(item["source_type"] == "local_filesystem" for item in payload)
+
+
+def test_scan_sensitive_data_smoke_over_temp_files(tmp_path, capsys):
+    (tmp_path / "contacts.txt").write_text("reach me at alice@example.com", encoding="utf-8")
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "sensitive-data", "--json", "--quiet"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert len(payload) == 1
+    assert payload[0]["source_type"] == "local_sensitive_data"
+    # Privacy: the raw matched value must never appear in scan output.
+    assert "alice@example.com" not in json.dumps(payload)
