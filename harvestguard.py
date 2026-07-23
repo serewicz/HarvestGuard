@@ -182,12 +182,15 @@ def run_scan_command(args: argparse.Namespace) -> int:
     )
 
     if args.json is not None:
+        # An output write failure is an execution error, not invalid CLI input:
+        # exit 2 is reserved for bad arguments (see docs/CLI.md), so a failed
+        # write returns the scan-error code instead.
         if not _emit_output(findings_json(findings), args.json, "JSON findings", args.quiet):
-            return EXIT_USAGE
+            return EXIT_SCAN_ERROR
     elif args.markdown is not None:
         report = format_markdown_report(findings, context)
         if not _emit_output(report, args.markdown, "Markdown report", args.quiet):
-            return EXIT_USAGE
+            return EXIT_SCAN_ERROR
     else:
         print(format_console_summary(findings, context))
 

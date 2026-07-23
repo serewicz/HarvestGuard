@@ -112,6 +112,37 @@ def test_scan_s3_bucket_records_per_object_client_error(mock_client):
 
 
 @patch("scanner.cloud.boto3.client")
+def test_scan_s3_bucket_paginates_all_pages(mock_client):
+    # list_objects_v2 caps each response at 1,000 keys and signals more with
+    # IsTruncated/NextContinuationToken. The scanner must follow every page,
+    # otherwise a large bucket is silently reported as complete after page one.
+    client = MagicMock()
+    client.list_objects_v2.side_effect = [
+        {
+            "Contents": [{"Key": "page1.txt", "Size": 10, "LastModified": "2026-01-01"}],
+            "IsTruncated": True,
+            "NextContinuationToken": "token-1",
+        },
+        {
+            "Contents": [{"Key": "page2.txt", "Size": 20, "LastModified": "2026-01-02"}],
+            "IsTruncated": False,
+        },
+    ]
+    client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+    mock_client.return_value = client
+
+    df = scan_s3_bucket("my-bucket")
+
+    assert client.list_objects_v2.call_count == 2
+    # The second call must forward the continuation token from the first page.
+    assert client.list_objects_v2.call_args_list[1].kwargs["ContinuationToken"] == "token-1"
+    assert list(df["Location"]) == [
+        "s3://my-bucket/page1.txt",
+        "s3://my-bucket/page2.txt",
+    ]
+
+
+@patch("scanner.cloud.boto3.client")
 def test_scan_s3_bucket_findings_raises_on_per_object_client_error(mock_client):
     # The findings wrapper must not return empty/exit clean when head_object
     # coverage failed: it propagates the coverage gap as a CloudScanError.

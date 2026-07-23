@@ -169,6 +169,46 @@ def test_scan_command_json_writes_findings_file(tmp_path, capsys, monkeypatch):
     assert payload[0]["source_type"] == "crypto_inventory"
 
 
+def test_scan_command_json_unwritable_destination_exits_scan_error(tmp_path, capsys, monkeypatch):
+    # An output write failure is an execution error, not invalid CLI input.
+    # docs/CLI.md guarantees exit 2 means invalid arguments, so a failed write
+    # must return the scan-error code (1) instead so automation can tell the two
+    # apart. A directory path is unwritable as a text file (IsADirectoryError).
+    unwritable = tmp_path / "out-dir"
+    unwritable.mkdir()
+    _patch_local_scanners(
+        monkeypatch,
+        {"crypto": [_finding("crypto_inventory", "PEM Certificate", str(tmp_path / "cert.pem"))]},
+    )
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--json", str(unwritable), "--quiet"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "could not write JSON findings" in captured.err
+
+
+def test_scan_command_markdown_unwritable_destination_exits_scan_error(
+    tmp_path, capsys, monkeypatch
+):
+    unwritable = tmp_path / "out-dir"
+    unwritable.mkdir()
+    _patch_local_scanners(
+        monkeypatch,
+        {"crypto": [_finding("crypto_inventory", "PEM Certificate", str(tmp_path / "cert.pem"))]},
+    )
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--markdown", str(unwritable), "--quiet"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "could not write Markdown report" in captured.err
+
+
 def test_scan_command_invalid_path_returns_usage_error(capsys):
     exit_code = harvestguard.main(["scan", "/definitely/not/a/real/path"])
 

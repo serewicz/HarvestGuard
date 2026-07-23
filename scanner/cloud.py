@@ -29,21 +29,34 @@ def scan_s3_bucket(bucket_name: str, prefix: str = "", errors: list[str] | None 
             errors.append(message)
 
     try:
-        response = s3.list_objects_v2(Bucket=bucket_name, Prefix=prefix)
-        for obj in response.get('Contents', []):
-            key = obj['Key']
-            try:
-                enc = s3.head_object(Bucket=bucket_name, Key=key)
-                enc_status = enc.get('ServerSideEncryption', 'None')
-                results.append({
-                    "Location": f"s3://{bucket_name}/{key}",
-                    "Size": obj['Size'],
-                    "Modified": obj['LastModified'],
-                    "Encryption": enc_status,
-                    "Risk": "Low" if enc_status != "None" else "High"
-                })
-            except ClientError as e:
-                _record(f"Error reading encryption status for s3://{bucket_name}/{key}: {e}")
+        # list_objects_v2 returns at most 1,000 keys per call, so iterate every
+        # page. Without this a large bucket is silently reported as complete
+        # after only its first page, hiding all later objects from the scan.
+        continuation_token: str | None = None
+        while True:
+            kwargs = {"Bucket": bucket_name, "Prefix": prefix}
+            if continuation_token is not None:
+                kwargs["ContinuationToken"] = continuation_token
+            response = s3.list_objects_v2(**kwargs)
+            for obj in response.get('Contents', []):
+                key = obj['Key']
+                try:
+                    enc = s3.head_object(Bucket=bucket_name, Key=key)
+                    enc_status = enc.get('ServerSideEncryption', 'None')
+                    results.append({
+                        "Location": f"s3://{bucket_name}/{key}",
+                        "Size": obj['Size'],
+                        "Modified": obj['LastModified'],
+                        "Encryption": enc_status,
+                        "Risk": "Low" if enc_status != "None" else "High"
+                    })
+                except ClientError as e:
+                    _record(f"Error reading encryption status for s3://{bucket_name}/{key}: {e}")
+            if not response.get('IsTruncated'):
+                break
+            continuation_token = response.get('NextContinuationToken')
+            if not continuation_token:
+                break
     except Exception as e:
         _record(f"Error scanning S3: {e}")
 
