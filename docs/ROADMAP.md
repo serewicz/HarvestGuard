@@ -185,12 +185,19 @@ Key product constraints:
 - **Title:** Demo target
 - **Purpose:** Provide a safe, repeatable sample target that demonstrates
   crypto evidence, sensitive-data findings, confidence, and reports.
-- **Status:** Planned
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-002, HG-003
-- **Acceptance criteria:** A small local demo fixture can be scanned without
-  real credentials or sensitive data; expected findings are documented; tests
-  verify the demo remains stable.
+- **Acceptance criteria:** A small local demo fixture
+  (`demo/sample_target/`) can be scanned without real credentials or network
+  access; expected findings are documented in
+  [docs/CLI.md](CLI.md#demo-walkthrough), including filesystem encryption
+  evidence, cryptographic inventory evidence, sensitive-data categories, and
+  confidence fields; tests verify the demo's evidence, confidence, and
+  JSON/Markdown report behavior remain stable, without pinning the one field
+  (volume-level encryption fallback) that is legitimately platform-dependent;
+  every fixture value is clearly marked fake, and none matches a real
+  service's credential format.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/18
 
 ### HG-007
