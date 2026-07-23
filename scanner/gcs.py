@@ -70,5 +70,12 @@ def scan_gcs_bucket_findings(
     collected_at = datetime.now(timezone.utc)
     df = scan_gcs_bucket(bucket_name, prefix=prefix, errors=errors)
     if errors:
-        raise CloudScanError("; ".join(errors))
+        # Still a failure (the caller exits nonzero), but the findings
+        # gathered before the failure ride along on the exception instead
+        # of being discarded -- a later blob/page failing must not erase
+        # the evidence already collected.
+        raise CloudScanError(
+            "; ".join(errors),
+            partial_findings=normalize_gcs_df(df, scan_id=scan_id, observed_at=collected_at),
+        )
     return normalize_gcs_df(df, scan_id=scan_id, observed_at=collected_at)
