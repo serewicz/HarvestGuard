@@ -130,8 +130,14 @@ def normalize_azure_blob_df(
 
 
 def normalize_sensitive_data_df(
-    df: pd.DataFrame, scan_id: str | None = None
+    df: pd.DataFrame,
+    scan_id: str | None = None,
+    observed_at: str | datetime | None = None,
 ) -> list[NormalizedFinding]:
+    # observed_at is the scan's collection time (passed in by the scan
+    # wrapper), never the file's own "Modified" mtime -- the latter is a
+    # property of the asset, not of the observation, and is preserved in
+    # technical_metadata["Modified"]. See ASSET_INVENTORY.md / NORMALIZED_FINDINGS.md.
     return [
         NormalizedFinding(
             scan_id=scan_id,
@@ -140,7 +146,7 @@ def normalize_sensitive_data_df(
             location=row["Location"],
             scanner_name="sensitive_data_classifier",
             scanner_version="0.1.0",
-            observed_at=row.get("Modified"),
+            observed_at=observed_at,
             evidence=(
                 f"Sensitive data categories detected: {row.get('Categories')}; "
                 f"total matches: {row.get('Total Matches')}"
