@@ -7,6 +7,7 @@ from google.cloud import storage
 
 from finding_adapters import normalize_gcs_df
 from findings import NormalizedFinding
+from scanner.errors import CloudScanError
 
 
 def _encryption_status(blob) -> str:
@@ -17,7 +18,9 @@ def _risk_for_encryption(encryption: str) -> str:
     return "Low" if encryption == "CMEK" else "Medium"
 
 
-def scan_gcs_bucket(bucket_name: str, prefix: str = "") -> pd.DataFrame:
+def scan_gcs_bucket(
+    bucket_name: str, prefix: str = "", errors: list[str] | None = None
+) -> pd.DataFrame:
     """Scan a GCS bucket for encryption status.
 
     GCS encrypts every object at rest by default (Google-managed keys), so
@@ -25,6 +28,11 @@ def scan_gcs_bucket(bucket_name: str, prefix: str = "") -> pd.DataFrame:
     signal for a due-diligence scan is whether the org has taken on
     customer-managed key (CMEK) control or is relying on the platform
     default.
+
+    A scan-level failure (auth/provider error) is swallowed so the Streamlit
+    dashboard degrades to an empty result. When ``errors`` is provided, the
+    failure is recorded there instead of printed, so a caller (the CLI) can
+    distinguish a failed scan from an empty bucket and report it explicitly.
     """
     results = []
 
@@ -43,7 +51,11 @@ def scan_gcs_bucket(bucket_name: str, prefix: str = "") -> pd.DataFrame:
         # DefaultCredentialsError comes from google.auth, not google.api_core --
         # storage.Client() resolves credentials eagerly at construction time,
         # so an auth failure surfaces here rather than from a list_blobs() call.
-        print(f"Error scanning GCS: {e}")
+        message = f"Error scanning GCS: {e}"
+        if errors is None:
+            print(message)
+        else:
+            errors.append(message)
 
     return pd.DataFrame(results)
 
@@ -51,4 +63,8 @@ def scan_gcs_bucket(bucket_name: str, prefix: str = "") -> pd.DataFrame:
 def scan_gcs_bucket_findings(
     bucket_name: str, prefix: str = "", scan_id: str | None = None
 ) -> list[NormalizedFinding]:
-    return normalize_gcs_df(scan_gcs_bucket(bucket_name, prefix=prefix), scan_id=scan_id)
+    errors: list[str] = []
+    df = scan_gcs_bucket(bucket_name, prefix=prefix, errors=errors)
+    if errors:
+        raise CloudScanError("; ".join(errors))
+    return normalize_gcs_df(df, scan_id=scan_id)

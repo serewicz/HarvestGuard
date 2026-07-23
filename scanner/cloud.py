@@ -4,10 +4,17 @@ from botocore.exceptions import ClientError
 
 from finding_adapters import normalize_s3_df
 from findings import NormalizedFinding
+from scanner.errors import CloudScanError
 
 
-def scan_s3_bucket(bucket_name: str, prefix: str = ""):
-    """Scan S3 bucket for encryption status."""
+def scan_s3_bucket(bucket_name: str, prefix: str = "", errors: list[str] | None = None):
+    """Scan S3 bucket for encryption status.
+
+    A scan-level failure (auth/provider error) is swallowed so the Streamlit
+    dashboard degrades to an empty result. When ``errors`` is provided, the
+    failure is recorded there instead of printed, so a caller (the CLI) can
+    distinguish a failed scan from an empty bucket and report it explicitly.
+    """
     s3 = boto3.client('s3')
     results = []
 
@@ -28,7 +35,11 @@ def scan_s3_bucket(bucket_name: str, prefix: str = ""):
             except ClientError:
                 pass
     except Exception as e:
-        print(f"Error scanning S3: {e}")
+        message = f"Error scanning S3: {e}"
+        if errors is None:
+            print(message)
+        else:
+            errors.append(message)
 
     return pd.DataFrame(results)
 
@@ -36,4 +47,8 @@ def scan_s3_bucket(bucket_name: str, prefix: str = ""):
 def scan_s3_bucket_findings(
     bucket_name: str, prefix: str = "", scan_id: str | None = None
 ) -> list[NormalizedFinding]:
-    return normalize_s3_df(scan_s3_bucket(bucket_name, prefix=prefix), scan_id=scan_id)
+    errors: list[str] = []
+    df = scan_s3_bucket(bucket_name, prefix=prefix, errors=errors)
+    if errors:
+        raise CloudScanError("; ".join(errors))
+    return normalize_s3_df(df, scan_id=scan_id)

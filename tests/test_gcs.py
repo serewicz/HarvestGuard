@@ -1,9 +1,11 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import DefaultCredentialsError
 
-from scanner.gcs import scan_gcs_bucket
+from scanner.errors import CloudScanError
+from scanner.gcs import scan_gcs_bucket, scan_gcs_bucket_findings
 
 
 def _make_blob(name, size, updated, kms_key_name=None):
@@ -72,3 +74,35 @@ def test_scan_gcs_bucket_handles_missing_credentials_gracefully(mock_client_cls)
     df = scan_gcs_bucket("my-bucket")
 
     assert df.empty
+
+
+@patch("scanner.gcs.storage.Client")
+def test_scan_gcs_bucket_records_scan_error_when_collector_supplied(mock_client_cls, capsys):
+    mock_client_cls.side_effect = DefaultCredentialsError("no credentials found")
+
+    errors: list[str] = []
+    df = scan_gcs_bucket("my-bucket", errors=errors)
+
+    assert df.empty
+    assert capsys.readouterr().out == ""
+    assert errors and "Error scanning GCS" in errors[0]
+
+
+@patch("scanner.gcs.storage.Client")
+def test_scan_gcs_bucket_findings_raises_on_swallowed_scan_error(mock_client_cls):
+    mock_client_cls.return_value.list_blobs.side_effect = GoogleAPIError("boom")
+
+    with pytest.raises(CloudScanError):
+        scan_gcs_bucket_findings("my-bucket")
+
+
+@patch("scanner.gcs.storage.Client")
+def test_scan_gcs_bucket_findings_returns_findings_on_success(mock_client_cls):
+    mock_client_cls.return_value.list_blobs.return_value = [
+        _make_blob("data.csv", 50, "2026-01-01")
+    ]
+
+    findings = scan_gcs_bucket_findings("my-bucket")
+
+    assert len(findings) == 1
+    assert findings[0].location == "gs://my-bucket/data.csv"

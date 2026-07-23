@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock
 
 import pytest
+from botocore.exceptions import NoCredentialsError
 
 import harvestguard
 from findings import NormalizedFinding
@@ -401,6 +403,36 @@ def test_scan_type_azure_invokes_azure_scanner(capsys, monkeypatch):
     assert captured["account_url"] == "https://acct.blob.core.windows.net"
     assert captured["container"] == "container"
     assert payload[0]["source_type"] == "azure_blob"
+
+
+def test_scan_type_s3_swallowed_failure_exits_error_with_valid_json(capsys, monkeypatch):
+    # Exercise the real scan_s3_bucket_findings wrapper: the S3 scanner swallows
+    # provider/auth errors internally, so the CLI must still surface the failure
+    # as a nonzero exit code AND keep --json stdout valid (no error text prefix).
+    client = MagicMock()
+    client.list_objects_v2.side_effect = NoCredentialsError()
+    monkeypatch.setattr("scanner.cloud.boto3.client", lambda *a, **k: client)
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--json", "--quiet"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    # stdout must be parseable JSON, not "Error scanning S3: ..." + JSON.
+    assert json.loads(captured.out) == []
+
+
+def test_scan_type_s3_swallowed_failure_no_fail_on_error_exits_zero(capsys, monkeypatch):
+    client = MagicMock()
+    client.list_objects_v2.side_effect = NoCredentialsError()
+    monkeypatch.setattr("scanner.cloud.boto3.client", lambda *a, **k: client)
+
+    exit_code = harvestguard.main(
+        ["scan", "my-bucket", "--type", "s3", "--json", "--quiet", "--no-fail-on-error"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert json.loads(captured.out) == []
 
 
 def test_scan_type_azure_invalid_target_is_usage_error(capsys):

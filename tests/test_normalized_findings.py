@@ -207,12 +207,12 @@ def test_cloud_scanner_wrappers_can_return_normalized_findings(monkeypatch):
         "Encryption": "AES256",
         "Risk": "Low",
     }])
-    monkeypatch.setattr(s3_scanner, "scan_s3_bucket", lambda bucket, prefix="": df)
-    monkeypatch.setattr(gcs_scanner, "scan_gcs_bucket", lambda bucket, prefix="": df)
+    monkeypatch.setattr(s3_scanner, "scan_s3_bucket", lambda bucket, prefix="", errors=None: df)
+    monkeypatch.setattr(gcs_scanner, "scan_gcs_bucket", lambda bucket, prefix="", errors=None: df)
     monkeypatch.setattr(
         azure_scanner,
         "scan_azure_container",
-        lambda account_url, container_name, prefix="": df,
+        lambda account_url, container_name, prefix="", errors=None: df,
     )
 
     assert s3_scanner.scan_s3_bucket_findings("bucket")[0].source_type == "aws_s3"
