@@ -429,7 +429,7 @@ jobs:
             reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 40
+            --max-turns 60
           settings: |
             {
               "permissions": {
@@ -1322,7 +1322,7 @@ jobs:
             attempted the correction but could not reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 40
+            --max-turns 60
           settings: |
             {
               "permissions": {
@@ -2089,7 +2089,7 @@ jobs:
             attempted the correction but could not reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 40
+            --max-turns 60
           settings: |
             {
               "permissions": {
@@ -2856,7 +2856,7 @@ jobs:
             attempted the correction but could not reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 40
+            --max-turns 60
           settings: |
             {
               "permissions": {
