@@ -934,3 +934,22 @@ def test_cycle_n_consumers_read_exactly_what_the_prior_cycle_uploaded(workflow, 
     assert download["with"]["path"] == expected_dir
     ctx = next(s for s in review["steps"] if s.get("name") == "Write Codex re-review context file")
     assert ctx["env"]["PRIOR_REVIEW_PATH"] == expected
+
+
+# --- Claude turn limit --------------------------------------------------------
+
+
+def test_every_claude_invocation_uses_exactly_sixty_max_turns(workflow):
+    # Raised from 40 after the live Issue #16 run hit the cap mid-task.
+    # A pure cost/loop bound inside the Claude Code action -- asserted for
+    # every invocation so a future copied job can't silently diverge.
+    claude_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if "claude-code-action" in step.get("uses", "")
+    ]
+    assert len(claude_steps) == 4  # build + three correction cycles
+    for step in claude_steps:
+        assert "--max-turns 60" in step["with"]["claude_args"]
+        assert "--max-turns 40" not in step["with"]["claude_args"]
