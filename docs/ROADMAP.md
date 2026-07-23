@@ -85,7 +85,8 @@ Grafana -> Future Executive Priority Index.
 Key product constraints:
 
 - Local-first operation is the trust boundary.
-- Observed evidence and inferred risk must remain separate.
+- Observed evidence and inferred risk must remain separate. The shared
+  vocabulary for both is defined in [TERMINOLOGY.md](TERMINOLOGY.md).
 - Raw findings are immutable; prioritization is a separate assessment layer.
 - SQLite is the initial local system of record.
 - Prometheus stores operational and trend metrics, not detailed findings.
@@ -121,7 +122,12 @@ Key product constraints:
   evidence-based risk topology, executive question, exposure, HNDL exposure,
   risk score, and remediation priority; recommendation is defined as outside
   the core HarvestGuard evidence layer; UI and reports avoid claiming
-  certainty where only inference exists.
+  certainty where only inference exists. Terminology is defined in
+  [TERMINOLOGY.md](TERMINOLOGY.md), which also maps current dashboard and
+  report language to these terms and marks the heuristic risk score and HNDL
+  exposure as `Needs Validation` until the UI labels them as inference. Remains
+  `Partial` because the dashboard does not yet present those fields as inferred
+  (future UI work under HG-011 and HG-013).
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/14
 
 ### HG-003
