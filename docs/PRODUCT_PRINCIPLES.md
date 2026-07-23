@@ -120,6 +120,12 @@ an organization is quantum-ready.
 
 ## Vocabulary
 
+The terms below are the product-boundary essentials.
+[docs/TERMINOLOGY.md](TERMINOLOGY.md) is the canonical, complete glossary and
+adds exposure, HNDL exposure, risk score, remediation priority, false positive,
+and false negative, plus how current dashboard and report language maps to
+these terms.
+
 - **Observed evidence:** Source-attributed facts collected directly by a
   scanner, such as file signatures, object encryption metadata, certificate
   fields, key properties, scanner errors, or pattern counts.

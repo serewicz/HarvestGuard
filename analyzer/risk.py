@@ -1,5 +1,12 @@
 import pandas as pd
 
+# Risk Score and HNDL Exposure are inference, not observed evidence: a heuristic
+# ordering aid derived from encryption status and path signals, not a measured
+# fact, probability, or business-impact figure. This early proof-of-concept
+# scoring is marked `Needs Validation` in docs/TERMINOLOGY.md; UI and reports
+# must not present it as certainty. See docs/DECISIONS/ADR-005 and
+# docs/TERMINOLOGY.md for the evidence-versus-inference boundary.
+
 # Values scanners use to signal "confirmed unencrypted" across sources
 # (filesystem scans emit "Unencrypted"; S3 emits "None"; legacy POC value
 # kept for compatibility).
@@ -7,7 +14,10 @@ _UNENCRYPTED_VALUES = {"Unknown / Unencrypted", "None", "Unencrypted"}
 
 
 def calculate_risk_score(row):
-    """Simple risk scoring for POC - expand with real logic later."""
+    """Heuristic (inferred) risk ordering aid, not a measured fact.
+
+    Proof-of-concept scoring; `Needs Validation` per docs/TERMINOLOGY.md.
+    """
     score = 50  # Base
     if row.get("Encryption") in _UNENCRYPTED_VALUES:
         score += 40

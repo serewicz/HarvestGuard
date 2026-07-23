@@ -34,6 +34,12 @@ HarvestGuard collects verifiable cryptographic evidence, communicates
 confidence and unknowns, surfaces ownership signals, and frames the questions
 organizations must answer. It does not prescribe the answer.
 
+The terms used throughout this flow — observed evidence, confidence, ownership
+signal, unknown, coverage, partial scan, inference, exposure, HNDL exposure,
+evidence-based risk topology, risk score, remediation priority, executive
+question, and recommendation — are defined in
+[TERMINOLOGY.md](TERMINOLOGY.md).
+
 The stages in this conceptual flow have separate responsibilities:
 
 - **Observed evidence:** scan adapters collect source-attributed evidence from

@@ -7,6 +7,7 @@ should not need to redefine product direction before doing useful work.
 Before proposing work, read:
 
 - [Product Principles](docs/PRODUCT_PRINCIPLES.md)
+- [Terminology](docs/TERMINOLOGY.md)
 - [ADR-006: Product Boundary](docs/DECISIONS/ADR-006-product-boundary.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Architecture](docs/ARCHITECTURE.md)
@@ -20,7 +21,9 @@ Before proposing work, read:
 - Keep HarvestGuard crypto-first. Do not broaden it into a generic security
   scanner without an accepted roadmap and ADR change.
 - Preserve local-first behavior and no telemetry by default.
-- Separate observed evidence from inferred risk.
+- Separate observed evidence from inferred risk. Use the shared vocabulary in
+  [docs/TERMINOLOGY.md](docs/TERMINOLOGY.md); do not present heuristic scores as
+  measured facts.
 
 ## Contribution Workflow
 

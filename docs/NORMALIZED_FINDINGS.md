@@ -12,6 +12,11 @@ Scanners observe evidence. They do not decide business impact, remediation
 cost, owner, executive priority, or quantum risk. Those assessment concepts
 belong to later layers and must not be mixed into normalized findings.
 
+The evidence-layer terms used below — observed evidence, confidence, ownership
+signal, unknown, coverage, and partial scan — and the assessment-layer terms
+deliberately excluded from the raw finding are defined in
+[TERMINOLOGY.md](TERMINOLOGY.md).
+
 ## Required Fields
 
 - `finding_id`: deterministic SHA-256 identifier for the normalized finding.
