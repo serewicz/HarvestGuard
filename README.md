@@ -138,7 +138,13 @@ harvestguard scan ./tests/fixtures/crypto_inventory
 
 # Write a Markdown evidence report
 harvestguard scan ./tests/fixtures/crypto_inventory --markdown report.md
+
+# Run a single scan type, or a cloud scan (uses provider SDK default creds)
+harvestguard scan ./tests/fixtures/crypto_inventory --type crypto --json findings.json
+harvestguard scan my-bucket --type s3 --json --quiet
 ```
+
+See [docs/CLI.md](docs/CLI.md) for all scan types, options, and exit codes.
 
 ### Running in a container
 
