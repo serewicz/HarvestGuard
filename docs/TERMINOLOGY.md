@@ -131,8 +131,8 @@ fixtures.
 | Where it appears | Current label | Layer | Notes |
 | --- | --- | --- | --- |
 | Dashboard results table (`dashboard/visualizations.py`) | `Encryption` | Observed evidence | Encryption status as reported by the scanner or provider metadata. |
-| Dashboard "Risk Scores" bar / results table | `Risk Score` | Inference (heuristic) | 0–100 heuristic from `analyzer/risk.py`. Not a measured fact. **Needs Validation.** The UI does not yet label it as inferred. |
-| Dashboard "Risk Distribution" pie | `HNDL Exposure` | Inference (heuristic) | High/Medium/Low bucket derived from the risk score. **Needs Validation.** The UI does not yet label it as inferred. |
+| Dashboard "Risk Scores" bar / results table | `Risk Score` | Inference (heuristic) | 0–100 heuristic from `analyzer/risk.py`. Not a measured fact. **Needs Validation.** The dashboard labels it as an inferred heuristic. |
+| Dashboard "Risk Distribution" pie | `HNDL Exposure` | Inference (heuristic) | High/Medium/Low bucket derived from the risk score. **Needs Validation.** The dashboard labels it as inferred. |
 | Markdown / JSON report (`reports.py`) | `Observed Evidence`, `Confidence` | Observed evidence | Reports are evidence-only by design and already state that they do not infer business risk. |
 | Markdown / JSON report | (risk score, priority, ownership inference) | Inference / assessment | Deliberately **excluded** from reports today; if ever added, must be a clearly labeled assessment section separate from evidence. |
 
@@ -142,11 +142,13 @@ fixtures.
   and confidence separate from inference: they carry no risk score, exposure
   bucket, remediation priority, or ownership inference. They are the reference
   for how the rest of the product should read.
-- The Streamlit dashboard still presents `Risk Score` and `HNDL Exposure`
-  without labeling them as inferred heuristics. Closing that gap is future UI
-  work (HG-011 "shows evidence and inference separately", HG-013 color-coded
-  exposure states). Until then these fields are marked **Needs Validation**
-  here and in `analyzer/risk.py` so no release claim treats them as measured.
+- The Streamlit dashboard labels `Risk Score` and `HNDL Exposure` as
+  inferred heuristics (**Needs Validation**), with help text distinguishing
+  them from observed evidence. Rendering evidence and inference in fully
+  separate labeled areas remains future UI work (HG-011 "shows evidence and
+  inference separately", HG-013 color-coded exposure states). The fields stay
+  marked **Needs Validation** here and in `analyzer/risk.py` so no release
+  claim treats them as measured.
 - When the dashboard migrates to the normalized finding model, evidence fields
   and inferred fields should render in separate, labeled areas rather than in a
   single undifferentiated table.

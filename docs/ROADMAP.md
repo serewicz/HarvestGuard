@@ -114,7 +114,7 @@ Key product constraints:
 - **Purpose:** Use evidence and risk language that is accurate enough for
   diligence and executive reporting without overstating certainty or drifting
   into recommendations.
-- **Status:** Partial
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-001
 - **Acceptance criteria:** Documentation defines observed evidence, inference,
@@ -125,9 +125,11 @@ Key product constraints:
   certainty where only inference exists. Terminology is defined in
   [TERMINOLOGY.md](TERMINOLOGY.md), which also maps current dashboard and
   report language to these terms and marks the heuristic risk score and HNDL
-  exposure as `Needs Validation` until the UI labels them as inference. Remains
-  `Partial` because the dashboard does not yet present those fields as inferred
-  (future UI work under HG-011 and HG-013).
+  exposure as `Needs Validation` until validated. The dashboard now labels
+  Risk Score and HNDL Exposure as inferred heuristics (`Needs Validation`)
+  with help text distinguishing them from observed evidence; rendering
+  evidence and inference in fully separate labeled areas remains future UI
+  work under HG-011 and HG-013.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/14
 
 ### HG-003
