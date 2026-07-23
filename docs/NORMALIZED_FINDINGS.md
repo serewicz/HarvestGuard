@@ -4,6 +4,11 @@ HarvestGuard's normalized finding schema is the internal evidence contract
 between scanner adapters and later workflow layers. It is versioned for current
 repository use, but it is not a long-term public API guarantee.
 
+The cross-scanner cryptographic asset inventory these findings realize —
+including the minimum inventory record fields and the per-adapter mapping — is
+described at a conceptual level in [ASSET_INVENTORY.md](ASSET_INVENTORY.md).
+This document is the field-level contract underneath it.
+
 Current schema version: `1.0.0`
 
 ## Purpose
