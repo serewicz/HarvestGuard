@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -138,6 +139,30 @@ def test_sensitive_data_classifier_can_return_normalized_findings(tmp_path):
     assert payload["source_type"] == "local_sensitive_data"
     assert payload["technical_metadata"]["Categories"] == "Email"
     assert payload["technical_metadata"]["Total Matches"] == 1
+
+
+def test_sensitive_data_observed_at_is_collection_time_not_file_mtime(tmp_path):
+    # Regression: observed_at must be the scan's collection time, not the
+    # file's own modification time. A file whose mtime is years in the past
+    # must still yield a recent collection timestamp, with the mtime kept
+    # only as asset metadata. See ASSET_INVENTORY.md.
+    target = tmp_path / "customers.csv"
+    target.write_text("name,email\nJane,jane@example.com\n")
+    old_mtime = datetime(2000, 1, 1, tzinfo=timezone.utc).timestamp()
+    os.utime(target, (old_mtime, old_mtime))
+
+    # observed_at is normalized to whole-second resolution, so widen the
+    # window by a second on each side to stay robust to truncation.
+    before = datetime.now(timezone.utc) - timedelta(seconds=1)
+    findings = scan_filesystem_for_sensitive_data_findings(str(tmp_path))
+    after = datetime.now(timezone.utc) + timedelta(seconds=1)
+
+    payload = findings[0].to_dict()
+    observed_at = datetime.fromisoformat(payload["observed_at"])
+    assert before <= observed_at <= after
+    assert observed_at.year != 2000
+    # The file's own mtime is preserved as asset metadata, not as observed_at.
+    assert payload["technical_metadata"]["Modified"] is not None
 
 
 def test_cloud_scanner_adapters_preserve_provider_metadata():

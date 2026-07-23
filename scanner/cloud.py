@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import boto3
 import pandas as pd
 from botocore.exceptions import ClientError
@@ -67,6 +69,10 @@ def scan_s3_bucket_findings(
     bucket_name: str, prefix: str = "", scan_id: str | None = None
 ) -> list[NormalizedFinding]:
     errors: list[str] = []
+    # Collection time for the scan (observed_at), stamped once so every record
+    # from this scan shares the same collection timestamp. This is the time the
+    # observation was collected, never the object's own LastModified time.
+    collected_at = datetime.now(timezone.utc)
     df = scan_s3_bucket(bucket_name, prefix=prefix, errors=errors)
     if errors:
         # Still a failure (the caller exits nonzero), but the findings
@@ -75,6 +81,6 @@ def scan_s3_bucket_findings(
         # the evidence already collected.
         raise CloudScanError(
             "; ".join(errors),
-            partial_findings=normalize_s3_df(df, scan_id=scan_id),
+            partial_findings=normalize_s3_df(df, scan_id=scan_id, observed_at=collected_at),
         )
-    return normalize_s3_df(df, scan_id=scan_id)
+    return normalize_s3_df(df, scan_id=scan_id, observed_at=collected_at)

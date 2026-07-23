@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import certifi
@@ -133,4 +134,10 @@ def scan_source_for_crypto_usage(path: str) -> pd.DataFrame:
 def scan_source_for_crypto_usage_findings(
     path: str, scan_id: str | None = None
 ) -> list[NormalizedFinding]:
-    return normalize_code_analysis_df(scan_source_for_crypto_usage(path), scan_id=scan_id)
+    # Collection time for the scan (observed_at), stamped explicitly rather
+    # than left unset so code-analysis records carry a scan time like every
+    # other adapter.
+    collected_at = datetime.now(timezone.utc)
+    return normalize_code_analysis_df(
+        scan_source_for_crypto_usage(path), scan_id=scan_id, observed_at=collected_at
+    )

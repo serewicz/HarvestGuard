@@ -101,3 +101,27 @@ def test_scan_azure_container_findings_returns_findings_on_success(mock_service_
 
     assert len(findings) == 1
     assert findings[0].location == "https://acct.blob.core.windows.net/my-container/data.csv"
+
+
+def _mixed_result_blobs():
+    """Yield one good blob, then fail partway through iteration."""
+    yield _make_blob("good.csv", 10, "2026-01-01")
+    raise AzureError("boom")
+
+
+@patch("scanner.azure_blob.DefaultAzureCredential")
+@patch("scanner.azure_blob.BlobServiceClient")
+def test_mixed_result_scan_keeps_partial_findings_on_the_exception(mock_service_cls, _mock_cred):
+    # A failure partway through blob iteration is still a failure -- but the
+    # finding collected before the failure must ride along on the exception,
+    # not be discarded with it.
+    container_client = mock_service_cls.return_value.get_container_client.return_value
+    container_client.list_blobs.return_value = _mixed_result_blobs()
+
+    with pytest.raises(CloudScanError) as exc_info:
+        scan_azure_container_findings("https://acct.blob.core.windows.net", "my-container")
+
+    partial = exc_info.value.partial_findings
+    assert len(partial) == 1
+    assert partial[0].location == "https://acct.blob.core.windows.net/my-container/good.csv"
+    assert "boom" in str(exc_info.value)

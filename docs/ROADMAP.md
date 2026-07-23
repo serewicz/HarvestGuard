@@ -99,13 +99,18 @@ Key product constraints:
 - **Title:** Cryptographic asset inventory
 - **Purpose:** Identify cryptographic exposure across local filesystems and
   supported object storage using observable evidence.
-- **Status:** Partial
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** None
 - **Acceptance criteria:** Local filesystem, AWS S3, GCS, Azure Blob, and code
   crypto analysis scan adapters produce inventory records; each record includes
   source, location, observed evidence, scanner identity, scan time, and
-  confidence; existing scanner capabilities are preserved.
+  confidence; existing scanner capabilities are preserved. The inventory
+  concept, its minimum record fields, and the per-adapter mapping are documented
+  in [ASSET_INVENTORY.md](ASSET_INVENTORY.md); the adapters that produce the
+  records are implemented in `finding_adapters.py` over the normalized model in
+  `findings.py`. Uncertain and inaccessible observations remain visible rather
+  than being silently reclassified.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/13
 
 ### HG-002

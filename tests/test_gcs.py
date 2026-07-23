@@ -106,3 +106,25 @@ def test_scan_gcs_bucket_findings_returns_findings_on_success(mock_client_cls):
 
     assert len(findings) == 1
     assert findings[0].location == "gs://my-bucket/data.csv"
+
+
+def _mixed_result_blobs():
+    """Yield one good blob, then fail partway through iteration."""
+    yield _make_blob("good.csv", 10, "2026-01-01")
+    raise GoogleAPIError("boom")
+
+
+@patch("scanner.gcs.storage.Client")
+def test_mixed_result_scan_keeps_partial_findings_on_the_exception(mock_client_cls):
+    # A failure partway through blob iteration is still a failure -- but the
+    # finding collected before the failure must ride along on the exception,
+    # not be discarded with it.
+    mock_client_cls.return_value.list_blobs.return_value = _mixed_result_blobs()
+
+    with pytest.raises(CloudScanError) as exc_info:
+        scan_gcs_bucket_findings("my-bucket")
+
+    partial = exc_info.value.partial_findings
+    assert len(partial) == 1
+    assert partial[0].location == "gs://my-bucket/good.csv"
+    assert "boom" in str(exc_info.value)

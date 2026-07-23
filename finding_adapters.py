@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -58,7 +59,15 @@ def _filesystem_ownership_signals(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def normalize_s3_df(df: pd.DataFrame, scan_id: str | None = None) -> list[NormalizedFinding]:
+def normalize_s3_df(
+    df: pd.DataFrame,
+    scan_id: str | None = None,
+    observed_at: str | datetime | None = None,
+) -> list[NormalizedFinding]:
+    # observed_at is the scan's collection time (passed in by the scan
+    # wrapper), never the object's own LastModified time -- the latter is a
+    # property of the asset, not of the observation, and is preserved in
+    # technical_metadata["Modified"]. See ASSET_INVENTORY.md / NORMALIZED_FINDINGS.md.
     return [
         NormalizedFinding(
             scan_id=scan_id,
@@ -67,7 +76,7 @@ def normalize_s3_df(df: pd.DataFrame, scan_id: str | None = None) -> list[Normal
             location=row["Location"],
             scanner_name="s3",
             scanner_version="0.1.0",
-            observed_at=row.get("Modified"),
+            observed_at=observed_at,
             evidence=f"S3 ServerSideEncryption metadata: {row.get('Encryption')}",
             confidence="High",
             technical_metadata=_metadata(row, ["Size", "Modified", "Encryption"]),
@@ -76,7 +85,11 @@ def normalize_s3_df(df: pd.DataFrame, scan_id: str | None = None) -> list[Normal
     ]
 
 
-def normalize_gcs_df(df: pd.DataFrame, scan_id: str | None = None) -> list[NormalizedFinding]:
+def normalize_gcs_df(
+    df: pd.DataFrame,
+    scan_id: str | None = None,
+    observed_at: str | datetime | None = None,
+) -> list[NormalizedFinding]:
     return [
         NormalizedFinding(
             scan_id=scan_id,
@@ -85,7 +98,7 @@ def normalize_gcs_df(df: pd.DataFrame, scan_id: str | None = None) -> list[Norma
             location=row["Location"],
             scanner_name="gcs",
             scanner_version="0.1.0",
-            observed_at=row.get("Modified"),
+            observed_at=observed_at,
             evidence=f"GCS encryption metadata: {row.get('Encryption')}",
             confidence="High",
             technical_metadata=_metadata(row, ["Size", "Modified", "Encryption"]),
@@ -95,7 +108,9 @@ def normalize_gcs_df(df: pd.DataFrame, scan_id: str | None = None) -> list[Norma
 
 
 def normalize_azure_blob_df(
-    df: pd.DataFrame, scan_id: str | None = None
+    df: pd.DataFrame,
+    scan_id: str | None = None,
+    observed_at: str | datetime | None = None,
 ) -> list[NormalizedFinding]:
     return [
         NormalizedFinding(
@@ -105,7 +120,7 @@ def normalize_azure_blob_df(
             location=row["Location"],
             scanner_name="azure_blob",
             scanner_version="0.1.0",
-            observed_at=row.get("Modified"),
+            observed_at=observed_at,
             evidence=f"Azure Blob encryption metadata: {row.get('Encryption')}",
             confidence="High",
             technical_metadata=_metadata(row, ["Size", "Modified", "Encryption"]),
@@ -115,8 +130,14 @@ def normalize_azure_blob_df(
 
 
 def normalize_sensitive_data_df(
-    df: pd.DataFrame, scan_id: str | None = None
+    df: pd.DataFrame,
+    scan_id: str | None = None,
+    observed_at: str | datetime | None = None,
 ) -> list[NormalizedFinding]:
+    # observed_at is the scan's collection time (passed in by the scan
+    # wrapper), never the file's own "Modified" mtime -- the latter is a
+    # property of the asset, not of the observation, and is preserved in
+    # technical_metadata["Modified"]. See ASSET_INVENTORY.md / NORMALIZED_FINDINGS.md.
     return [
         NormalizedFinding(
             scan_id=scan_id,
@@ -125,7 +146,7 @@ def normalize_sensitive_data_df(
             location=row["Location"],
             scanner_name="sensitive_data_classifier",
             scanner_version="0.1.0",
-            observed_at=row.get("Modified"),
+            observed_at=observed_at,
             evidence=(
                 f"Sensitive data categories detected: {row.get('Categories')}; "
                 f"total matches: {row.get('Total Matches')}"
@@ -140,8 +161,13 @@ def normalize_sensitive_data_df(
 
 
 def normalize_code_analysis_df(
-    df: pd.DataFrame, scan_id: str | None = None
+    df: pd.DataFrame,
+    scan_id: str | None = None,
+    observed_at: str | datetime | None = None,
 ) -> list[NormalizedFinding]:
+    # observed_at is the scan's collection time (passed in by the scan
+    # wrapper). Source findings have no asset "modification time" to confuse
+    # it with; this makes scan time explicit rather than leaving it unset.
     return [
         NormalizedFinding(
             scan_id=scan_id,
@@ -150,6 +176,7 @@ def normalize_code_analysis_df(
             location=row["Location"],
             scanner_name="semgrep_crypto_rules",
             scanner_version="0.1.0",
+            observed_at=observed_at,
             evidence=f"Semgrep rule matched: {row.get('Rule')}",
             confidence="High",
             # Location alone (file:line) is not always a unique identity: two

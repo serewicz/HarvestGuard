@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 
@@ -105,6 +105,12 @@ def scan_filesystem_for_sensitive_data(path: str, max_depth: int = 3) -> pd.Data
 def scan_filesystem_for_sensitive_data_findings(
     path: str, max_depth: int = 3, scan_id: str | None = None
 ) -> list[NormalizedFinding]:
+    # Collection time for the scan (observed_at), stamped once here rather
+    # than derived from each file's "Modified" mtime so sensitive-data
+    # records carry a scan time like every other adapter.
+    collected_at = datetime.now(timezone.utc)
     return normalize_sensitive_data_df(
-        scan_filesystem_for_sensitive_data(path, max_depth=max_depth), scan_id=scan_id
+        scan_filesystem_for_sensitive_data(path, max_depth=max_depth),
+        scan_id=scan_id,
+        observed_at=collected_at,
     )

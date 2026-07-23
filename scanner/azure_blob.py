@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
 from azure.core.exceptions import AzureError
 from azure.identity import DefaultAzureCredential
@@ -70,7 +72,18 @@ def scan_azure_container_findings(
     scan_id: str | None = None,
 ) -> list[NormalizedFinding]:
     errors: list[str] = []
+    # Collection time for the scan (observed_at), not the blob's own last-modified time.
+    collected_at = datetime.now(timezone.utc)
     df = scan_azure_container(account_url, container_name, prefix=prefix, errors=errors)
     if errors:
-        raise CloudScanError("; ".join(errors))
-    return normalize_azure_blob_df(df, scan_id=scan_id)
+        # Still a failure (the caller exits nonzero), but the findings
+        # gathered before the failure ride along on the exception instead
+        # of being discarded -- a later blob/page failing must not erase
+        # the evidence already collected.
+        raise CloudScanError(
+            "; ".join(errors),
+            partial_findings=normalize_azure_blob_df(
+                df, scan_id=scan_id, observed_at=collected_at
+            ),
+        )
+    return normalize_azure_blob_df(df, scan_id=scan_id, observed_at=collected_at)
