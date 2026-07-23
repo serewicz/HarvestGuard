@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["APPROVED", "BLOCKERS", "NEEDS_HUMAN"]
+    },
+    "reviewed_sha": {
+      "type": "string"
+    },
+    "blockers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "important": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "follow_up": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": ["status", "reviewed_sha", "blockers", "important", "follow_up", "summary"],
+  "additionalProperties": false
+}

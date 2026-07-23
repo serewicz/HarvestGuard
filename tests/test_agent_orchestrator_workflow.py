@@ -37,6 +37,11 @@ def publish_job(workflow) -> dict:
     return workflow["jobs"]["publish"]
 
 
+@pytest.fixture(scope="module")
+def review_job(workflow) -> dict:
+    return workflow["jobs"]["review"]
+
+
 def _all_run_text(job: dict) -> str:
     return "\n".join(step.get("run", "") for step in job["steps"])
 
@@ -214,3 +219,165 @@ def test_no_step_in_build_calls_check_builder_result_after_a_write(build_job):
     check_index = names.index("Stage and check builder result")
     assert check_index < names.index("Lint with ruff")
     assert check_index < names.index("Create implementation artifact")
+
+
+# --- Codex Principal Review stage -----------------------------------------
+#
+# These mirror the authority-separation properties already covered above,
+# applied to the new `review` job: it must be read-only end to end (no
+# GitHub write scope, no mutating git/gh command, no merge/ready path), it
+# must be the only place the Codex action runs, and it must actually pass
+# and enforce the exact PR head SHA rather than trusting Codex's self-report.
+
+
+def test_review_depends_on_publish(review_job):
+    assert review_job["needs"] == "publish"
+
+
+def test_review_only_runs_when_publish_succeeded(review_job):
+    assert "needs.publish.result == 'success'" in review_job["if"]
+
+
+def test_review_job_permissions_are_read_only(review_job):
+    assert review_job["permissions"] == {
+        "contents": "read",
+        "pull-requests": "read",
+        "issues": "read",
+    }
+
+
+def test_review_job_has_no_write_permissions(review_job):
+    perms = review_job["permissions"]
+    assert all(scope == "read" for scope in perms.values())
+
+
+def test_review_job_checkout_does_not_persist_credentials(review_job):
+    checkout = next(
+        s for s in review_job["steps"] if s.get("uses", "").startswith("actions/checkout")
+    )
+    assert checkout["with"]["persist-credentials"] is False
+
+
+def test_review_job_checks_out_the_exact_publish_pr_head_sha(review_job):
+    checkout = next(
+        s for s in review_job["steps"] if s.get("uses", "").startswith("actions/checkout")
+    )
+    assert checkout["with"]["ref"] == "${{ needs.publish.outputs.pr_head_sha }}"
+
+
+def test_publish_job_declares_pr_number_and_head_sha_outputs(publish_job):
+    assert "pr_number" in publish_job["outputs"]
+    assert "pr_head_sha" in publish_job["outputs"]
+
+
+def test_codex_action_runs_only_in_review(build_job, publish_job, review_job):
+    assert not any("codex-action" in u for u in _all_uses(build_job))
+    assert not any("codex-action" in u for u in _all_uses(publish_job))
+    assert any("codex-action" in u for u in _all_uses(review_job))
+
+
+def test_codex_step_uses_read_only_permission_profile(review_job):
+    codex_step = next(s for s in review_job["steps"] if "codex-action" in s.get("uses", ""))
+    assert codex_step["with"]["permission-profile"] == ":read-only"
+
+
+def test_codex_step_uses_the_openai_api_key_secret(review_job):
+    codex_step = next(s for s in review_job["steps"] if "codex-action" in s.get("uses", ""))
+    assert codex_step["with"]["openai-api-key"] == "${{ secrets.OPENAI_API_KEY }}"
+
+
+def test_codex_step_declares_the_structured_output_schema(review_job):
+    codex_step = next(s for s in review_job["steps"] if "codex-action" in s.get("uses", ""))
+    assert codex_step["with"]["output-schema-file"] == "scripts/codex_review_schema.json"
+
+
+def test_review_job_validates_result_against_exact_pr_head_sha(review_job):
+    names = [s.get("name") for s in review_job["steps"]]
+    validate_step = review_job["steps"][names.index("Validate Codex review result")]
+    assert "check_codex_review.py" in validate_step["run"]
+    assert validate_step["env"]["PR_HEAD_SHA"] == "${{ needs.publish.outputs.pr_head_sha }}"
+
+
+def test_codex_review_runs_before_validate_step(review_job):
+    names = [s.get("name") for s in review_job["steps"]]
+    codex_index = next(
+        i for i, s in enumerate(review_job["steps"]) if "codex-action" in s.get("uses", "")
+    )
+    assert codex_index < names.index("Validate Codex review result")
+
+
+def test_review_job_has_no_write_capable_git_or_gh_command(review_job):
+    combined = _all_run_text(review_job)
+    for forbidden in (
+        "git push",
+        "git commit",
+        "git checkout -b",
+        "gh pr create",
+        "gh pr edit",
+        "gh pr merge",
+        "gh pr ready",
+        "gh pr review",
+        "gh pr comment",
+        "--force",
+    ):
+        assert forbidden not in combined
+
+
+def test_review_job_uploads_result_as_artifact_and_does_not_post_to_pr(review_job):
+    assert any(u.startswith("actions/upload-artifact") for u in _all_uses(review_job))
+    combined = _all_run_text(review_job)
+    assert "gh pr comment" not in combined
+
+
+# --- CI gating hardening: fail closed on the exact PR head SHA -------------
+
+WAIT_STEP_NAME = "Wait for required CI checks on the exact PR head SHA"
+
+
+def test_ci_wait_step_uses_the_committed_required_ci_checker(review_job):
+    wait_step = next(s for s in review_job["steps"] if s.get("name") == WAIT_STEP_NAME)
+    assert "scripts/check_required_ci.py" in wait_step["run"]
+    assert "$PR_HEAD_SHA" in wait_step["run"]
+    assert wait_step["env"]["PR_HEAD_SHA"] == "${{ needs.publish.outputs.pr_head_sha }}"
+
+
+def test_ci_wait_step_fetches_check_runs_for_the_exact_sha_not_the_pr(review_job):
+    wait_step = next(s for s in review_job["steps"] if s.get("name") == WAIT_STEP_NAME)
+    # Regression guard: the earlier version used `gh pr checks`, which
+    # reflects the PR's *current* head, not necessarily the SHA this job
+    # actually checked out and is about to hand to Codex.
+    assert "commits/$PR_HEAD_SHA/check-runs" in wait_step["run"]
+    assert "gh pr checks" not in wait_step["run"]
+
+
+def test_ci_wait_step_is_bounded(review_job):
+    wait_step = next(s for s in review_job["steps"] if s.get("name") == WAIT_STEP_NAME)
+    assert "MAX_WAIT_SECONDS" in wait_step["run"]
+    assert "Timed out" in wait_step["run"]
+
+
+def test_ci_wait_step_precedes_codex_invocation(review_job):
+    names = [s.get("name") for s in review_job["steps"]]
+    codex_index = next(
+        i for i, s in enumerate(review_job["steps"]) if "codex-action" in s.get("uses", "")
+    )
+    assert names.index(WAIT_STEP_NAME) < codex_index
+
+
+# --- Codex step hardening ---------------------------------------------------
+
+
+def test_codex_step_sets_drop_sudo_safety_strategy_explicitly(review_job):
+    codex_step = next(s for s in review_job["steps"] if "codex-action" in s.get("uses", ""))
+    assert codex_step["with"]["safety-strategy"] == "drop-sudo"
+
+
+# --- Review artifact preserved even when validation fails closed -----------
+
+
+def test_upload_review_artifact_step_runs_even_on_failure(review_job):
+    upload_step = next(
+        s for s in review_job["steps"] if s.get("name") == "Upload Codex review artifact"
+    )
+    assert upload_step["if"] == "always()"
+    assert upload_step["with"]["if-no-files-found"] == "ignore"
