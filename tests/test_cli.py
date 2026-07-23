@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -422,3 +423,66 @@ def test_cloud_scan_failure_is_scan_execution_error(capsys, monkeypatch):
     assert exit_code == 1
     assert "Scanner Warnings:" in captured.out
     assert "s3: credentials unavailable" in captured.out
+
+
+# The following tests exercise the real scanner caught-error paths by mocking
+# the provider SDKs (not the harvestguard-level wrapper), confirming that an
+# SDK/auth failure produces exit code 1 and leaves --json stdout uncorrupted.
+
+
+def test_s3_scan_sdk_failure_exits_one_with_clean_json(capsys, monkeypatch):
+    from botocore.exceptions import NoCredentialsError
+
+    mock_client = MagicMock()
+    mock_client.list_objects_v2.side_effect = NoCredentialsError()
+    monkeypatch.setattr("scanner.cloud.boto3.client", lambda *a, **k: mock_client)
+
+    exit_code = harvestguard.main(["scan", "acme-bucket", "--type", "s3", "--json"])
+
+    captured = capsys.readouterr()
+    assert exit_code == harvestguard.EXIT_SCANNER_ERROR
+    # stdout must remain valid, empty JSON -- not corrupted by the error text.
+    assert json.loads(captured.out) == []
+    assert "Error scanning S3" not in captured.out
+    # The failure is surfaced on stderr, where it does not corrupt output.
+    assert "s3 scanner failed" in captured.err
+
+
+def test_gcs_scan_credentials_failure_exits_one_with_clean_json(capsys, monkeypatch):
+    from google.auth.exceptions import DefaultCredentialsError
+
+    # storage.Client() resolves credentials eagerly at construction time, so an
+    # auth failure surfaces from the constructor rather than from list_blobs().
+    monkeypatch.setattr(
+        "scanner.gcs.storage.Client",
+        MagicMock(side_effect=DefaultCredentialsError("no credentials found")),
+    )
+
+    exit_code = harvestguard.main(["scan", "acme-bucket", "--type", "gcs", "--json"])
+
+    captured = capsys.readouterr()
+    assert exit_code == harvestguard.EXIT_SCANNER_ERROR
+    assert json.loads(captured.out) == []
+    assert "Error scanning GCS" not in captured.out
+    assert "gcs scanner failed" in captured.err
+
+
+def test_azure_blob_scan_sdk_failure_exits_one_with_clean_json(capsys, monkeypatch):
+    from azure.core.exceptions import ClientAuthenticationError
+
+    mock_service = MagicMock()
+    mock_service.return_value.get_container_client.return_value.list_blobs.side_effect = (
+        ClientAuthenticationError("authentication failed")
+    )
+    monkeypatch.setattr("scanner.azure_blob.BlobServiceClient", mock_service)
+    monkeypatch.setattr("scanner.azure_blob.DefaultAzureCredential", MagicMock())
+
+    exit_code = harvestguard.main(
+        ["scan", "acct/container", "--type", "azure-blob", "--json"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == harvestguard.EXIT_SCANNER_ERROR
+    assert json.loads(captured.out) == []
+    assert "Error scanning Azure Blob" not in captured.out
+    assert "azure blob scanner failed" in captured.err

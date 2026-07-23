@@ -207,11 +207,13 @@ def test_cloud_scanner_wrappers_can_return_normalized_findings(monkeypatch):
         "Encryption": "AES256",
         "Risk": "Low",
     }])
-    monkeypatch.setattr(s3_scanner, "scan_s3_bucket", lambda bucket, prefix="": df)
-    monkeypatch.setattr(gcs_scanner, "scan_gcs_bucket", lambda bucket, prefix="": df)
+    # The *_findings wrappers read from the raising _collect_* core (not the
+    # error-swallowing DataFrame view) so scan failures propagate to the CLI.
+    monkeypatch.setattr(s3_scanner, "_collect_s3_objects", lambda bucket, prefix="": df)
+    monkeypatch.setattr(gcs_scanner, "_collect_gcs_objects", lambda bucket, prefix="": df)
     monkeypatch.setattr(
         azure_scanner,
-        "scan_azure_container",
+        "_collect_azure_blobs",
         lambda account_url, container_name, prefix="": df,
     )
 
