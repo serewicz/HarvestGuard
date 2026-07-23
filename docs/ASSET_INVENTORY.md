@@ -89,8 +89,17 @@ explicitly rather than dropping it:
 - **Things that cannot be established at all** — e.g. business ownership from
   filesystem metadata — are recorded in `unknowns`, distinct from
   `limitations`.
-- **Parsing and API errors** — partial or malformed assets and scanner/API
-  failures are surfaced in `errors` rather than collapsing the record.
+- **Parsing errors** — partial or malformed assets (for example an
+  undecryptable or malformed certificate/key block in the local certificate/key
+  scanner) are surfaced in the record's `errors` field rather than collapsing
+  the record.
+- **Cloud scanner/API failures** — a provider, authentication, or per-object
+  access failure in the S3, GCS, or Azure Blob adapters does not produce a
+  per-object inventory record. It is raised as a scan-level `CloudScanError`
+  that carries whatever findings were already collected before the failure, so
+  a failed or partial cloud scan is reported as a failure (nonzero CLI exit)
+  rather than being silently presented as a clean, empty result. The specific
+  objects or pages that could not be read are named in that error.
 - **Confidence** — records whose evidence is indirect or incomplete carry a
   lower `confidence` (and, for the filesystem reference adapter, a
   `confidence_rationale`) rather than being presented as certain.

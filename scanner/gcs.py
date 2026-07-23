@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
 from google.api_core.exceptions import GoogleAPIError
 from google.auth.exceptions import DefaultCredentialsError
@@ -64,7 +66,9 @@ def scan_gcs_bucket_findings(
     bucket_name: str, prefix: str = "", scan_id: str | None = None
 ) -> list[NormalizedFinding]:
     errors: list[str] = []
+    # Collection time for the scan (observed_at), not the blob's own update time.
+    collected_at = datetime.now(timezone.utc)
     df = scan_gcs_bucket(bucket_name, prefix=prefix, errors=errors)
     if errors:
         raise CloudScanError("; ".join(errors))
-    return normalize_gcs_df(df, scan_id=scan_id)
+    return normalize_gcs_df(df, scan_id=scan_id, observed_at=collected_at)
