@@ -647,6 +647,58 @@ def test_no_agent_runs_in_a_write_capable_job(workflow):
         assert not (has_write and runs_agent), f"{job_id} runs an agent with write scope"
 
 
+# --- Codex escalation criteria ----------------------------------------------
+#
+# The classification guidance must keep ordinary implementation defects on
+# the BLOCKERS path (eligible for the one correction cycle) and reserve
+# NEEDS_HUMAN for genuine human decisions. Both Codex prompts are defined
+# separately (cycle 0 and the re-review), so both are checked. Prompts are
+# whitespace-normalized before matching so YAML line wrapping cannot split
+# a phrase across lines and silently break these assertions.
+
+
+def _codex_prompt_text(job: dict) -> str:
+    codex_step = next(s for s in job["steps"] if "codex-action" in s.get("uses", ""))
+    return " ".join(codex_step["with"]["prompt"].split())
+
+
+ESCALATION_GUIDANCE_PHRASES = [
+    # The explicit tie-breaking instruction, verbatim.
+    "When a finding has a clear expected behavior and a bounded technical "
+    "correction, classify it as BLOCKERS rather than NEEDS_HUMAN.",
+    "NEEDS_HUMAN is not a severity level; it means a human decision is required.",
+    # BLOCKER must cover ordinary implementation defects...
+    "incorrect behavior, requirement mismatches, missing validation, swallowed "
+    "errors, incorrect exit behavior, broken or insufficient tests, unsafe "
+    "implementation details, regressions, and documentation that contradicts "
+    "implemented behavior",
+    # ...and stay BLOCKER regardless of significance.
+    "do not escalate them to NEEDS_HUMAN merely because they require code changes",
+    # NEEDS_HUMAN is reserved for genuine human decisions.
+    "NEEDS_HUMAN is reserved for findings that genuinely require a human decision",
+    "product-scope decisions",
+    "architecture choices with multiple materially different valid approaches",
+    "requested changes to protected governance paths",
+]
+
+
+@pytest.mark.parametrize("phrase", ESCALATION_GUIDANCE_PHRASES)
+def test_cycle_0_review_prompt_contains_escalation_guidance(review_job, phrase):
+    assert phrase in _codex_prompt_text(review_job)
+
+
+@pytest.mark.parametrize("phrase", ESCALATION_GUIDANCE_PHRASES)
+def test_cycle_1_rereview_prompt_contains_escalation_guidance(rereview_job, phrase):
+    assert phrase in _codex_prompt_text(rereview_job)
+
+
+def test_both_codex_prompts_keep_important_vocabulary_unchanged(review_job, rereview_job):
+    # IMPORTANT retains its existing meaning -- the guidance must not have
+    # redefined or dropped it in either prompt.
+    for job in (review_job, rereview_job):
+        assert "IMPORTANT: normally fixed before merge." in _codex_prompt_text(job)
+
+
 def test_correction_jobs_never_cat_or_echo_the_review_json(correct_job, rereview_job):
     # The review/blocker text flows only through context files written by
     # python (which print counts, never content); no shell step may dump

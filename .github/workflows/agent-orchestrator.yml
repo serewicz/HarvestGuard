@@ -972,6 +972,31 @@ jobs:
             - IMPORTANT: normally fixed before merge.
             - FOLLOW_UP: a valid issue that belongs in separate work, not this PR.
 
+            BLOCKER covers concrete, bounded defects that should prevent
+            merge and that the builder can reasonably correct in code:
+            incorrect behavior, requirement mismatches, missing validation,
+            swallowed errors, incorrect exit behavior, broken or
+            insufficient tests, unsafe implementation details, regressions,
+            and documentation that contradicts implemented behavior. Such
+            findings stay BLOCKER even when they are significant -- do not
+            escalate them to NEEDS_HUMAN merely because they require code
+            changes.
+
+            NEEDS_HUMAN is reserved for findings that genuinely require a
+            human decision before implementation can proceed: ambiguous or
+            conflicting product requirements, product-scope decisions,
+            architecture choices with multiple materially different valid
+            approaches, security or governance policy decisions, requested
+            changes to protected governance paths, unclear business intent,
+            or any situation where you cannot determine the correct
+            behavior from the issue, the repository, Product Principles,
+            and the Agent Contract.
+
+            When a finding has a clear expected behavior and a bounded
+            technical correction, classify it as BLOCKERS rather than
+            NEEDS_HUMAN. NEEDS_HUMAN is not a severity level; it means a
+            human decision is required.
+
             Write a single JSON object to the exact path given in the context
             file's "result_file_path" field, conforming to the schema this run
             was invoked with:
@@ -1698,6 +1723,31 @@ jobs:
             - BLOCKER: must prevent merge.
             - IMPORTANT: normally fixed before merge.
             - FOLLOW_UP: a valid issue that belongs in separate work, not this PR.
+
+            BLOCKER covers concrete, bounded defects that should prevent
+            merge and that the builder can reasonably correct in code:
+            incorrect behavior, requirement mismatches, missing validation,
+            swallowed errors, incorrect exit behavior, broken or
+            insufficient tests, unsafe implementation details, regressions,
+            and documentation that contradicts implemented behavior. Such
+            findings stay BLOCKER even when they are significant -- do not
+            escalate them to NEEDS_HUMAN merely because they require code
+            changes.
+
+            NEEDS_HUMAN is reserved for findings that genuinely require a
+            human decision before implementation can proceed: ambiguous or
+            conflicting product requirements, product-scope decisions,
+            architecture choices with multiple materially different valid
+            approaches, security or governance policy decisions, requested
+            changes to protected governance paths, unclear business intent,
+            or any situation where you cannot determine the correct
+            behavior from the issue, the repository, Product Principles,
+            and the Agent Contract.
+
+            When a finding has a clear expected behavior and a bounded
+            technical correction, classify it as BLOCKERS rather than
+            NEEDS_HUMAN. NEEDS_HUMAN is not a severity level; it means a
+            human decision is required.
 
             Write a single JSON object to the exact path given in the context
             file's "result_file_path" field, conforming to the schema this run
