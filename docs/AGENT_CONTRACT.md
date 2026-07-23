@@ -168,7 +168,7 @@ once.
 
 If disagreement remains: escalate to Tim.
 
-Maximum automated correction/review cycles: 2.
+Maximum automated correction/review cycles: 3.
 
 ## When human involvement is required
 
@@ -208,8 +208,8 @@ Default policy:
 
 ## Cost governance
 
-- max automated correction cycles: 2;
-- max review cycles: 2;
+- max automated correction cycles: 3;
+- max review cycles: 3;
 - log provider/model, run count, duration, and estimated cost where
   available;
 - no infinite review/fix loops;

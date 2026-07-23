@@ -24,24 +24,37 @@ def _write_policy(tmp_path, limit) -> Path:
     return path
 
 
-def test_orchestrator_cap_is_exactly_one():
-    # The workflow's static job graph contains exactly one correction
-    # chain; this constant must mirror that. See the script's docstring.
-    assert ORCHESTRATOR_MAX_CORRECTION_CYCLES == 1
+def test_orchestrator_cap_is_exactly_three():
+    # The workflow's static job graph contains exactly three correction
+    # chains; this constant must mirror that. See the script's docstring.
+    assert ORCHESTRATOR_MAX_CORRECTION_CYCLES == 3
 
 
-def test_cycle_1_within_policy_limit_passes():
-    assert check(_policy(1), 1) == []
-    assert check(_policy(2), 1) == []
+def test_cycles_1_through_3_within_policy_limit_pass():
+    for cycle in (1, 2, 3):
+        assert check(_policy(3), cycle) == []
 
 
-def test_cycle_2_fails_even_when_policy_allows_2():
-    # The policy ceiling is 2 (per docs/AGENT_CONTRACT.md), but this
-    # orchestrator version only implements one cycle -- the hard cap must
-    # refuse cycle 2 regardless of policy headroom.
-    reasons = check(_policy(2), 2)
+def test_cycle_4_fails_under_the_policy_limit_too():
+    reasons = check(_policy(3), 4)
     assert reasons
     assert any("hard cap" in r for r in reasons)
+    assert any("policy limit" in r for r in reasons)
+
+
+def test_cycle_4_fails_via_hard_cap_even_if_policy_is_accidentally_raised():
+    # check() itself doesn't re-validate the policy ceiling (that's
+    # validate_agent_policy.py's job) -- so even a wildly permissive value
+    # must not unlock a fourth cycle here.
+    reasons = check(_policy(99), 4)
+    assert reasons
+    assert any("hard cap" in r for r in reasons)
+
+
+def test_policy_below_requested_cycle_rejects():
+    reasons = check(_policy(1), 2)
+    assert reasons
+    assert any("policy limit" in r for r in reasons)
 
 
 def test_policy_limit_0_refuses_cycle_1():
@@ -87,9 +100,9 @@ def test_main_passes_for_valid_policy_and_cycle_1(tmp_path, capsys):
     assert "permitted" in capsys.readouterr().out
 
 
-def test_main_fails_for_cycle_2(tmp_path, capsys):
-    path = _write_policy(tmp_path, 2)
-    rc = main([str(path), "2"])
+def test_main_fails_for_cycle_4(tmp_path, capsys):
+    path = _write_policy(tmp_path, 3)
+    rc = main([str(path), "4"])
     assert rc == 1
     assert "::error::" in capsys.readouterr().out
 
@@ -126,10 +139,11 @@ def test_main_requires_two_arguments(capsys):
     assert "usage" in capsys.readouterr().out
 
 
-def test_real_repo_policy_permits_exactly_cycle_1():
-    # The committed policy (max_automated_correction_cycles: 2, the
-    # contract ceiling) must allow the one cycle this workflow implements
-    # -- and the hard cap must still refuse a second one.
+def test_real_repo_policy_permits_cycles_1_through_3_and_no_more():
+    # The committed policy (max_automated_correction_cycles: 3, the
+    # contract ceiling) must allow exactly the three cycles this workflow
+    # implements -- and both caps must refuse a fourth.
     policy = yaml.safe_load((REPO_ROOT / ".agent-policy.yml").read_text())
-    assert check(policy, 1) == []
-    assert check(policy, 2)
+    for cycle in (1, 2, 3):
+        assert check(policy, cycle) == []
+    assert check(policy, 4)

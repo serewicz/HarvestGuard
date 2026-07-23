@@ -8,16 +8,19 @@ Called by the `correct` job in .github/workflows/agent-orchestrator.yml as:
 Exit 0 only if the requested correction cycle number is permitted by BOTH:
 
 1. This orchestrator version's hard cap (ORCHESTRATOR_MAX_CORRECTION_CYCLES
-   = 1). The workflow's static job graph only contains one correction
-   chain, so this constant is a belt-and-braces mirror of that structure --
+   = 3). The workflow's static job graph contains exactly three correction
+   chains, so this constant is a belt-and-braces mirror of that structure --
    raising it without also adding the corresponding jobs (and policy
    review) would be meaningless, which is the point: two things have to
-   change together, visibly.
+   change together, visibly. A cycle number above 3 is rejected here even
+   if the policy value were accidentally raised later.
 
 2. `review.max_automated_correction_cycles` in .agent-policy.yml. The
    policy value is the governance ceiling (docs/AGENT_CONTRACT.md allows at
-   most 2); if a future policy edit lowers it to 0, this gate refuses to
-   run any correction at all, with no workflow change needed.
+   most 3, raised from 2 with Tim's explicit authorization); if a future
+   policy edit lowers it, this gate refuses the excess cycles -- or all
+   corrections at 0 -- with no workflow change needed. Every correction
+   cycle re-runs this gate independently.
 
 Fails closed on every malformed input: missing/unreadable/invalid policy
 file, missing key, boolean-typed or non-integer or negative limit, and any
@@ -31,10 +34,11 @@ from pathlib import Path
 
 import yaml
 
-# Mirror of the workflow's static structure: exactly one correction chain
-# (correct -> publish_correction -> rereview) exists. See the module
-# docstring for why this is deliberately duplicated here.
-ORCHESTRATOR_MAX_CORRECTION_CYCLES = 1
+# Mirror of the workflow's static structure: exactly three correction
+# chains (correct_N -> publish_correction_N -> review_N, N in 1..3) exist,
+# and nothing depends on review_3. See the module docstring for why this
+# is deliberately duplicated here.
+ORCHESTRATOR_MAX_CORRECTION_CYCLES = 3
 
 POLICY_KEY_PATH = ("review", "max_automated_correction_cycles")
 

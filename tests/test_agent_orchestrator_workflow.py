@@ -42,19 +42,21 @@ def review_job(workflow) -> dict:
     return workflow["jobs"]["review"]
 
 
-@pytest.fixture(scope="module")
-def correct_job(workflow) -> dict:
-    return workflow["jobs"]["correct"]
+CORRECTION_CYCLES = (1, 2, 3)
+
+CORRECT_IDS = tuple(f"correct_{n}" for n in CORRECTION_CYCLES)
+PUBLISH_CORRECTION_IDS = tuple(f"publish_correction_{n}" for n in CORRECTION_CYCLES)
+REVIEW_IDS = ("review", "review_1", "review_2", "review_3")
+
+SECRET_EXPR = "${{ secrets.HARVESTGUARD_AUTOMATION_TOKEN }}"
+PAT_JOB_IDS = ("publish",) + PUBLISH_CORRECTION_IDS
 
 
-@pytest.fixture(scope="module")
-def publish_correction_job(workflow) -> dict:
-    return workflow["jobs"]["publish_correction"]
-
-
-@pytest.fixture(scope="module")
-def rereview_job(workflow) -> dict:
-    return workflow["jobs"]["rereview"]
+def _reviewed_sha_expr(n: int) -> str:
+    """The exact SHA cycle-n corrections are built against and verified by."""
+    if n == 1:
+        return "${{ needs.publish.outputs.pr_head_sha }}"
+    return "${{ needs.publish_correction_%d.outputs.correction_sha }}" % (n - 1)
 
 
 def _all_run_text(job: dict) -> str:
@@ -81,11 +83,12 @@ def test_build_job_has_no_write_permissions(build_job):
     assert perms.get("contents") == "read"
 
 
-def test_publish_job_has_the_write_scopes(publish_job):
+def test_publish_job_github_token_is_read_only(publish_job):
+    # Since the automation PAT became the write path, the job's own
+    # GITHUB_TOKEN needs only checkout + PR-number reads.
     assert publish_job["permissions"] == {
-        "contents": "write",
-        "issues": "read",
-        "pull-requests": "write",
+        "contents": "read",
+        "pull-requests": "read",
     }
 
 
@@ -138,12 +141,12 @@ def test_publish_job_consumes_build_branch_output(publish_job):
 
 
 def test_claude_code_action_runs_only_in_read_only_jobs(workflow):
-    # Claude runs in exactly two places -- build and correct -- and both
-    # hold read-only GitHub tokens. It must never appear in a job with any
-    # write scope (publish, publish_correction).
+    # Claude runs in exactly four places -- build and the three correction
+    # jobs -- and all hold read-only GitHub tokens. It must never appear in
+    # a job with any write scope (publish, publish_correction_*).
     for job_id, job in workflow["jobs"].items():
         has_claude = any("claude-code-action" in u for u in _all_uses(job))
-        if job_id in ("build", "correct"):
+        if job_id == "build" or job_id in CORRECT_IDS:
             assert has_claude
         else:
             assert not has_claude, f"claude-code-action must not run in {job_id}"
@@ -292,10 +295,10 @@ def test_publish_job_declares_pr_number_and_head_sha_outputs(publish_job):
     assert "pr_head_sha" in publish_job["outputs"]
 
 
-def test_codex_action_runs_only_in_the_two_read_only_review_jobs(workflow):
+def test_codex_action_runs_only_in_the_read_only_review_jobs(workflow):
     for job_id, job in workflow["jobs"].items():
         has_codex = any("codex-action" in u for u in _all_uses(job))
-        if job_id in ("review", "rereview"):
+        if job_id in REVIEW_IDS:
             assert has_codex
         else:
             assert not has_codex, f"codex-action must not run in {job_id}"
@@ -414,55 +417,90 @@ def test_upload_review_artifact_step_runs_even_on_failure(review_job):
     assert upload_step["with"]["name"] == "codex-review-cycle-0"
 
 
-# --- One-cycle correction loop ----------------------------------------------
+# --- Three-cycle correction loop ---------------------------------------------
 #
-# These pin the structural properties of the correction chain:
-# correct (Claude, read-only) -> publish_correction (deterministic, write)
-# -> rereview (Codex, read-only, strict final gate). The behavioral halves
-# (routing exit codes, cycle-limit math, log redaction) live in
-# tests/test_route_codex_review.py and tests/test_check_cycle_limit.py.
+# The correction chain (correct_N -> publish_correction_N -> review_N) now
+# exists exactly three times, wired sequentially on the SAME PR. These pin
+# the structural properties of every cycle; the behavioral halves (routing
+# exit codes, cycle-limit math, log redaction) live in
+# tests/test_route_codex_review.py, tests/test_check_codex_review.py, and
+# tests/test_check_cycle_limit.py.
 
 
-def test_correct_runs_only_after_a_blockers_verdict(correct_job):
-    # APPROVED first review -> review_status is APPROVED -> this condition
-    # is false -> no correction. NEEDS_HUMAN/malformed -> the review job
-    # itself failed -> result != success -> no correction.
-    condition = correct_job["if"]
-    assert "needs.review.result == 'success'" in condition
-    assert "needs.review.outputs.review_status == 'BLOCKERS'" in condition
+def test_the_job_graph_is_exactly_the_twelve_known_jobs(workflow):
+    assert set(workflow["jobs"].keys()) == {
+        "build",
+        "publish",
+        "review",
+        "correct_1",
+        "publish_correction_1",
+        "review_1",
+        "correct_2",
+        "publish_correction_2",
+        "review_2",
+        "correct_3",
+        "publish_correction_3",
+        "review_3",
+    }
 
 
-def test_correct_job_permissions_are_read_only(correct_job):
-    assert correct_job["permissions"] == {
+def test_exactly_four_codex_and_four_claude_invocations_exist(workflow):
+    all_uses = [u for job in workflow["jobs"].values() for u in _all_uses(job)]
+    assert sum("codex-action" in u for u in all_uses) == 4
+    assert sum("claude-code-action" in u for u in all_uses) == 4
+
+
+def test_nothing_depends_on_review_3_so_no_cycle_4_can_exist(workflow):
+    for job_id, job in workflow["jobs"].items():
+        needs = job.get("needs") or []
+        needs = [needs] if isinstance(needs, str) else needs
+        assert "review_3" not in needs, f"{job_id} must not chain off the final review"
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_runs_only_after_a_blockers_verdict_from_the_prior_review(workflow, n):
+    # APPROVED -> review_status is APPROVED -> condition false -> skip.
+    # NEEDS_HUMAN/malformed/mismatch -> the review job itself failed ->
+    # result != success -> skip. Only a routed BLOCKERS verdict proceeds.
+    job = workflow["jobs"][f"correct_{n}"]
+    prior_review = "review" if n == 1 else f"review_{n - 1}"
+    assert f"needs.{prior_review}.result == 'success'" in job["if"]
+    assert f"needs.{prior_review}.outputs.review_status == 'BLOCKERS'" in job["if"]
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_permissions_are_read_only(workflow, n):
+    assert workflow["jobs"][f"correct_{n}"]["permissions"] == {
         "contents": "read",
         "issues": "read",
         "pull-requests": "read",
     }
 
 
-def test_correct_job_checks_out_the_reviewed_sha_without_credentials(correct_job):
-    checkout = next(
-        s for s in correct_job["steps"] if s.get("uses", "").startswith("actions/checkout")
-    )
-    assert checkout["with"]["ref"] == "${{ needs.publish.outputs.pr_head_sha }}"
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_checks_out_the_exact_reviewed_sha_without_credentials(workflow, n):
+    job = workflow["jobs"][f"correct_{n}"]
+    checkout = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["ref"] == _reviewed_sha_expr(n)
     assert checkout["with"]["persist-credentials"] is False
 
 
-def test_correct_job_enforces_the_cycle_limit_before_claude_runs(correct_job):
-    names = [s.get("name") for s in correct_job["steps"]]
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_enforces_its_own_cycle_limit_before_claude_runs(workflow, n):
+    job = workflow["jobs"][f"correct_{n}"]
+    names = [s.get("name") for s in job["steps"]]
     limit_index = names.index("Enforce correction cycle limit")
-    limit_step = correct_job["steps"][limit_index]
-    assert "check_cycle_limit.py .agent-policy.yml 1" in limit_step["run"]
+    assert f"check_cycle_limit.py .agent-policy.yml {n}" in job["steps"][limit_index]["run"]
     claude_index = next(
-        i for i, s in enumerate(correct_job["steps"]) if "claude-code-action" in s.get("uses", "")
+        i for i, s in enumerate(job["steps"]) if "claude-code-action" in s.get("uses", "")
     )
     assert limit_index < claude_index
 
 
-def test_correct_job_settings_deny_protected_paths_and_git_mutation(correct_job):
-    claude_step = next(
-        s for s in correct_job["steps"] if "claude-code-action" in s.get("uses", "")
-    )
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_settings_deny_protected_paths_and_git_mutation(workflow, n):
+    job = workflow["jobs"][f"correct_{n}"]
+    claude_step = next(s for s in job["steps"] if "claude-code-action" in s.get("uses", ""))
     deny = json.loads(claude_step["with"]["settings"])["permissions"]["deny"]
     assert any(".github/workflows/**" in rule for rule in deny)
     assert any(".agent-policy.yml" in rule for rule in deny)
@@ -471,86 +509,186 @@ def test_correct_job_settings_deny_protected_paths_and_git_mutation(correct_job)
         assert mutating in deny
 
 
-def test_correct_job_gates_its_result_before_producing_the_artifact(correct_job):
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_gates_its_result_before_producing_the_artifact(workflow, n):
     # A FAILED/NEEDS_HUMAN/violating result fails this step, so the job
-    # fails, publish_correction's `if:` never fires, and nothing is pushed.
-    names = [s.get("name") for s in correct_job["steps"]]
+    # fails, publish_correction_N's `if:` never fires, nothing is pushed.
+    job = workflow["jobs"][f"correct_{n}"]
+    names = [s.get("name") for s in job["steps"]]
     check_index = names.index("Stage and check correction result")
-    assert "check_builder_result.py" in correct_job["steps"][check_index]["run"]
+    assert "check_builder_result.py" in job["steps"][check_index]["run"]
     assert check_index < names.index("Create correction artifact")
 
 
-def test_correct_job_uploads_the_cycle_1_correction_artifact(correct_job):
-    upload = next(
-        s for s in correct_job["steps"] if s.get("uses", "").startswith("actions/upload-artifact")
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_consumes_the_prior_review_artifact_and_uploads_its_own(workflow, n):
+    job = workflow["jobs"][f"correct_{n}"]
+    download = next(
+        s for s in job["steps"] if s.get("uses", "").startswith("actions/download-artifact")
     )
-    assert upload["with"]["name"] == "claude-correction-cycle-1"
+    assert download["with"]["name"] == f"codex-review-cycle-{n - 1}"
+    upload = next(
+        s for s in job["steps"] if s.get("uses", "").startswith("actions/upload-artifact")
+    )
+    assert upload["with"]["name"] == f"claude-correction-cycle-{n}"
 
 
-def test_correct_job_never_pushes_or_touches_gh_pr(correct_job):
-    combined = _all_run_text(correct_job)
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correct_n_never_pushes_or_touches_gh_pr(workflow, n):
+    combined = _all_run_text(workflow["jobs"][f"correct_{n}"])
     assert "git push" not in combined
     assert "git commit" not in combined
     assert "gh pr" not in combined
 
 
-def test_publish_correction_runs_only_for_a_complete_correction(publish_correction_job):
-    condition = publish_correction_job["if"]
-    assert "needs.correct.result == 'success'" in condition
-    assert "needs.correct.outputs.status == 'COMPLETE'" in condition
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_publish_correction_n_runs_only_for_a_complete_correction(workflow, n):
+    job = workflow["jobs"][f"publish_correction_{n}"]
+    assert f"needs.correct_{n}.result == 'success'" in job["if"]
+    assert f"needs.correct_{n}.outputs.status == 'COMPLETE'" in job["if"]
 
 
-def test_publish_correction_permissions_are_exactly_write_contents_read_prs(
-    publish_correction_job,
-):
-    assert publish_correction_job["permissions"] == {
-        "contents": "write",
-        "pull-requests": "read",
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_publish_correction_n_github_token_is_read_only(workflow, n):
+    # The PAT is the write path; the job token only reads for checkout
+    # and the ls-remote stale check.
+    assert workflow["jobs"][f"publish_correction_{n}"]["permissions"] == {
+        "contents": "read",
     }
 
 
-def test_publish_correction_verifies_branch_head_before_anything_else(publish_correction_job):
-    names = [s.get("name") for s in publish_correction_job["steps"]]
+@pytest.mark.parametrize("job_id", PAT_JOB_IDS)
+def test_publish_side_checkouts_do_not_persist_credentials(workflow, job_id):
+    job = workflow["jobs"][job_id]
+    checkout = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout"))
+    assert checkout["with"]["persist-credentials"] is False
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_publish_correction_n_verifies_the_branch_head_before_anything_else(workflow, n):
+    # Stale-SHA protection at every cycle: the remote PR branch head must
+    # still equal the exact SHA the prior Codex review evaluated.
+    job = workflow["jobs"][f"publish_correction_{n}"]
+    names = [s.get("name") for s in job["steps"]]
     verify_index = names.index("Verify PR branch head still equals the reviewed SHA")
-    verify_step = publish_correction_job["steps"][verify_index]
+    verify_step = job["steps"][verify_index]
     assert "git ls-remote origin" in verify_step["run"]
-    assert verify_step["env"]["REVIEWED_SHA"] == "${{ needs.publish.outputs.pr_head_sha }}"
-    # Stale-SHA check must precede patch application, commit, and push.
+    assert verify_step["env"]["REVIEWED_SHA"] == _reviewed_sha_expr(n)
     assert verify_index < names.index("Apply correction patch")
     assert verify_index < names.index("Commit correction")
     assert verify_index < names.index("Push correction to the PR branch")
 
 
-def test_publish_correction_verifies_the_patch_base_sha(publish_correction_job):
-    names = [s.get("name") for s in publish_correction_job["steps"]]
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_publish_correction_n_verifies_the_patch_base_sha_and_cycle(workflow, n):
+    job = workflow["jobs"][f"publish_correction_{n}"]
+    names = [s.get("name") for s in job["steps"]]
     base_index = names.index("Verify correction base SHA and cycle")
+    base_step = job["steps"][base_index]
+    assert base_step["env"]["REVIEWED_SHA"] == _reviewed_sha_expr(n)
+    assert f'"correction_cycle") != {n}:' in base_step["run"]
     assert base_index < names.index("Apply correction patch")
 
 
-def test_publish_correction_rechecks_protected_paths_after_applying(publish_correction_job):
-    names = [s.get("name") for s in publish_correction_job["steps"]]
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_publish_correction_n_rechecks_protected_paths_after_applying(workflow, n):
+    job = workflow["jobs"][f"publish_correction_{n}"]
+    names = [s.get("name") for s in job["steps"]]
     apply_index = names.index("Apply correction patch")
     recheck_index = names.index("Re-check protected governance paths")
     assert apply_index < recheck_index < names.index("Commit correction")
-    assert "check_builder_result.py" in _all_run_text(publish_correction_job)
+    assert "check_builder_result.py" in _all_run_text(job)
 
 
-def test_publish_correction_commits_once_and_pushes_plainly(publish_correction_job):
-    combined = _all_run_text(publish_correction_job)
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_publish_correction_n_commits_once_and_pushes_once_plainly(workflow, n):
+    job = workflow["jobs"][f"publish_correction_{n}"]
+    combined = _all_run_text(job)
     assert combined.count("git commit") == 1
     assert combined.count("git push") == 1
-    push_step = next(
-        s
-        for s in publish_correction_job["steps"]
-        if s.get("name") == "Push correction to the PR branch"
+    assert "gh pr create" not in combined
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_review_n_runs_only_after_its_publish_and_checks_out_its_exact_sha(workflow, n):
+    job = workflow["jobs"][f"review_{n}"]
+    assert job["needs"] == ["publish", f"publish_correction_{n}"]
+    assert f"needs.publish_correction_{n}.result == 'success'" in job["if"]
+    checkout = next(s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout"))
+    assert (
+        checkout["with"]["ref"]
+        == "${{ needs.publish_correction_%d.outputs.correction_sha }}" % n
     )
-    # Plain push to the existing branch ref -- no force, no new branch, no
-    # second PR.
-    assert push_step["run"] == 'git push origin "HEAD:refs/heads/$BRANCH"'
+    assert checkout["with"]["persist-credentials"] is False
 
 
-def test_publish_correction_never_creates_a_pr(publish_correction_job):
-    assert "gh pr create" not in _all_run_text(publish_correction_job)
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_review_n_permissions_are_read_only(workflow, n):
+    assert workflow["jobs"][f"review_{n}"]["permissions"] == {
+        "contents": "read",
+        "pull-requests": "read",
+        "issues": "read",
+    }
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_review_n_gates_on_required_ci_for_its_exact_sha_before_codex(workflow, n):
+    # CI failure, or a missing required check, fails this bounded wait ->
+    # Codex never runs at this cycle and nothing advances.
+    job = workflow["jobs"][f"review_{n}"]
+    names = [s.get("name") for s in job["steps"]]
+    wait_index = names.index("Wait for required CI checks on the correction SHA")
+    wait_step = job["steps"][wait_index]
+    assert "check_required_ci.py" in wait_step["run"]
+    assert "MAX_WAIT_SECONDS" in wait_step["run"]
+    assert (
+        wait_step["env"]["PR_HEAD_SHA"]
+        == "${{ needs.publish_correction_%d.outputs.correction_sha }}" % n
+    )
+    codex_index = next(
+        i for i, s in enumerate(job["steps"]) if "codex-action" in s.get("uses", "")
+    )
+    assert wait_index < codex_index
+
+
+@pytest.mark.parametrize("n", (1, 2))
+def test_intermediate_review_n_routes_rather_than_hard_failing(workflow, n):
+    # Cycles 1 and 2 use the router (BLOCKERS -> next correction may
+    # trigger); only review_3 is the strict terminal gate.
+    job = workflow["jobs"][f"review_{n}"]
+    names = [s.get("name") for s in job["steps"]]
+    route_step = job["steps"][names.index("Route Codex re-review result")]
+    assert "route_codex_review.py" in route_step["run"]
+    assert route_step["id"] == "route"
+    assert job["outputs"]["review_status"] == "${{ steps.route.outputs.status }}"
+
+
+def test_review_3_is_the_strict_final_gate(workflow):
+    job = workflow["jobs"]["review_3"]
+    combined = _all_run_text(job)
+    assert "check_codex_review.py" in combined
+    assert "route_codex_review.py" not in combined
+    assert "outputs" not in job or not job.get("outputs")
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_review_n_uploads_its_cycle_artifact_even_on_failure(workflow, n):
+    job = workflow["jobs"][f"review_{n}"]
+    upload = next(
+        s for s in job["steps"] if s.get("uses", "").startswith("actions/upload-artifact")
+    )
+    assert upload["with"]["name"] == f"codex-review-cycle-{n}"
+    assert upload["if"] == "always()"
+    assert upload["with"]["if-no-files-found"] == "ignore"
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_review_n_carries_the_prior_blockers_via_artifact_not_logs(workflow, n):
+    job = workflow["jobs"][f"review_{n}"]
+    download = next(
+        s for s in job["steps"] if s.get("uses", "").startswith("actions/download-artifact")
+    )
+    assert download["with"]["name"] == f"codex-review-cycle-{n - 1}"
 
 
 def test_gh_pr_create_appears_exactly_once_in_the_whole_workflow(workflow):
@@ -558,103 +696,120 @@ def test_gh_pr_create_appears_exactly_once_in_the_whole_workflow(workflow):
     assert combined.count("gh pr create") == 1  # publish only -- never a second PR
 
 
-def test_rereview_runs_only_after_a_successful_correction_publish(rereview_job):
-    assert rereview_job["needs"] == ["publish", "publish_correction"]
-    assert "needs.publish_correction.result == 'success'" in rereview_job["if"]
-
-
-def test_rereview_permissions_are_read_only(rereview_job):
-    assert rereview_job["permissions"] == {
-        "contents": "read",
-        "pull-requests": "read",
-        "issues": "read",
-    }
-
-
-def test_rereview_checks_out_the_exact_correction_sha_without_credentials(rereview_job):
-    checkout = next(
-        s for s in rereview_job["steps"] if s.get("uses", "").startswith("actions/checkout")
-    )
-    assert checkout["with"]["ref"] == "${{ needs.publish_correction.outputs.correction_sha }}"
-    assert checkout["with"]["persist-credentials"] is False
-
-
-def test_rereview_gates_on_required_ci_for_the_correction_sha_before_codex(rereview_job):
-    names = [s.get("name") for s in rereview_job["steps"]]
-    wait_index = names.index("Wait for required CI checks on the correction SHA")
-    wait_step = rereview_job["steps"][wait_index]
-    assert "check_required_ci.py" in wait_step["run"]
-    assert "MAX_WAIT_SECONDS" in wait_step["run"]
-    assert (
-        wait_step["env"]["PR_HEAD_SHA"]
-        == "${{ needs.publish_correction.outputs.correction_sha }}"
-    )
-    codex_index = next(
-        i for i, s in enumerate(rereview_job["steps"]) if "codex-action" in s.get("uses", "")
-    )
-    # CI fail -> the wait step exits 1 -> Codex never runs.
-    assert wait_index < codex_index
-
-
-def test_rereview_validates_strictly_against_the_correction_sha(rereview_job):
-    # The strict gate (check_codex_review.py, not the router): a second
-    # BLOCKERS, NEEDS_HUMAN, or any non-empty important exits non-zero and
-    # ends the run -- and no job in the workflow depends on rereview, so
-    # a second correction cannot exist to trigger.
-    names = [s.get("name") for s in rereview_job["steps"]]
-    validate_step = rereview_job["steps"][names.index("Validate Codex re-review result")]
-    assert "check_codex_review.py" in validate_step["run"]
-    assert "route_codex_review.py" not in validate_step["run"]
-    assert (
-        validate_step["env"]["PR_HEAD_SHA"]
-        == "${{ needs.publish_correction.outputs.correction_sha }}"
-    )
-
-
-def test_rereview_uploads_the_cycle_1_artifact_even_on_failure(rereview_job):
-    upload = next(
-        s
-        for s in rereview_job["steps"]
-        if s.get("name") == "Upload Codex review artifact (cycle 1)"
-    )
-    assert upload["if"] == "always()"
-    assert upload["with"]["name"] == "codex-review-cycle-1"
-    assert upload["with"]["if-no-files-found"] == "ignore"
-
-
-def test_nothing_depends_on_rereview_so_no_second_cycle_can_exist(workflow):
-    for job_id, job in workflow["jobs"].items():
-        needs = job.get("needs") or []
-        needs = [needs] if isinstance(needs, str) else needs
-        assert "rereview" not in needs, f"{job_id} must not chain off the final review"
-
-
-def test_exactly_one_correction_chain_exists(workflow):
-    job_ids = set(workflow["jobs"].keys())
-    assert job_ids == {"build", "publish", "review", "correct", "publish_correction", "rereview"}
-    all_uses = [u for job in workflow["jobs"].values() for u in _all_uses(job)]
-    assert sum("codex-action" in u for u in all_uses) == 2  # cycle 0 + cycle 1, no more
-    assert sum("claude-code-action" in u for u in all_uses) == 2  # build + one correction
-
-
 def test_no_agent_runs_in_a_write_capable_job(workflow):
+    # "Write-capable" covers both a write-scoped GITHUB_TOKEN and the
+    # automation PAT -- an agent may hold neither.
     for job_id, job in workflow["jobs"].items():
         perms = job.get("permissions", {})
         has_write = any(scope == "write" for scope in perms.values())
+        has_write = has_write or "HARVESTGUARD_AUTOMATION_TOKEN" in repr(job)
         runs_agent = any(
             "claude-code-action" in u or "codex-action" in u for u in _all_uses(job)
         )
-        assert not (has_write and runs_agent), f"{job_id} runs an agent with write scope"
+        assert not (has_write and runs_agent), f"{job_id} runs an agent with write authority"
+
+
+@pytest.mark.parametrize("job_id", CORRECT_IDS + ("review_1", "review_2", "review_3"))
+def test_correction_and_review_jobs_never_cat_or_echo_review_json(workflow, job_id):
+    # Review/blocker text flows only through context files written by
+    # python (which print counts, never content); no shell step may dump
+    # raw review JSON into the log.
+    combined = _all_run_text(workflow["jobs"][job_id])
+    assert 'cat "$REVIEW_PATH"' not in combined
+    assert 'cat "$PRIOR_REVIEW_PATH"' not in combined
+    assert "print(json.dumps" not in combined
+
+
+# --- HARVESTGUARD_AUTOMATION_TOKEN containment -------------------------------
+#
+# The PAT exists to make agent-branch pushes, draft-PR creation, and
+# correction pushes emit real events (GITHUB_TOKEN events deliberately do
+# not trigger workflows, which forced a manual "Approve workflows to run"
+# click). It must be reachable ONLY by the exact deterministic steps that
+# perform those writes -- never by an agent, a log, an artifact, or a
+# context file -- and its absence must fail closed, never fall back.
+
+def test_automation_token_appears_only_in_deterministic_publish_jobs(workflow):
+    for job_id, job in workflow["jobs"].items():
+        referenced = "HARVESTGUARD_AUTOMATION_TOKEN" in repr(job)
+        if job_id in PAT_JOB_IDS:
+            assert referenced, f"{job_id} should use the automation token"
+        else:
+            # In particular: never in build, any correct_N (Claude), or
+            # any review job (Codex).
+            assert not referenced, f"{job_id} must never see the automation token"
+
+
+def test_automation_token_is_step_scoped_to_exactly_the_write_steps(workflow):
+    for job_id in PAT_JOB_IDS:
+        job = workflow["jobs"][job_id]
+        expected = (
+            {"Push implementation branch", "Open draft pull request"}
+            if job_id == "publish"
+            else {"Push correction to the PR branch"}
+        )
+        holders = {
+            s.get("name")
+            for s in job["steps"]
+            if "HARVESTGUARD_AUTOMATION_TOKEN" in repr(s)
+        }
+        assert holders == expected, f"{job_id}: token leaked beyond {expected}: {holders}"
+
+
+@pytest.mark.parametrize("job_id", PAT_JOB_IDS)
+def test_trigger_producing_pushes_use_the_pat_not_github_token(workflow, job_id):
+    job = workflow["jobs"][job_id]
+    push_name = (
+        "Push implementation branch" if job_id == "publish" else "Push correction to the PR branch"
+    )
+    push_step = next(s for s in job["steps"] if s.get("name") == push_name)
+    assert push_step["env"]["AUTOMATION_TOKEN"] == SECRET_EXPR
+    # The push goes through an explicit x-access-token URL -- not the
+    # `origin` remote, whose persisted credential is GITHUB_TOKEN.
+    assert "x-access-token:${AUTOMATION_TOKEN}@github.com" in push_step["run"]
+    assert "git push origin" not in push_step["run"]
+    # Fail closed when the secret is absent -- no GITHUB_TOKEN fallback.
+    assert '-z "${AUTOMATION_TOKEN:-}"' in push_step["run"]
+    assert "exit 1" in push_step["run"]
+
+
+def test_draft_pr_creation_uses_the_pat_not_github_token(workflow):
+    steps = workflow["jobs"]["publish"]["steps"]
+    step = next(s for s in steps if s.get("name") == "Open draft pull request")
+    assert step["env"]["GH_TOKEN"] == SECRET_EXPR
+    assert step["env"]["GH_TOKEN"] != "${{ github.token }}"
+    assert '-z "${GH_TOKEN:-}"' in step["run"]
+
+
+def test_automation_token_is_never_echoed(workflow):
+    for job in workflow["jobs"].values():
+        for step in job["steps"]:
+            run = step.get("run", "")
+            assert "echo $AUTOMATION_TOKEN" not in run
+            assert 'echo "$AUTOMATION_TOKEN' not in run
+            assert "echo $GH_TOKEN" not in run
+            assert 'echo "$GH_TOKEN' not in run
+
+
+def test_automation_token_is_not_written_to_artifacts_or_context_files(workflow):
+    # No artifact-upload or context/metadata-writing step may reference
+    # the secret at all: the only steps that hold it are the push/PR-create
+    # steps, which write nothing to disk.
+    for job in workflow["jobs"].values():
+        for step in job["steps"]:
+            if step.get("uses", "").startswith("actions/upload-artifact"):
+                assert "HARVESTGUARD_AUTOMATION_TOKEN" not in repr(step)
+            name = step.get("name") or ""
+            if "context file" in name or "artifact" in name.lower():
+                assert "HARVESTGUARD_AUTOMATION_TOKEN" not in repr(step)
 
 
 # --- Codex escalation criteria ----------------------------------------------
 #
-# The classification guidance must keep ordinary implementation defects on
-# the BLOCKERS path (eligible for the one correction cycle) and reserve
-# NEEDS_HUMAN for genuine human decisions. Both Codex prompts are defined
-# separately (cycle 0 and the re-review), so both are checked. Prompts are
-# whitespace-normalized before matching so YAML line wrapping cannot split
-# a phrase across lines and silently break these assertions.
+# All four Codex prompts (cycle 0 plus the three re-reviews) must keep
+# ordinary implementation defects on the BLOCKERS path and reserve
+# NEEDS_HUMAN for genuine human decisions. Whitespace-normalized so YAML
+# line wrapping cannot split a phrase.
 
 
 def _codex_prompt_text(job: dict) -> str:
@@ -663,18 +818,14 @@ def _codex_prompt_text(job: dict) -> str:
 
 
 ESCALATION_GUIDANCE_PHRASES = [
-    # The explicit tie-breaking instruction, verbatim.
     "When a finding has a clear expected behavior and a bounded technical "
     "correction, classify it as BLOCKERS rather than NEEDS_HUMAN.",
     "NEEDS_HUMAN is not a severity level; it means a human decision is required.",
-    # BLOCKER must cover ordinary implementation defects...
     "incorrect behavior, requirement mismatches, missing validation, swallowed "
     "errors, incorrect exit behavior, broken or insufficient tests, unsafe "
     "implementation details, regressions, and documentation that contradicts "
     "implemented behavior",
-    # ...and stay BLOCKER regardless of significance.
     "do not escalate them to NEEDS_HUMAN merely because they require code changes",
-    # NEEDS_HUMAN is reserved for genuine human decisions.
     "NEEDS_HUMAN is reserved for findings that genuinely require a human decision",
     "product-scope decisions",
     "architecture choices with multiple materially different valid approaches",
@@ -682,31 +833,104 @@ ESCALATION_GUIDANCE_PHRASES = [
 ]
 
 
+@pytest.mark.parametrize("job_id", REVIEW_IDS)
 @pytest.mark.parametrize("phrase", ESCALATION_GUIDANCE_PHRASES)
-def test_cycle_0_review_prompt_contains_escalation_guidance(review_job, phrase):
-    assert phrase in _codex_prompt_text(review_job)
+def test_every_codex_prompt_contains_the_escalation_guidance(workflow, job_id, phrase):
+    assert phrase in _codex_prompt_text(workflow["jobs"][job_id])
 
 
-@pytest.mark.parametrize("phrase", ESCALATION_GUIDANCE_PHRASES)
-def test_cycle_1_rereview_prompt_contains_escalation_guidance(rereview_job, phrase):
-    assert phrase in _codex_prompt_text(rereview_job)
+@pytest.mark.parametrize("job_id", REVIEW_IDS)
+def test_every_codex_prompt_keeps_important_vocabulary_unchanged(workflow, job_id):
+    assert "IMPORTANT: normally fixed before merge." in _codex_prompt_text(
+        workflow["jobs"][job_id]
+    )
 
 
-def test_both_codex_prompts_keep_important_vocabulary_unchanged(review_job, rereview_job):
-    # IMPORTANT retains its existing meaning -- the guidance must not have
-    # redefined or dropped it in either prompt.
-    for job in (review_job, rereview_job):
-        assert "IMPORTANT: normally fixed before merge." in _codex_prompt_text(job)
+@pytest.mark.parametrize("job_id", ("review_1", "review_2", "review_3"))
+def test_every_rereview_prompt_demands_the_cumulative_pr_at_the_exact_sha(workflow, job_id):
+    prompt = _codex_prompt_text(workflow["jobs"][job_id])
+    assert "Review the COMPLETE cumulative PR at this exact SHA" in prompt
+    assert "git diff origin/main...HEAD" in prompt
 
 
-def test_correction_jobs_never_cat_or_echo_the_review_json(correct_job, rereview_job):
-    # The review/blocker text flows only through context files written by
-    # python (which print counts, never content); no shell step may dump
-    # the raw review JSON into the log. The redaction behavior of the
-    # routing/validation scripts themselves is unit-tested in
-    # tests/test_route_codex_review.py and tests/test_check_codex_review.py.
-    combined = _all_run_text(correct_job) + _all_run_text(rereview_job)
-    assert 'cat "$REVIEW_PATH"' not in combined
-    assert 'cat "$PRIOR_REVIEW_PATH"' not in combined
-    assert "codex_review.json' | jq" not in combined
-    assert "print(json.dumps" not in combined
+@pytest.mark.parametrize("job_id", ("review_1", "review_2"))
+def test_intermediate_rereviews_treat_new_bounded_defects_as_correctable(workflow, job_id):
+    # Convergence semantics: a defect first noticed at cycle N (different
+    # from what cycle N-1 flagged) stays BLOCKERS and routes onward -- it
+    # must not be escalated to NEEDS_HUMAN just because it is new.
+    prompt = _codex_prompt_text(workflow["jobs"][job_id])
+    assert (
+        "A newly discovered concrete, bounded defect is a BLOCKER -- it routes "
+        "to the next automated correction cycle" in prompt
+    )
+    assert (
+        "convergence over successive bounded corrections on the same PR is "
+        "expected behavior, not grounds for NEEDS_HUMAN" in prompt
+    )
+
+
+def test_review_3_prompt_declares_itself_final_with_no_fourth_cycle(workflow):
+    prompt = _codex_prompt_text(workflow["jobs"]["review_3"])
+    assert "This is the FINAL automated review -- there is no fourth correction cycle." in prompt
+
+
+# --- Codex review artifact filename convention -------------------------------
+#
+# Every Codex review artifact carries the SAME internal filename
+# (codex_review.json) inside a cycle-specific artifact NAME
+# (codex-review-cycle-N). Downstream consumers download artifact N into
+# review_cycleN/ and read review_cycleN/codex_review.json -- a mismatch
+# here silently breaks the cycle handoff (the cycle-2/3 jobs would fail on
+# a missing file), which is exactly the defect this pins against.
+
+REVIEW_ARTIFACT_BASENAME = "codex_review.json"
+
+
+def test_every_review_cycle_uploads_the_stable_review_basename(workflow):
+    for job_id in REVIEW_IDS:
+        upload = next(
+            s
+            for s in workflow["jobs"][job_id]["steps"]
+            if s.get("uses", "").startswith("actions/upload-artifact")
+        )
+        assert upload["with"]["path"].endswith("/" + REVIEW_ARTIFACT_BASENAME), job_id
+        # The artifact NAME stays cycle-specific even though the file
+        # inside does not.
+        cycle = 0 if job_id == "review" else int(job_id.split("_")[1])
+        assert upload["with"]["name"] == f"codex-review-cycle-{cycle}"
+
+
+def test_every_review_producer_writes_the_basename_its_gate_reads(workflow):
+    for job_id in REVIEW_IDS:
+        job = workflow["jobs"][job_id]
+        codex_step = next(s for s in job["steps"] if "codex-action" in s.get("uses", ""))
+        gate_step = next(
+            s
+            for s in job["steps"]
+            if "route_codex_review.py" in s.get("run", "")
+            or "check_codex_review.py" in s.get("run", "")
+        )
+        assert codex_step["with"]["output-file"] == gate_step["env"]["RESULT_PATH"], job_id
+        assert gate_step["env"]["RESULT_PATH"].endswith("/" + REVIEW_ARTIFACT_BASENAME)
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_cycle_n_consumers_read_exactly_what_the_prior_cycle_uploaded(workflow, n):
+    expected = "${{ runner.temp }}/review_cycle%d/%s" % (n - 1, REVIEW_ARTIFACT_BASENAME)
+    expected_dir = "${{ runner.temp }}/review_cycle%d" % (n - 1)
+
+    correct = workflow["jobs"][f"correct_{n}"]
+    download = next(
+        s for s in correct["steps"] if s.get("uses", "").startswith("actions/download-artifact")
+    )
+    assert download["with"]["path"] == expected_dir
+    ctx = next(s for s in correct["steps"] if s.get("name") == "Write correction context file")
+    assert ctx["env"]["REVIEW_PATH"] == expected
+
+    review = workflow["jobs"][f"review_{n}"]
+    download = next(
+        s for s in review["steps"] if s.get("uses", "").startswith("actions/download-artifact")
+    )
+    assert download["with"]["path"] == expected_dir
+    ctx = next(s for s in review["steps"] if s.get("name") == "Write Codex re-review context file")
+    assert ctx["env"]["PRIOR_REVIEW_PATH"] == expected
