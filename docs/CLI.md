@@ -154,6 +154,118 @@ The Markdown report includes:
 - Known Limitations
 - Appendix
 
+## Demo Walkthrough
+
+`demo/sample_target/` (GitHub issue [#18](https://github.com/serewicz/HarvestGuard/issues/18),
+roadmap [HG-006](ROADMAP.md)) is a small, deterministic fixture so anyone can
+see real HarvestGuard output without scanning real confidential data.
+
+**All values in the fixture are synthetic and intentionally fake.** Do not
+copy anything from it into a real `.env` file or substitute real credentials
+or sensitive data into it. It exists only so the scanners have something
+evidence-shaped to find, and its contents are documented in full in
+[`demo/sample_target/sensitive/leaked_config.env`](../demo/sample_target/sensitive/leaked_config.env)'s
+own header comment. It requires no credentials and no network access.
+
+Run every local scanner against it:
+
+```bash
+harvestguard scan demo/sample_target --type all --summary
+```
+
+Expected output (files scanned and finding counts are deterministic; see
+"What varies by host" below for the one platform-dependent field):
+
+```text
+HarvestGuard Scan Complete
+
+Files scanned: 1
+
+Findings
+
+Certificates: 0
+Private Keys: 1
+Encrypted Keys: 0
+SSH Keys: 0
+PKCS#12: 0
+Expired Certificates: 0
+Sensitive Files: 1
+Semgrep Findings: 0
+Malformed Assets: 1
+Errors: 1
+
+Total Findings: 3
+```
+
+Three findings, one from each of three scanners:
+
+- **Filesystem encryption evidence** (`--type filesystem`) — one finding for
+  `leaked_config.env` with `Evidence: "Encryption status observed: <value>"`
+  and a populated `Confidence` (`High`, `Medium`, or `Low`) plus
+  `Confidence Rationale`. The exact `<value>` and confidence level depend on
+  how encryption status was determined on your host (see "What varies by
+  host" below) — this is expected, not a bug.
+- **Cryptographic inventory evidence** (`--type crypto`) — one finding, asset
+  type `Malformed PEM Private Key`, confidence `Low`. The fixture's PEM
+  header (`-----BEGIN RSA PRIVATE KEY-----`) is real enough to be detected as
+  a PEM block, but its body is plain fake text, not valid base64/DER, so
+  parsing correctly fails. The `errors` field is non-empty and names the
+  parse failure; `technical_metadata` (algorithm, key size, fingerprint,
+  etc.) stays unset because parsing never succeeded. This is the intended,
+  deterministic outcome for this fixture, not a scanner defect.
+- **Sensitive-data categories** (`--type sensitive-data`) — one finding for
+  `leaked_config.env` with `Categories: Email, Generic Secret, Private Key`.
+  `Slack Token`, `GitHub Token`, and `AWS Access Key` do **not** appear: the
+  fixture's Slack/GitHub/AWS-shaped lines are deliberately inert (they do not
+  match those services' real credential formats), specifically so nothing
+  committed to this repository can be mistaken for a live credential by
+  GitHub push protection or any other scanner. Category names and counts are
+  reported; the matched sensitive text itself is never included in output.
+
+JSON (machine-readable, same normalized finding schema as
+[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md)):
+
+```bash
+harvestguard scan demo/sample_target --type all --json --quiet
+```
+
+Markdown (professional evidence report):
+
+```bash
+harvestguard scan demo/sample_target --type all --markdown --quiet
+```
+
+Both report exactly the same three findings as structured evidence records
+(`Detailed Findings` in the Markdown report) — never the raw matched
+sensitive value, the fixture's fake password, or its fake PEM body text, only
+category names, counts, and evidence-layer fields such as confidence and
+rule ID.
+
+### What varies by host
+
+Encryption status for a plain-text file with no matching file-level
+signature falls back to volume-level encryption status, which is detected
+differently per platform (FileVault on macOS, `lsblk`/similar on Linux) and
+is not deterministic across environments — CI and your local machine may
+report a different value or a different confidence level for that one field.
+This is expected: `docs/TERMINOLOGY.md` documents this as evidence quality
+that depends on what could be observed, not a claim that HarvestGuard can
+always determine full-disk or volume encryption status the same way on every
+supported platform. Every other field described above is fixed, since it
+depends only on the fixture's unchanging content.
+
+### Reading the results
+
+Per [docs/TERMINOLOGY.md](TERMINOLOGY.md): everything the demo scan reports
+above is **observed evidence** (encryption status, confidence, sensitive-data
+categories, PEM parse errors) — direct scanner output about what the fixture
+contains, not a business conclusion. The demo does not exercise the
+dashboard's **Risk Score** or **HNDL Exposure** fields, which the same
+terminology document marks as inferred heuristics (`Needs Validation`) and
+which must never be read as measured facts. Nothing in this walkthrough is a
+complete quantum-readiness assessment; it is a small, fixed evidence sample
+for seeing real output.
+
 ## Exit Codes
 
 - `0`: scan completed without scanner-level failures.
