@@ -7,14 +7,27 @@ from botocore.exceptions import ClientError
 from finding_adapters import normalize_s3_df
 from findings import NormalizedFinding
 
+# The only head_object ClientError codes that mean "this one object is
+# genuinely absent" -- a key can vanish between list_objects_v2 and
+# head_object (deletion, lifecycle expiry), and S3 surfaces that as a bare
+# "404" (HEAD responses carry no error body) or NoSuchKey/NotFound. Every
+# other code -- AccessDenied, ExpiredToken, InvalidAccessKeyId,
+# SignatureDoesNotMatch, throttling, 5xx -- is a provider/auth/execution
+# failure: skipping it would silently produce an incomplete scan that the
+# CLI reports as success, so it propagates instead. Unknown/missing codes
+# propagate too (fail closed).
+_ABSENT_OBJECT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+
 
 def _collect_s3_objects(bucket_name: str, prefix: str = "") -> pd.DataFrame:
     """List S3 objects with encryption status; raise on bucket/auth failure.
 
-    A single unreadable object (head_object ClientError) is skipped so it
-    doesn't abort the whole scan, but a failure to list the bucket -- or an
-    auth/credentials failure -- propagates to the caller so it can be surfaced
-    (e.g. as a nonzero CLI exit code) rather than silently masked.
+    A single genuinely-absent object (head_object 404/NoSuchKey/NotFound,
+    e.g. deleted between listing and inspection) is skipped so it doesn't
+    abort the whole scan. Any other head_object ClientError -- and any
+    failure to list the bucket or authenticate -- propagates to the caller
+    so it can be surfaced (e.g. as a nonzero CLI exit code) rather than
+    silently masked as an incomplete-but-successful scan.
     """
     s3 = boto3.client('s3')
     results = []
@@ -32,8 +45,11 @@ def _collect_s3_objects(bucket_name: str, prefix: str = "") -> pd.DataFrame:
                 "Encryption": enc_status,
                 "Risk": "Low" if enc_status != "None" else "High"
             })
-        except ClientError:
-            pass
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in _ABSENT_OBJECT_CODES:
+                continue
+            raise
 
     return pd.DataFrame(results)
 
