@@ -165,6 +165,37 @@ def test_sensitive_data_observed_at_is_collection_time_not_file_mtime(tmp_path):
     assert payload["technical_metadata"]["Modified"] is not None
 
 
+def test_sensitive_data_normalized_finding_never_contains_raw_matched_values(tmp_path):
+    # Contract: the sensitive-data classifier emits category names and counts
+    # only. Raw matched values must never reach evidence, technical_metadata,
+    # or the serialized JSON -- a scan result must not itself leak the
+    # sensitive data it found. Secret-shaped values are assembled at runtime
+    # (never committed as source literals) so this test file trips no secret
+    # scanner; see tests/test_classifier.py's _fake_* helpers for the same
+    # technique. This exercises the real classifier -> adapter -> serialization
+    # path, not a mock of it.
+    email = "jane.doe@example.com"
+    slack_token = "-".join(["xoxb", "FAKE0000000000", "TESTONLYNOTREAL"])
+    aws_key = "AKIA" + "FAKE0000FAKE0000"
+    raw_values = [email, slack_token, aws_key]
+
+    (tmp_path / "leaked.env").write_text(
+        f"CONTACT_EMAIL={email}\nSLACK_TOKEN={slack_token}\naws_access_key_id = {aws_key}\n"
+    )
+
+    findings = scan_filesystem_for_sensitive_data_findings(str(tmp_path))
+
+    assert len(findings) == 1
+    payload = findings[0].to_dict()
+    serialized = json.dumps(payload)
+    for raw in raw_values:
+        assert raw not in serialized, f"raw matched value leaked into normalized finding: {raw!r}"
+    # The finding is still evidence: category names and a total count survive,
+    # so downstream consumers know what was observed without the raw values.
+    assert "Email" in payload["technical_metadata"]["Categories"]
+    assert payload["technical_metadata"]["Total Matches"] >= 3
+
+
 def test_cloud_scanner_adapters_preserve_provider_metadata():
     modified = datetime(2026, 1, 1, tzinfo=timezone.utc)
     s3 = normalize_s3_df(
@@ -202,6 +233,37 @@ def test_cloud_scanner_adapters_preserve_provider_metadata():
     assert azure["source_type"] == "azure_blob"
     assert azure["technical_metadata"]["Encryption"] == "Microsoft-managed"
     assert "Risk" not in s3["technical_metadata"]
+
+
+def test_cloud_adapters_use_collection_time_for_observed_at_not_source_modified():
+    # Acceptance criteria (S3, GCS, Azure Blob): the object/blob's own
+    # modification time is a property of the asset and must stay in
+    # technical_metadata; observed_at is HarvestGuard's collection time, passed
+    # in by the scan wrapper. The two must not be conflated even when the
+    # source was last modified years before the scan.
+    source_modified = datetime(2001, 2, 3, 4, 5, 6, tzinfo=timezone.utc)
+    collected_at = datetime(2026, 7, 24, 12, 0, 0, tzinfo=timezone.utc)
+
+    adapters = {
+        normalize_s3_df: "s3://bucket/key.txt",
+        normalize_gcs_df: "gs://bucket/key.txt",
+        normalize_azure_blob_df: "https://acct.blob.core.windows.net/container/key.txt",
+    }
+    for adapter, location in adapters.items():
+        df = pd.DataFrame([{
+            "Location": location,
+            "Size": 1,
+            "Modified": source_modified,
+            "Encryption": "None",
+        }])
+
+        payload = adapter(df, observed_at=collected_at)[0].to_dict()
+
+        assert payload["observed_at"] == "2026-07-24T12:00:00+00:00"
+        # The source modified time is preserved as asset metadata, distinct
+        # from observed_at -- never substituted for it.
+        assert payload["technical_metadata"]["Modified"] == "2001-02-03T04:05:06+00:00"
+        assert payload["observed_at"] != payload["technical_metadata"]["Modified"]
 
 
 def test_code_analysis_adapter_preserves_rule_evidence_without_risk():
