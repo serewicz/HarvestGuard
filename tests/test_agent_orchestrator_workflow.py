@@ -527,9 +527,11 @@ def test_correct_n_consumes_the_prior_review_artifact_and_uploads_its_own(workfl
         s for s in job["steps"] if s.get("uses", "").startswith("actions/download-artifact")
     )
     assert download["with"]["name"] == f"codex-review-cycle-{n - 1}"
-    upload = next(
-        s for s in job["steps"] if s.get("uses", "").startswith("actions/upload-artifact")
-    )
+    # Name-specific lookup: the job now also has an "Upload failure
+    # diagnostics" upload-artifact step (see "Failure diagnostics" section
+    # below), so the first upload-artifact match is no longer necessarily
+    # this one.
+    upload = next(s for s in job["steps"] if s.get("name") == "Upload correction artifact")
     assert upload["with"]["name"] == f"claude-correction-cycle-{n}"
 
 
@@ -953,3 +955,194 @@ def test_every_claude_invocation_uses_exactly_sixty_max_turns(workflow):
     for step in claude_steps:
         assert "--max-turns 60" in step["with"]["claude_args"]
         assert "--max-turns 40" not in step["with"]["claude_args"]
+
+
+# --- Builder work-budget discipline (issue #17: max-turns exhausted) --------
+#
+# All four Claude prompts (build + correct_1/2/3) must carry the same
+# spec-first, checklist-before-editing, focused-tests-during-iteration
+# guidance, without weakening the required full-validation gate that makes
+# a "COMPLETE" result trustworthy.
+
+CLAUDE_PROMPT_JOB_IDS = ("build",) + CORRECT_IDS
+
+WORK_BUDGET_PHRASES = [
+    "Treat the context file as the authoritative implementation",
+    "Do not re-derive the full specification from the",
+    "repository unless you find a concrete conflict between the",
+    "write yourself a short internal",
+    "implementation checklist before editing anything",
+    "Classify each major acceptance criterion as: already",
+    "satisfied, requires code, requires tests, or requires docs",
+    "If a criterion is",
+    "already satisfied, verify it rather than redesigning it",
+    "Prefer the smallest change that satisfies the acceptance",
+    "Do not perform unrelated cleanup, refactoring,",
+    "formatting, or documentation work",
+    "Use focused tests (for example `pytest -v",
+    "Do not repeatedly run the full test suite while",
+    "debugging",
+    "Run the full `ruff check .` and full `pytest -v` only once,",
+    "near the end, unless a specific failure requires re-running",
+    "Self-review only the resulting diff (`git diff`) against the",
+    "acceptance criteria, protected paths, and the product/security",
+    'report "NEEDS_HUMAN" with what remains rather',
+    "than broadening scope or continuing to search indefinitely",
+]
+
+
+def _claude_prompt_text(job: dict) -> str:
+    step = next(s for s in job["steps"] if "claude-code-action" in s.get("uses", ""))
+    return " ".join(step["with"]["prompt"].split())
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+@pytest.mark.parametrize("phrase", WORK_BUDGET_PHRASES)
+def test_every_claude_prompt_contains_work_budget_guidance(workflow, job_id, phrase):
+    assert phrase in _claude_prompt_text(workflow["jobs"][job_id])
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_work_budget_guidance_still_requires_full_validation(workflow, job_id):
+    prompt = _claude_prompt_text(workflow["jobs"][job_id])
+    # The efficiency guidance must not read as permission to skip required
+    # validation -- the prompt states this explicitly, and the structured
+    # result schema still demands a real ruff/pytest verdict.
+    assert (
+        'a "COMPLETE" result must still reflect full `ruff check .` and full '
+        "`pytest -v` passing" in prompt
+    )
+    validation_schema = (
+        '"validation": {"ruff": "pass"|"fail"|"not_run", '
+        '"pytest": "pass"|"fail"|"not_run"}'
+    )
+    assert validation_schema in prompt
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_no_claude_prompt_tells_claude_to_skip_tests(workflow, job_id):
+    prompt = _claude_prompt_text(workflow["jobs"][job_id])
+    lowered = prompt.lower()
+    forbidden_phrases = (
+        "skip tests",
+        "skip pytest",
+        "skip validation",
+        "no need to test",
+        "don't run tests",
+    )
+    for forbidden in forbidden_phrases:
+        assert forbidden not in lowered
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_work_budget_guidance_precedes_ground_rules(workflow, job_id):
+    prompt = workflow["jobs"][job_id]["steps"]
+    step = next(s for s in prompt if "claude-code-action" in s.get("uses", ""))
+    raw = step["with"]["prompt"]
+    assert raw.index("Work-budget discipline") < raw.index("Ground rules")
+
+
+# --- Failure diagnostics -----------------------------------------------------
+#
+# When a Claude step fails (most commonly: max-turns reached), the job must
+# preserve enough safe evidence to diagnose it without exposing secrets or
+# gaining write authority. scripts/collect_failure_diagnostics.py's own
+# redaction/content behavior is covered by
+# tests/test_collect_failure_diagnostics.py; these pin the workflow wiring.
+
+DIAGNOSTICS_ARTIFACT_NAMES = {
+    "build": "claude-build-failure-diagnostics",
+    "correct_1": "claude-correction-cycle-1-failure-diagnostics",
+    "correct_2": "claude-correction-cycle-2-failure-diagnostics",
+    "correct_3": "claude-correction-cycle-3-failure-diagnostics",
+}
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_claude_step_has_an_id_for_diagnostics_to_reference(workflow, job_id):
+    step = next(
+        s for s in workflow["jobs"][job_id]["steps"] if "claude-code-action" in s.get("uses", "")
+    )
+    assert step["id"] == "claude"
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_failure_diagnostics_step_exists_and_runs_only_on_claude_failure(workflow, job_id):
+    step = next(
+        s
+        for s in workflow["jobs"][job_id]["steps"]
+        if s.get("name") == "Preserve failure diagnostics"
+    )
+    assert step["if"] == "always() && steps.claude.conclusion == 'failure'"
+    assert "scripts/collect_failure_diagnostics.py" in step["run"]
+    assert job_id in step["run"]
+    assert "steps.claude.outputs.session_id" in step["run"]
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_failure_diagnostics_upload_step_is_correctly_scoped_and_named(workflow, job_id):
+    step = next(
+        s
+        for s in workflow["jobs"][job_id]["steps"]
+        if s.get("name") == "Upload failure diagnostics"
+    )
+    assert step["if"] == "always() && steps.claude.conclusion == 'failure'"
+    assert step["uses"].startswith("actions/upload-artifact")
+    assert step["with"]["name"] == DIAGNOSTICS_ARTIFACT_NAMES[job_id]
+    assert step["with"]["if-no-files-found"] == "ignore"
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_failure_diagnostics_steps_precede_the_stage_and_check_step(workflow, job_id):
+    steps = workflow["jobs"][job_id]["steps"]
+    names = [s.get("name") for s in steps]
+    claude_idx = names.index(
+        "Run Claude Code builder" if job_id == "build" else "Run Claude Code correction"
+    )
+    collect_idx = names.index("Preserve failure diagnostics")
+    upload_idx = names.index("Upload failure diagnostics")
+    stage_name = (
+        "Stage and check builder result"
+        if job_id == "build"
+        else "Stage and check correction result"
+    )
+    stage_idx = names.index(stage_name)
+    assert claude_idx < collect_idx < upload_idx < stage_idx
+
+
+@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+def test_failure_diagnostics_job_permissions_unchanged_and_read_only(workflow, job_id):
+    # Diagnostics upload requires no additional permission -- the job's
+    # existing read-only permissions block is untouched by this feature.
+    perms = workflow["jobs"][job_id]["permissions"]
+    assert all(scope == "read" for scope in perms.values())
+
+
+def test_no_failure_diagnostics_step_references_secrets(workflow):
+    for job_id in CLAUDE_PROMPT_JOB_IDS:
+        combined = _all_run_text(workflow["jobs"][job_id])
+        for forbidden in (
+            "HARVESTGUARD_AUTOMATION_TOKEN",
+            "ANTHROPIC_API_KEY",
+            "OPENAI_API_KEY",
+            "GITHUB_TOKEN",
+        ):
+            # These secrets legitimately never appear in build/correct_N at
+            # all except ANTHROPIC_API_KEY, which is passed only to the
+            # claude-code-action `with:` block (not a `run:` step) -- so no
+            # `run:` step text (including the new diagnostics steps) may
+            # reference any of them.
+            assert forbidden not in combined, f"{job_id}: {forbidden} referenced in a run: step"
+
+
+def test_normal_successful_artifact_behavior_is_unchanged(build_job):
+    # The build job's ordinary (non-failure) artifact path -- creation and
+    # upload of the implementation artifact -- must still exist unmodified
+    # alongside the new failure-only path.
+    names = [s.get("name") for s in build_job["steps"]]
+    assert "Create implementation artifact" in names
+    assert "Upload implementation artifact" in names
+    upload = next(
+        s for s in build_job["steps"] if s.get("name") == "Upload implementation artifact"
+    )
+    assert "if" not in upload  # always runs when reached, same as before this change
