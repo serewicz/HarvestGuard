@@ -941,10 +941,15 @@ def test_cycle_n_consumers_read_exactly_what_the_prior_cycle_uploaded(workflow, 
 # --- Claude turn limit --------------------------------------------------------
 
 
-def test_every_claude_invocation_uses_exactly_sixty_max_turns(workflow):
-    # Raised from 40 after the live Issue #16 run hit the cap mid-task.
-    # A pure cost/loop bound inside the Claude Code action -- asserted for
-    # every invocation so a future copied job can't silently diverge.
+def test_every_claude_invocation_uses_exactly_eighty_max_turns(workflow):
+    # Raised 40 -> 60 after the live Issue #16 run hit the cap mid-task,
+    # then 60 -> 80 after Issue #17 hit the 60-turn cap a second time (this
+    # time with work-budget discipline already in effect and diagnostics
+    # showing real forward progress, not thrashing) -- the final planned
+    # tuning for HG-005. A pure cost/loop bound inside the Claude Code
+    # action -- asserted for every invocation so a future copied job can't
+    # silently diverge, and so workflow config and diagnostics metadata
+    # can never disagree about the configured ceiling.
     claude_steps = [
         step
         for job in workflow["jobs"].values()
@@ -953,8 +958,17 @@ def test_every_claude_invocation_uses_exactly_sixty_max_turns(workflow):
     ]
     assert len(claude_steps) == 4  # build + three correction cycles
     for step in claude_steps:
-        assert "--max-turns 60" in step["with"]["claude_args"]
-        assert "--max-turns 40" not in step["with"]["claude_args"]
+        # Line-exact, not substring: "--max-turns 80" is also a substring
+        # of a wrong value like "--max-turns 800", which a bare `in` check
+        # would miss.
+        arg_lines = step["with"]["claude_args"].splitlines()
+        assert "--max-turns 80" in arg_lines
+        other_turn_lines = [
+            line
+            for line in arg_lines
+            if line.startswith("--max-turns") and line != "--max-turns 80"
+        ]
+        assert other_turn_lines == []
 
 
 # --- Builder work-budget discipline (issue #17: max-turns exhausted) --------
@@ -1146,3 +1160,21 @@ def test_normal_successful_artifact_behavior_is_unchanged(build_job):
         s for s in build_job["steps"] if s.get("name") == "Upload implementation artifact"
     )
     assert "if" not in upload  # always runs when reached, same as before this change
+
+
+def test_failure_diagnostics_configured_max_turns_matches_workflow(workflow):
+    # The diagnostics script's own constant must never disagree with what
+    # the workflow actually configures -- checked here from the workflow
+    # side; the value itself is asserted from the script side in
+    # tests/test_collect_failure_diagnostics.py.
+    import scripts.collect_failure_diagnostics as diag
+
+    claude_step = next(
+        s for s in workflow["jobs"]["build"]["steps"] if "claude-code-action" in s.get("uses", "")
+    )
+    workflow_max_turns = next(
+        line.removeprefix("--max-turns ")
+        for line in claude_step["with"]["claude_args"].splitlines()
+        if line.startswith("--max-turns")
+    )
+    assert int(workflow_max_turns) == diag.CONFIGURED_MAX_TURNS

@@ -225,7 +225,9 @@ def test_metadata_reports_configured_max_turns_and_job(tmp_path, monkeypatch):
     diag.collect("correct_3", tmp_path, "sess-789", "failure")
 
     metadata = json.loads((tmp_path / "metadata.json").read_text())
-    assert metadata["configured_max_turns"] == 60
+    # 80, matching the workflow's current --max-turns value -- diagnostics
+    # metadata and the workflow config must never disagree.
+    assert metadata["configured_max_turns"] == 80 == diag.CONFIGURED_MAX_TURNS
     assert metadata["job"] == "correct_3"
     assert metadata["failed_step"] == "Run Claude Code correction"
     assert metadata["session_id"] == "sess-789"
