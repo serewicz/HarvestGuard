@@ -164,6 +164,16 @@ name: Agent Orchestrator
 #   JSON, any secret, any environment dump), and the sensitive-data scan
 #   that redacts the working-tree files if anything looks unsafe. No
 #   permission, token, cycle-count, or `--max-turns` change.
+# - This revision raises the Claude per-invocation turn ceiling from 60 to
+#   80 (all four invocations: build + correct_1/2/3), after issue #17 hit
+#   the 60-turn ceiling a second time -- this time with the work-budget
+#   discipline already in effect, and the failure diagnostics from that run
+#   showed substantial, relevant forward progress rather than thrashing.
+#   scripts/collect_failure_diagnostics.py's CONFIGURED_MAX_TURNS constant
+#   is raised to match, so diagnostics metadata never claims a ceiling the
+#   workflow isn't actually using. This is the final planned turn-limit
+#   tuning for HG-005; no other prompt, permission, cycle-count, or gating
+#   change.
 on:
   workflow_dispatch:
     inputs:
@@ -485,7 +495,7 @@ jobs:
             reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 60
+            --max-turns 80
           settings: |
             {
               "permissions": {
@@ -1445,7 +1455,7 @@ jobs:
             attempted the correction but could not reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 60
+            --max-turns 80
           settings: |
             {
               "permissions": {
@@ -2279,7 +2289,7 @@ jobs:
             attempted the correction but could not reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 60
+            --max-turns 80
           settings: |
             {
               "permissions": {
@@ -3113,7 +3123,7 @@ jobs:
             attempted the correction but could not reach a passing state.
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
-            --max-turns 60
+            --max-turns 80
           settings: |
             {
               "permissions": {

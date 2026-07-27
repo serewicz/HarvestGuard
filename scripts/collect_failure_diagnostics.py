@@ -69,7 +69,7 @@ from classifier.scanner import classify_text  # noqa: E402
 # Static, matches the workflow's `--max-turns` configuration. Not read from
 # the environment or the execution-output file -- this script never opens
 # that file.
-CONFIGURED_MAX_TURNS = 60
+CONFIGURED_MAX_TURNS = 80
 
 # Literal API-key-shaped prefixes not covered by classifier.scanner's
 # service-credential patterns (which cover AWS/GitHub-classic/Slack/private
