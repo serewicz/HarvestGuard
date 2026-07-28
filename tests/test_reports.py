@@ -133,6 +133,66 @@ def test_markdown_report_has_required_sections_and_evidence_fields() -> None:
     assert "Executive Priority Index" not in report
 
 
+def test_markdown_detailed_findings_include_scanner_identity_and_observed_at() -> None:
+    # Provenance must be readable per finding, not only as an aggregate
+    # Scanner Versions table: which scanner observed this, and when.
+    findings = [
+        _finding(
+            "crypto_inventory",
+            "PEM Certificate",
+            "/scan/root/cert.pem",
+            scanner_name="crypto-inventory",
+        ),
+        _finding(
+            "code_analysis", "source_code", "/scan/root/app.py:4", scanner_name="semgrep"
+        ),
+    ]
+
+    report = format_markdown_report(findings, _context())
+
+    assert (
+        "| Location | Asset Type | Scanner | Scanner Version | Observed At | "
+        "Algorithm | Key Size | Expiration | Issuer | Subject | Fingerprint | "
+        "Confidence | Observed Evidence | Unknowns | Limitations | Errors |"
+    ) in report
+    assert (
+        "| /scan/root/cert.pem | PEM Certificate | crypto-inventory | 0.1.0 | "
+        "2026-07-20T00:00:00+00:00 |"
+    ) in report
+    assert (
+        "| /scan/root/app.py:4 | source_code | semgrep | 0.1.0 | "
+        "2026-07-20T00:00:00+00:00 |"
+    ) in report
+
+
+def test_markdown_scope_lists_only_the_scanners_that_ran() -> None:
+    context = make_report_context(
+        target_path="/scan/root",
+        scan_type="filesystem",
+        scanners=["filesystem"],
+        scope_constraints=["Maximum directory depth: 3"],
+    )
+
+    report = format_markdown_report(
+        [_finding("local_filesystem", "file", "/scan/root/a.txt")], context
+    )
+
+    assert "- Scan type: `filesystem`" in report
+    assert "- Scanners run: filesystem" in report
+    assert "  - Maximum directory depth: 3" in report
+    # A single-scanner run must not claim the other local scanners ran.
+    for absent in ["crypto inventory", "sensitive data", "code analysis"]:
+        assert absent not in report
+
+
+def test_markdown_scope_states_scanners_not_recorded_when_context_omits_them() -> None:
+    report = format_markdown_report(
+        [_finding("local_filesystem", "file", "/scan/root/a.txt")], _context()
+    )
+
+    assert "- Scanners run: Not recorded" in report
+
+
 def test_markdown_report_orders_findings_by_type_then_location() -> None:
     findings = [
         _finding("local_sensitive_data", "file", "/scan/root/z.txt"),
@@ -315,6 +375,26 @@ def test_json_output_is_an_array_of_findings_not_a_report_envelope() -> None:
     assert all(isinstance(item, dict) for item in payload)
 
 
+def test_json_output_is_ordered_by_asset_type_location_and_finding_id() -> None:
+    # docs/CLI.md promises the same deterministic ordering for JSON as for
+    # Markdown, so input order must not leak into the array.
+    findings = [
+        _finding("local_sensitive_data", "file", "/scan/root/z.txt"),
+        _finding("crypto_inventory", "PEM Certificate", "/scan/root/b.pem"),
+        _finding("crypto_inventory", "PEM Certificate", "/scan/root/a.pem"),
+    ]
+
+    payload = json.loads(findings_json(findings))
+    reversed_payload = json.loads(findings_json(list(reversed(findings))))
+
+    assert [(item["asset_type"], item["location"]) for item in payload] == [
+        ("PEM Certificate", "/scan/root/a.pem"),
+        ("PEM Certificate", "/scan/root/b.pem"),
+        ("file", "/scan/root/z.txt"),
+    ]
+    assert payload == reversed_payload
+
+
 def test_json_output_serializes_frozen_structures_as_plain_json_values() -> None:
     finding = NormalizedFinding(
         source_type="local_filesystem",
@@ -418,11 +498,31 @@ def test_markdown_report_reports_scanner_errors_as_incomplete_coverage() -> None
 
 
 def test_markdown_report_without_limits_states_no_limits_recorded() -> None:
-    report = format_markdown_report([_finding("local_filesystem", "file", "/a.txt")], _context())
+    context = make_report_context(target_path="/scan/root")
+
+    report = format_markdown_report([_finding("local_filesystem", "file", "/a.txt")], context)
 
     assert "Coverage was not complete" not in report
     assert "| Coverage | No limits recorded |" in report
     assert "No scanner errors, finding-level errors, or limitations were reported." in report
+
+
+def test_markdown_report_marks_coverage_bounded_when_scope_was_constrained() -> None:
+    # A configured constraint is not a failure, but "No limits recorded" would
+    # be untrue: --prefix and --exclude bound coverage without producing any
+    # limitation finding.
+    context = make_report_context(
+        target_path="my-bucket",
+        excluded_paths=["vendor/*"],
+        scope_constraints=["Object/blob prefix: logs/"],
+    )
+
+    report = format_markdown_report([_finding("aws_s3", "object", "s3://my-bucket/a.txt")], context)
+
+    assert "Coverage was not complete" not in report
+    assert "| Coverage | Bounded by configured scan scope |" in report
+    assert "  - Object/blob prefix: logs/" in report
+    assert "  - Excluded patterns: vendor/*" in report
 
 
 def test_console_summary_states_incomplete_coverage() -> None:

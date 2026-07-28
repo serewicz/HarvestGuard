@@ -36,6 +36,10 @@ LOCAL_SCAN_TYPES = ("all", "filesystem", "crypto", "sensitive-data", "code")
 CLOUD_SCAN_TYPES = ("s3", "gcs", "azure")
 SCAN_TYPES = LOCAL_SCAN_TYPES + CLOUD_SCAN_TYPES
 
+# Scanner labels (as used in the scanner specs below) whose coverage is
+# bounded by --max-depth; the other scanners ignore it.
+DEPTH_BOUNDED_SCANNERS = ("filesystem", "sensitive data")
+
 # Exit codes deliberately separate invalid CLI input (2) from scan
 # execution failures (1) so automation can branch on the difference.
 EXIT_OK = 0
@@ -179,6 +183,9 @@ def run_scan_command(args: argparse.Namespace) -> int:
         duration_seconds=duration_seconds,
         excluded_paths=args.exclude,
         scanner_errors=scanner_errors,
+        scan_type=args.type,
+        scanners=[label for label, _ in specs],
+        scope_constraints=_scope_constraints(args, specs),
     )
 
     if args.json is not None:
@@ -251,6 +258,24 @@ def _cloud_scanner_specs(
             None,
         )
     return None, f"unknown scan type: {scan_type}"
+
+
+def _scope_constraints(
+    args: argparse.Namespace, specs: list[tuple[str, ScannerThunk]]
+) -> list[str]:
+    """Constraints that actually bounded this run, for the report's Scope.
+
+    Only options the selected scanners honor are recorded: `--max-depth` is
+    ignored by the crypto-inventory, code-analysis, and cloud scanners, and
+    `--prefix` is ignored by every local scanner.
+    """
+    labels = [label for label, _ in specs]
+    constraints: list[str] = []
+    if any(label in DEPTH_BOUNDED_SCANNERS for label in labels):
+        constraints.append(f"Maximum directory depth: {args.max_depth}")
+    if args.type in CLOUD_SCAN_TYPES and args.prefix:
+        constraints.append(f"Object/blob prefix: {args.prefix}")
+    return constraints
 
 
 def _run_scanners(

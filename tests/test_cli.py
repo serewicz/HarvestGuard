@@ -118,11 +118,61 @@ def test_scan_command_markdown_output(tmp_path, capsys, monkeypatch):
     assert "## Executive Summary" in output
     assert "## Detailed Findings" in output
     assert (
-        "| Location | Asset Type | Algorithm | Key Size | Expiration | Issuer | "
-        "Subject | Fingerprint | Confidence | Observed Evidence | Unknowns | "
-        "Limitations | Errors |"
+        "| Location | Asset Type | Scanner | Scanner Version | Observed At | "
+        "Algorithm | Key Size | Expiration | Issuer | Subject | Fingerprint | "
+        "Confidence | Observed Evidence | Unknowns | Limitations | Errors |"
     ) in output
     assert str(tmp_path / "data.csv") in output
+    # Per-finding provenance: which scanner observed this finding.
+    assert f"| {tmp_path / 'data.csv'} | file | test | 0.1.0 |" in output
+
+
+def test_scan_command_markdown_scope_reports_only_the_selected_local_scanner(
+    tmp_path, capsys, monkeypatch
+):
+    # Scope must describe the run that happened: a single-scanner local scan
+    # must not claim the other local scanners ran.
+    _patch_local_scanners(
+        monkeypatch,
+        {"filesystem": [_finding("local_filesystem", "file", str(tmp_path / "a.txt"))]},
+    )
+
+    exit_code = harvestguard.main([
+        "scan",
+        str(tmp_path),
+        "--type",
+        "filesystem",
+        "--max-depth",
+        "2",
+        "--markdown",
+        "--quiet",
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "- Scan type: `filesystem`" in output
+    assert "- Scanners run: filesystem" in output
+    assert "  - Maximum directory depth: 2" in output
+    for absent in ["crypto inventory", "sensitive data", "code analysis"]:
+        assert absent not in output
+
+
+def test_scan_command_markdown_scope_lists_every_scanner_for_type_all(
+    tmp_path, capsys, monkeypatch
+):
+    _patch_local_scanners(
+        monkeypatch,
+        {"filesystem": [_finding("local_filesystem", "file", str(tmp_path / "a.txt"))]},
+    )
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "all", "--markdown", "--quiet"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "- Scan type: `all`" in output
+    assert "- Scanners run: filesystem, crypto inventory, sensitive data, code analysis" in output
 
 
 def test_scan_command_markdown_writes_report_file(tmp_path, capsys, monkeypatch):
@@ -444,6 +494,39 @@ def test_scan_type_azure_invokes_azure_scanner(capsys, monkeypatch):
     assert captured["account_url"] == "https://acct.blob.core.windows.net"
     assert captured["container"] == "container"
     assert payload[0]["source_type"] == "azure_blob"
+
+
+def test_scan_type_s3_markdown_scope_reports_only_the_cloud_scanner(capsys, monkeypatch):
+    # A cloud scan must not report the local scanners as scope, and a --prefix
+    # bounds coverage even though it produces no limitation finding.
+    monkeypatch.setattr(
+        harvestguard,
+        "scan_s3_bucket_findings",
+        lambda bucket_name, prefix="": [
+            _finding("aws_s3", "object", f"s3://{bucket_name}/logs/a.txt")
+        ],
+    )
+
+    exit_code = harvestguard.main([
+        "scan",
+        "my-bucket",
+        "--type",
+        "s3",
+        "--prefix",
+        "logs/",
+        "--markdown",
+        "--quiet",
+    ])
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "- Scan type: `s3`" in output
+    assert "- Scanners run: s3" in output
+    assert "  - Object/blob prefix: logs/" in output
+    assert "| Coverage | Bounded by configured scan scope |" in output
+    assert "Maximum directory depth" not in output
+    for absent in ["crypto inventory", "sensitive data", "code analysis"]:
+        assert absent not in output
 
 
 def test_scan_type_s3_swallowed_failure_exits_error_with_valid_json(capsys, monkeypatch):

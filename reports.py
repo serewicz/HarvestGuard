@@ -19,6 +19,12 @@ class ScanReportContext:
     duration_seconds: float | None = None
     excluded_paths: list[str] = field(default_factory=list)
     scanner_errors: list[str] = field(default_factory=list)
+    # Which scan was actually run. The report must not claim a scanner ran
+    # that the caller never invoked, so scope is reported from what the CLI
+    # selected rather than from a fixed list of every scanner that exists.
+    scan_type: str | None = None
+    scanners: list[str] = field(default_factory=list)
+    scope_constraints: list[str] = field(default_factory=list)
 
 
 def make_report_context(
@@ -27,6 +33,9 @@ def make_report_context(
     duration_seconds: float | None = None,
     excluded_paths: list[str] | None = None,
     scanner_errors: list[str] | None = None,
+    scan_type: str | None = None,
+    scanners: list[str] | None = None,
+    scope_constraints: list[str] | None = None,
 ) -> ScanReportContext:
     started = started_at or datetime.now(timezone.utc)
     if started.tzinfo is None:
@@ -37,11 +46,17 @@ def make_report_context(
         duration_seconds=duration_seconds,
         excluded_paths=excluded_paths or [],
         scanner_errors=scanner_errors or [],
+        scan_type=scan_type,
+        scanners=list(scanners or []),
+        scope_constraints=list(scope_constraints or []),
     )
 
 
 def findings_json(findings: list[NormalizedFinding]) -> str:
-    return json.dumps(findings_to_dicts(findings), indent=2)
+    # Same ordering as the Markdown report (asset type, location, finding ID)
+    # so both outputs are deterministic and comparable. The shape stays a bare
+    # array of serialized normalized findings.
+    return json.dumps(findings_to_dicts(sorted(findings, key=_finding_sort_key)), indent=2)
 
 
 def format_console_summary(
@@ -107,7 +122,7 @@ def format_markdown_report(
         f"| Duration | {_duration(context.duration_seconds)} |",
         f"| Files Scanned | {counts['files_scanned']} |",
         f"| Excluded Paths | {_md(', '.join(context.excluded_paths) or 'None')} |",
-        f"| Coverage | {_md('Not complete' if coverage_statement else 'No limits recorded')} |",
+        f"| Coverage | {_md(_coverage_status(coverage_statement, context))} |",
         "",
         "## Scanner Versions",
         "",
@@ -115,15 +130,9 @@ def format_markdown_report(
         "| --- | --- | --- |",
     ])
     lines.extend(_scanner_version_rows(ordered))
+    lines.extend(["", "## Scope", ""])
+    lines.extend(_scope_lines(context))
     lines.extend([
-        "",
-        "## Scope",
-        "",
-        f"- Target path: `{_inline_code(context.target_path)}`",
-        "- Local filesystem encryption evidence",
-        "- Cryptographic asset inventory",
-        "- Sensitive-data category detection",
-        "- Local Semgrep crypto code analysis",
         "",
         "## Findings Summary",
         "",
@@ -159,11 +168,15 @@ def format_markdown_report(
             lines.extend([
                 f"### {asset_type}",
                 "",
-                "| Location | Asset Type | Algorithm | Key Size | Expiration | Issuer | "
-                "Subject | Fingerprint | Confidence | Observed Evidence | Unknowns | "
-                "Limitations | Errors |",
+                # Scanner/version/observed-at are per finding, not only in the
+                # aggregate Scanner Versions table: a reviewer must be able to
+                # tell which scanner produced each observation and when it was
+                # collected without leaving Detailed Findings.
+                "| Location | Asset Type | Scanner | Scanner Version | Observed At | "
+                "Algorithm | Key Size | Expiration | Issuer | Subject | Fingerprint | "
+                "Confidence | Observed Evidence | Unknowns | Limitations | Errors |",
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
-                "--- | --- |",
+                "--- | --- | --- | --- | --- |",
             ])
             for finding in items:
                 metadata = finding.technical_metadata
@@ -173,6 +186,9 @@ def format_markdown_report(
                         [
                             _md(finding.location),
                             _md(finding.asset_type),
+                            _md(finding.scanner_name),
+                            _md(finding.scanner_version),
+                            _md(finding.observed_at or "Not recorded"),
                             _md(metadata.get("Algorithm")),
                             _md(metadata.get("Key Size")),
                             _md(metadata.get("Expiration")),
@@ -303,6 +319,48 @@ def _coverage_statement(
         "and found clean; see Errors and Warnings and each finding's "
         "`limitations` field."
     )
+
+
+def _configured_scope(context: ScanReportContext) -> list[str]:
+    """Scope constraints the caller configured, as report-ready statements.
+
+    A configured constraint is not a failure (see docs/SCAN_COVERAGE.md), but
+    it does bound what the scan could observe, so it is recorded rather than
+    silently dropped.
+    """
+    constraints = list(context.scope_constraints)
+    if context.excluded_paths:
+        constraints.append("Excluded patterns: " + ", ".join(context.excluded_paths))
+    return constraints
+
+
+def _coverage_status(coverage_statement: str | None, context: ScanReportContext) -> str:
+    if coverage_statement:
+        return "Not complete"
+    if _configured_scope(context):
+        # `--prefix` and `--exclude` bound coverage without producing
+        # limitation findings, so "No limits recorded" would be untrue here.
+        return "Bounded by configured scan scope"
+    return "No limits recorded"
+
+
+def _scope_lines(context: ScanReportContext) -> list[str]:
+    """What this specific run covered: only the scanners that actually ran and
+    the constraints that were actually configured."""
+    lines = [f"- Target path: `{_inline_code(context.target_path)}`"]
+    if context.scan_type:
+        lines.append(f"- Scan type: `{_inline_code(context.scan_type)}`")
+    if context.scanners:
+        lines.append("- Scanners run: " + ", ".join(_md(name) for name in context.scanners))
+    else:
+        lines.append("- Scanners run: Not recorded")
+    constraints = _configured_scope(context)
+    if constraints:
+        lines.append("- Configured scope constraints:")
+        lines.extend(f"  - {_md(constraint)}" for constraint in constraints)
+    else:
+        lines.append("- Configured scope constraints: None recorded")
+    return lines
 
 
 def _executive_summary(counts: dict[str, int], findings: list[NormalizedFinding]) -> str:

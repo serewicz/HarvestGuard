@@ -165,8 +165,9 @@ Given findings A and B were collected before a later failure:
 
 - The Markdown report's **Scan Information** table includes a `Coverage`
   row: `Not complete` whenever any finding carries a `limitations` entry or
-  the scan recorded a `scanner_errors` entry, `No limits recorded`
-  otherwise.
+  the scan recorded a `scanner_errors` entry; `Bounded by configured scan
+  scope` when neither holds but a scope constraint (`--max-depth`,
+  `--prefix`, `--exclude`) was configured; `No limits recorded` otherwise.
 - A **Coverage was not complete** statement appears (in both the Markdown
   report and the console summary) whenever that condition holds, naming how
   many scanner errors and how many limitation-carrying findings were
