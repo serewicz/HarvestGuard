@@ -82,20 +82,40 @@ Adapters should:
 
 The normalized finding model is the contract between scanners and every
 downstream feature. The current internal contract is documented in
-[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md). It distinguishes:
+[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md).
+
+A raw `NormalizedFinding` record is evidence and provenance only. It
+contains:
 
 - asset identity and source;
 - observed evidence;
-- scanner metadata;
-- confidence and limitations;
-- derived exposure or risk fields;
-- immutable raw finding details;
-- separately mutable assessment fields.
+- provenance (scanner metadata, collection method and source, rule id,
+  repeatability, verification rationale);
+- confidence;
+- technical ownership signals (filesystem/cloud/IAM metadata only, never
+  confirmed business accountability);
+- unknowns and limitations, distinct from per-finding errors;
+- immutable technical metadata;
+- a stable finding identity (`finding_id`, and `identity_key` where a
+  scanner supplies one).
 
-The model should support observed evidence, inference, ownership signals,
-unknowns, evidence confidence, coverage, partial-scan status, derived exposure
-or topology linkage, executive questions, immutable raw details, and separate
-mutable assessment records without conflating them.
+A raw `NormalizedFinding` record deliberately does **not** contain: risk
+score, HNDL exposure, exposure probability, remediation priority, business
+impact, confirmed business ownership or accountability, executive
+questions, recommendations, compliance conclusions, or quantum-readiness
+conclusions. See [TERMINOLOGY.md](TERMINOLOGY.md) for the evidence-versus-
+inference vocabulary these boundaries use, and
+[ADR-005: Evidence versus inference](DECISIONS/ADR-005-evidence-versus-inference.md)
+for the rationale.
+
+Derived exposure or risk fields, inference, executive questions, and
+mutable assessment records are not responsibilities of the normalized
+finding model. They belong to a separate, downstream (and, beyond the
+existing heuristic risk score, currently future) assessment layer -- see
+"Future Executive Priority Index" below -- that would consume normalized
+findings by `finding_id` and stay traceable back to them, rather than
+carrying that data inside the raw finding itself. This document does not
+claim such a layer exists beyond what is actually implemented today.
 
 Assessment concepts such as business impact, severity, remediation cost,
 confirmed business ownership, quantum readiness, and executive priority are
