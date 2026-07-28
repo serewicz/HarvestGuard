@@ -175,6 +175,63 @@ def test_scan_command_markdown_scope_lists_every_scanner_for_type_all(
     assert "- Scanners run: filesystem, crypto inventory, sensitive data, code analysis" in output
 
 
+def test_scan_command_markdown_scanner_versions_cover_every_invoked_scanner(
+    tmp_path, capsys, monkeypatch
+):
+    # Scanner Versions is a statement about the run, not about the findings: a
+    # --type all scan where only one scanner produced anything must still name
+    # the other three with their versions and a zero count.
+    _patch_local_scanners(
+        monkeypatch,
+        {"filesystem": [_finding("local_filesystem", "file", str(tmp_path / "a.txt"))]},
+    )
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "all", "--markdown", "--quiet"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "| crypto_inventory | 0.1.0 | 0 |" in output
+    assert "| filesystem | 0.1.0 | 0 |" in output
+    assert "| semgrep_crypto_rules | 0.1.0 | 0 |" in output
+    assert "| sensitive_data_classifier | 0.1.0 | 0 |" in output
+    # The one finding came from the test scanner name, not from a declared one.
+    assert "| test | 0.1.0 | 1 |" in output
+    assert "| None | None | 0 |" not in output
+
+
+def test_scan_command_markdown_scanner_versions_survive_a_zero_finding_scan(
+    tmp_path, capsys, monkeypatch
+):
+    _patch_local_scanners(monkeypatch, {})
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "filesystem", "--markdown", "--quiet"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "| filesystem | 0.1.0 | 0 |" in output
+    assert "| None | None | 0 |" not in output
+
+
+def test_scan_type_s3_failure_markdown_still_reports_the_scanner_version(capsys, monkeypatch):
+    # The scanner failed before producing a single finding; the report must
+    # still show that it ran, and at which version, next to the error.
+    client = MagicMock()
+    client.list_objects_v2.side_effect = NoCredentialsError()
+    monkeypatch.setattr("scanner.cloud.boto3.client", lambda *a, **k: client)
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--markdown", "--quiet"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "| s3 | 0.1.0 | 0 |" in output
+    assert "| None | None | 0 |" not in output
+    assert "| Coverage | Not complete |" in output
+
+
 def test_scan_command_markdown_writes_report_file(tmp_path, capsys, monkeypatch):
     report_path = tmp_path / "report.md"
     _patch_local_scanners(

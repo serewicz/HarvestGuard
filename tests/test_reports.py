@@ -326,6 +326,61 @@ def test_markdown_scanner_version_rows_are_deterministically_ordered() -> None:
     )
 
 
+def test_markdown_scanner_versions_include_scanners_that_found_nothing() -> None:
+    # A scanner that ran and found nothing is evidence too: omitting it would
+    # hide both its version and the fact that it ran at all.
+    context = make_report_context(
+        target_path="/scan/root",
+        scanners=["filesystem", "code analysis"],
+        scanner_versions={"filesystem": "0.1.0", "semgrep_crypto_rules": "0.2.0"},
+    )
+
+    report = format_markdown_report(
+        [_finding("local_filesystem", "file", "/scan/root/a.txt", scanner_name="filesystem")],
+        context,
+    )
+
+    assert "| filesystem | 0.1.0 | 1 |" in report
+    assert "| semgrep_crypto_rules | 0.2.0 | 0 |" in report
+    assert "| None | None | 0 |" not in report
+
+
+def test_markdown_scanner_versions_include_a_scanner_that_failed_outright() -> None:
+    # The scanner failed before producing anything; its version and the fact
+    # that it was invoked must still be reported alongside the error.
+    context = make_report_context(
+        target_path="my-bucket",
+        scanners=["s3"],
+        scanner_versions={"s3": "0.1.0"},
+        scanner_errors=["s3: Error scanning S3: ClientError: ExpiredToken"],
+    )
+
+    report = format_markdown_report([], context)
+
+    assert "| s3 | 0.1.0 | 0 |" in report
+    assert "| None | None | 0 |" not in report
+    assert "Scanner error: s3: Error scanning S3: ClientError: ExpiredToken" in report
+
+
+def test_markdown_scanner_versions_keep_findings_from_undeclared_scanners() -> None:
+    # Declared scanners are additive: a finding whose scanner the caller never
+    # declared is still counted rather than dropped from the table.
+    context = make_report_context(
+        target_path="/scan/root",
+        scanners=["filesystem"],
+        scanner_versions={"filesystem": "0.1.0"},
+    )
+
+    finding = _finding(
+        "crypto_inventory", "PEM Certificate", "/scan/root/a.pem", scanner_name="crypto"
+    )
+
+    report = format_markdown_report([finding], context)
+
+    assert "| crypto | 0.1.0 | 1 |" in report
+    assert "| filesystem | 0.1.0 | 0 |" in report
+
+
 def test_markdown_report_scan_metadata_is_present() -> None:
     report = format_markdown_report([_finding("local_filesystem", "file", "/a.txt")], _context())
 

@@ -25,6 +25,11 @@ class ScanReportContext:
     scan_type: str | None = None
     scanners: list[str] = field(default_factory=list)
     scope_constraints: list[str] = field(default_factory=list)
+    # Normalized scanner name -> version for every scanner that was invoked.
+    # Recorded separately from the findings so the report can state the version
+    # of a scanner that produced no findings, or that failed before producing
+    # any, instead of omitting it as if it had never run.
+    scanner_versions: dict[str, str] = field(default_factory=dict)
 
 
 def make_report_context(
@@ -36,6 +41,7 @@ def make_report_context(
     scan_type: str | None = None,
     scanners: list[str] | None = None,
     scope_constraints: list[str] | None = None,
+    scanner_versions: dict[str, str] | None = None,
 ) -> ScanReportContext:
     started = started_at or datetime.now(timezone.utc)
     if started.tzinfo is None:
@@ -49,6 +55,7 @@ def make_report_context(
         scan_type=scan_type,
         scanners=list(scanners or []),
         scope_constraints=list(scope_constraints or []),
+        scanner_versions=dict(scanner_versions or {}),
     )
 
 
@@ -129,7 +136,7 @@ def format_markdown_report(
         "| Scanner | Version | Findings |",
         "| --- | --- | --- |",
     ])
-    lines.extend(_scanner_version_rows(ordered))
+    lines.extend(_scanner_version_rows(ordered, context))
     lines.extend(["", "## Scope", ""])
     lines.extend(_scope_lines(context))
     lines.extend([
@@ -377,15 +384,29 @@ def _executive_summary(counts: dict[str, int], findings: list[NormalizedFinding]
     )
 
 
-def _scanner_version_rows(findings: list[NormalizedFinding]) -> list[str]:
-    if not findings:
+def _scanner_version_rows(
+    findings: list[NormalizedFinding], context: ScanReportContext
+) -> list[str]:
+    """One row per scanner, counting findings but not depending on them.
+
+    Every scanner the caller invoked appears with its version and a count --
+    including a scanner that produced nothing and one that failed before
+    producing anything -- because omitting it would hide both the version that
+    ran and the fact that it ran at all. Scanners are keyed by normalized
+    identity (`scanner_name`, `scanner_version`), so a finding whose scanner
+    the caller did not declare is still reported.
+    """
+    counts: dict[tuple[str, str], int] = {
+        (name, version): 0 for name, version in context.scanner_versions.items()
+    }
+    for finding in findings:
+        key = (finding.scanner_name, finding.scanner_version)
+        counts[key] = counts.get(key, 0) + 1
+    if not counts:
         return ["| None | None | 0 |"]
-    versions: dict[tuple[str, str], int] = Counter(
-        (finding.scanner_name, finding.scanner_version) for finding in findings
-    )
     return [
         f"| {_md(scanner)} | {_md(version)} | {count} |"
-        for (scanner, version), count in sorted(versions.items())
+        for (scanner, version), count in sorted(counts.items())
     ]
 
 

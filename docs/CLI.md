@@ -320,7 +320,9 @@ are stable:
 - Executive Summary — evidence counts and scan context only
 - Scan Information — scan time, report generator/version, target, duration,
   files scanned, excluded paths, coverage status
-- Scanner Versions — scanner name, version, and finding count
+- Scanner Versions — scanner name, version, and finding count, listing every
+  scanner the run invoked; a scanner that produced no findings, or that failed
+  before producing any, still appears with its version and a count of `0`
 - Scope — target, scan type, the scanners that actually ran for that scan
   type, and the scope constraints that bounded the run
 - Findings Summary
