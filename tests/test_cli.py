@@ -119,7 +119,7 @@ def test_scan_command_markdown_output(tmp_path, capsys, monkeypatch):
     assert "## Detailed Findings" in output
     assert (
         "| Location | Asset Type | Algorithm | Key Size | Expiration | Issuer | "
-        "Subject | Fingerprint | Confidence | Observed Evidence | Errors |"
+        "Subject | Fingerprint | Confidence | Observed Evidence | Limitations | Errors |"
     ) in output
     assert str(tmp_path / "data.csv") in output
 
@@ -496,6 +496,63 @@ def test_scan_type_s3_per_object_access_denied_exits_error(capsys, monkeypatch):
     assert exit_code == 1
     # stdout stays valid JSON; the coverage failure is not silently dropped.
     assert json.loads(captured.out) == []
+
+
+def test_scan_type_s3_partial_failure_markdown_shows_findings_and_errors(capsys, monkeypatch):
+    # Markdown must carry the same truth as JSON on a partial cloud failure:
+    # the page-1 finding is present, the page-2 failure is visible in Errors
+    # and Warnings, and the report does not read as complete coverage.
+    from botocore.exceptions import ClientError
+
+    client = MagicMock()
+    client.list_objects_v2.side_effect = [
+        {
+            "Contents": [{"Key": "good.txt", "Size": 10, "LastModified": "2026-01-01"}],
+            "IsTruncated": True,
+            "NextContinuationToken": "token-1",
+        },
+        ClientError({"Error": {"Code": "ExpiredToken"}}, "ListObjectsV2"),
+    ]
+    client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+    monkeypatch.setattr("scanner.cloud.boto3.client", lambda *a, **k: client)
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--markdown", "--quiet"])
+
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "s3://my-bucket/good.txt" in output
+    assert "ExpiredToken" in output
+    assert "Coverage was not complete" in output
+    assert "| Coverage | Not complete |" in output
+
+
+def test_scan_type_filesystem_markdown_shows_coverage_limitations(tmp_path, capsys):
+    # Real filesystem scan (no mocks): a directory beyond --max-depth must show
+    # up in the report as an explicit, readable coverage limitation.
+    (tmp_path / "top.txt").write_text("hello")
+    (tmp_path / "deeper").mkdir()
+    (tmp_path / "deeper" / "buried.txt").write_text("buried")
+
+    exit_code = harvestguard.main(
+        [
+            "scan",
+            str(tmp_path),
+            "--type",
+            "filesystem",
+            "--max-depth",
+            "0",
+            "--markdown",
+            "--quiet",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0  # a configured limit is not a scanner failure
+    assert str(tmp_path / "deeper") in output
+    assert "max_depth" in output
+    assert "`max_depth_boundary`: 1" in output
+    assert "Coverage was not complete" in output
+    assert str(tmp_path / "deeper" / "buried.txt") not in output
 
 
 def test_scan_type_azure_invalid_target_is_usage_error(capsys):

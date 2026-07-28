@@ -153,7 +153,7 @@ def test_permission_denied_becomes_limitation_not_a_dropped_finding(tmp_path):
     assert payload["confidence"] == "Low"
 
 
-# 9. Symlinks are not followed by default.
+# 9. Symlinks are not followed, but the skip stays visible.
 @POSIX_ONLY
 def test_symlinks_are_not_followed(tmp_path):
     outside_secret = tmp_path.parent / f"{tmp_path.name}_outside_secret.txt"
@@ -165,20 +165,89 @@ def test_symlinks_are_not_followed(tmp_path):
 
         findings = scan_filesystem_findings(str(scan_root))
 
-        assert findings == []
+        # The link is reported as an explicitly skipped asset -- never as an
+        # inspected file, and never with evidence about the target's content.
+        assert [f.location for f in findings] == [str(scan_root / "link.txt")]
+        payload = findings[0].to_dict()
+        assert payload["asset_type"] == "special_file"
+        assert payload["rule_id"] == "skipped_special_file"
+        assert payload["limitations"]
+        assert payload["unknowns"]
+        assert payload["technical_metadata"] == {}
+        assert str(outside_secret) not in json.dumps(payload)
     finally:
         outside_secret.unlink()
 
 
-# 9b. A broken symlink must not crash the scan or produce a finding.
+# 9b. A broken symlink must not crash the scan, and must not be read as a file.
 @POSIX_ONLY
 def test_broken_symlink_is_skipped_without_crashing(tmp_path):
     (tmp_path / "dangling.txt").symlink_to(tmp_path / "does_not_exist.txt")
     (tmp_path / "real.txt").write_text("hello")
 
     findings = scan_filesystem_findings(str(tmp_path))
+    by_location = {f.location: f.to_dict() for f in findings}
 
-    assert [f.location for f in findings] == [str(tmp_path / "real.txt")]
+    assert by_location[str(tmp_path / "real.txt")]["asset_type"] == "file"
+    dangling = by_location[str(tmp_path / "dangling.txt")]
+    assert dangling["asset_type"] == "special_file"
+    assert dangling["rule_id"] == "skipped_special_file"
+
+
+# 9c. A symlinked directory is not descended into, and the skip stays visible.
+@POSIX_ONLY
+def test_symlinked_directory_is_not_descended_into(tmp_path):
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "inside.txt").write_text("hello")
+    scan_root = tmp_path / "root"
+    scan_root.mkdir()
+    (scan_root / "link_dir").symlink_to(real_dir, target_is_directory=True)
+
+    findings = scan_filesystem_findings(str(scan_root))
+    by_location = {f.location: f.to_dict() for f in findings}
+
+    # Nothing beneath the link was inspected, and nothing was fabricated.
+    assert str(scan_root / "link_dir" / "inside.txt") not in by_location
+    link_finding = by_location[str(scan_root / "link_dir")]
+    assert link_finding["asset_type"] == "special_file"
+    assert link_finding["rule_id"] == "skipped_special_file"
+    assert link_finding["limitations"]
+
+
+# 9d. A symlinked directory sitting exactly at the max-depth boundary must
+# still be classified as a skipped special file, not shadowed by max-depth
+# boundary classification -- regression test for the ordering bug where the
+# depth>=max_depth branch reported every child of `dirs` as
+# max_depth_boundary without checking whether the child was itself a
+# symlink.
+@POSIX_ONLY
+def test_symlinked_directory_at_max_depth_boundary_stays_special_file(tmp_path):
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    (real_dir / "inside.txt").write_text("hello")
+    scan_root = tmp_path / "root"
+    (scan_root / "l1").mkdir(parents=True)
+    (scan_root / "l1" / "link_dir").symlink_to(real_dir, target_is_directory=True)
+
+    # max_depth=1: "l1" is at depth 1, so its children (including link_dir)
+    # are evaluated in the depth>=max_depth branch that prunes and reports
+    # max_depth_boundary findings -- exactly the code path the fix touches.
+    findings = scan_filesystem_findings(str(scan_root), max_depth=1)
+    by_location = {f.location: f.to_dict() for f in findings}
+
+    link_path = str(scan_root / "l1" / "link_dir")
+    assert link_path in by_location
+    link_finding = by_location[link_path]
+    assert link_finding["asset_type"] == "special_file"
+    assert link_finding["rule_id"] == "skipped_special_file"
+    # Reported exactly once -- never also as a max_depth_boundary directory.
+    assert [f.location for f in findings].count(link_path) == 1
+    assert not any(
+        f.location == link_path and f.rule_id == "max_depth_boundary" for f in findings
+    )
+    # Nothing beneath the link was inspected, and nothing was fabricated.
+    assert str(scan_root / "l1" / "link_dir" / "inside.txt") not in by_location
 
 
 # 10. Special files are not accidentally read as normal files.
@@ -191,8 +260,15 @@ def test_fifo_is_not_opened_or_reported(tmp_path):
     # If the scanner ever opened the FIFO for reading, this call would hang
     # indefinitely (no writer is attached) instead of returning.
     findings = scan_filesystem_findings(str(tmp_path))
+    by_location = {f.location: f.to_dict() for f in findings}
 
-    assert [f.location for f in findings] == [str(tmp_path / "real.txt")]
+    assert by_location[str(tmp_path / "real.txt")]["asset_type"] == "file"
+    fifo_finding = by_location[str(fifo_path)]
+    assert fifo_finding["asset_type"] == "special_file"
+    assert fifo_finding["rule_id"] == "skipped_special_file"
+    assert "FIFO" in fifo_finding["evidence"]
+    # No encryption evidence is fabricated for something never opened.
+    assert fifo_finding["technical_metadata"] == {}
 
 
 # 11. A disappearing/changing file is handled without corrupting the scan.
@@ -240,6 +316,18 @@ def test_file_content_unreadable_mid_scan_becomes_a_limitation_not_a_crash(tmp_p
 
     assert payload["confidence"] == "Low"
     assert any("inaccessible" in item.lower() for item in payload["limitations"])
+
+
+# 11b. Inspected file content never reaches the finding.
+def test_file_content_is_never_emitted_in_the_finding(tmp_path):
+    # The scanner reads leading bytes for signature detection; none of that
+    # content may survive into the evidence record.
+    marker = "MARKER-VALUE-THAT-MUST-NOT-BE-EMITTED"
+    (tmp_path / "a.txt").write_text(marker * 4)
+
+    payload = scan_filesystem_findings(str(tmp_path))[0].to_dict()
+
+    assert marker not in json.dumps(payload)
 
 
 # 12. Serialization is JSON-compatible.
@@ -330,7 +418,88 @@ def test_max_depth_boundary_produces_directory_limitation_finding(tmp_path):
     assert boundary_finding["asset_type"] == "directory"
     assert boundary_finding["rule_id"] == "max_depth_boundary"
     assert boundary_finding["repeatable"] is True
-    assert "max_depth" in boundary_finding["evidence"]
+
+
+def _depth_tree(root):
+    """root/ (depth 0) -> l1/ (depth 1) -> l2/ (depth 2) -> l3/ (depth 3), each
+    holding one regular file."""
+    (root / "d0.txt").write_text("zero")
+    current = root
+    for level in range(1, 4):
+        current = current / f"l{level}"
+        current.mkdir()
+        (current / f"d{level}.txt").write_text(str(level))
+    return root
+
+
+def test_scan_root_is_depth_zero(tmp_path):
+    # max_depth=0 permits files in the root itself and nothing below it: the
+    # root is depth 0, so its child directories are already past the boundary.
+    _depth_tree(tmp_path)
+
+    findings = scan_filesystem_findings(str(tmp_path), max_depth=0)
+    by_location = {f.location: f.to_dict() for f in findings}
+
+    assert by_location[str(tmp_path / "d0.txt")]["asset_type"] == "file"
+    assert str(tmp_path / "l1" / "d1.txt") not in by_location
+    assert by_location[str(tmp_path / "l1")]["rule_id"] == "max_depth_boundary"
+
+
+def test_files_in_directories_at_max_depth_are_inspected(tmp_path):
+    # max_depth=2 permits files in directories at depth 2 (root/l1/l2), and
+    # stops at the depth-3 directory below it.
+    _depth_tree(tmp_path)
+
+    findings = scan_filesystem_findings(str(tmp_path), max_depth=2)
+    by_location = {f.location: f.to_dict() for f in findings}
+
+    for level, location in enumerate(
+        [
+            tmp_path / "d0.txt",
+            tmp_path / "l1" / "d1.txt",
+            tmp_path / "l1" / "l2" / "d2.txt",
+        ]
+    ):
+        assert by_location[str(location)]["asset_type"] == "file", level
+    assert str(tmp_path / "l1" / "l2" / "l3" / "d3.txt") not in by_location
+    assert by_location[str(tmp_path / "l1" / "l2" / "l3")]["rule_id"] == "max_depth_boundary"
+
+
+def test_directories_below_max_depth_are_pruned_before_descent(tmp_path, monkeypatch):
+    # Pruning must happen before descent, not by filtering results afterwards:
+    # nothing beneath the boundary should be listed or stat'd at all.
+    _depth_tree(tmp_path)
+    beyond = tmp_path / "l1" / "l2"
+    inspected: list[str] = []
+    real_lstat = os.lstat
+
+    def recording_lstat(path, *args, **kwargs):
+        inspected.append(os.fspath(path))
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(fs_module.os, "lstat", recording_lstat)
+
+    findings = scan_filesystem_findings(str(tmp_path), max_depth=1)
+    locations = {f.location for f in findings}
+
+    assert not any(path.startswith(str(beyond) + os.sep) for path in inspected)
+    # The boundary directory itself is reported once; the directory below it is
+    # never even discovered, so no second boundary finding is emitted for it.
+    assert str(beyond) in locations
+    assert str(beyond / "l3") not in locations
+
+
+def test_trailing_separator_on_root_does_not_shift_depth(tmp_path):
+    # "/data/" and "/data" describe the same scan root, so they must produce
+    # the same depth boundary rather than silently scanning a level deeper.
+    _depth_tree(tmp_path)
+
+    without = {f.location for f in scan_filesystem_findings(str(tmp_path), max_depth=1)}
+    with_sep = {
+        f.location for f in scan_filesystem_findings(str(tmp_path) + os.sep, max_depth=1)
+    }
+
+    assert without == with_sep
 
 
 def test_directory_limitation_findings_use_the_existing_finding_model(tmp_path):

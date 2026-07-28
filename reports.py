@@ -71,6 +71,9 @@ def format_console_summary(
     if context and context.scanner_errors:
         lines.extend(["", "Scanner Warnings:"])
         lines.extend(f"- {error}" for error in context.scanner_errors)
+    coverage_statement = _coverage_statement(findings, context) if context else None
+    if coverage_statement:
+        lines.extend(["", coverage_statement])
     return "\n".join(lines)
 
 
@@ -80,6 +83,7 @@ def format_markdown_report(
     counts = summarize_findings(findings)
     ordered = sorted(findings, key=_finding_sort_key)
     by_type = _group_by_type(ordered)
+    coverage_statement = _coverage_statement(findings, context)
     lines = [
         "# HarvestGuard Scan Report",
         "",
@@ -89,6 +93,10 @@ def format_markdown_report(
         "",
         "The report summarizes observed evidence only. It does not infer business risk.",
         "",
+    ]
+    if coverage_statement:
+        lines.extend([coverage_statement, ""])
+    lines.extend([
         "## Scan Information",
         "",
         "| Field | Value |",
@@ -99,12 +107,13 @@ def format_markdown_report(
         f"| Duration | {_duration(context.duration_seconds)} |",
         f"| Files Scanned | {counts['files_scanned']} |",
         f"| Excluded Paths | {_md(', '.join(context.excluded_paths) or 'None')} |",
+        f"| Coverage | {_md('Not complete' if coverage_statement else 'No limits recorded')} |",
         "",
         "## Scanner Versions",
         "",
         "| Scanner | Version | Findings |",
         "| --- | --- | --- |",
-    ]
+    ])
     lines.extend(_scanner_version_rows(ordered))
     lines.extend([
         "",
@@ -151,8 +160,9 @@ def format_markdown_report(
                 f"### {asset_type}",
                 "",
                 "| Location | Asset Type | Algorithm | Key Size | Expiration | Issuer | "
-                "Subject | Fingerprint | Confidence | Observed Evidence | Errors |",
-                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "Subject | Fingerprint | Confidence | Observed Evidence | Limitations | "
+                "Errors |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
             ])
             for finding in items:
                 metadata = finding.technical_metadata
@@ -170,6 +180,10 @@ def format_markdown_report(
                             _md(metadata.get("Fingerprint")),
                             _md(finding.confidence),
                             _md(finding.evidence),
+                            # Rendered in full rather than counted: a reviewer
+                            # needs to see exactly which scope was skipped or
+                            # only partially observed.
+                            _md("; ".join(finding.limitations)),
                             _md("; ".join(finding.errors)),
                         ]
                     )
@@ -184,11 +198,20 @@ def format_markdown_report(
         "",
     ])
     if context.scanner_errors:
-        lines.extend(f"- {_md(error)}" for error in context.scanner_errors)
-    elif counts["errors"]:
+        lines.extend(f"- Scanner error: {_md(error)}" for error in context.scanner_errors)
+    if counts["errors"]:
         lines.append("- Finding-level errors are listed in Detailed Findings.")
-    else:
-        lines.append("No scanner errors or finding-level errors were reported.")
+    limited = _limitation_findings(findings)
+    if limited:
+        lines.append(
+            f"- {len(limited)} finding(s) record limitations on what could be "
+            "observed or traversed; each is listed with its limitations in "
+            "Detailed Findings. Coverage limitations by type:"
+        )
+        for rule_id, count in sorted(Counter(_limitation_kind(f) for f in limited).items()):
+            lines.append(f"  - `{_inline_code(rule_id)}`: {count}")
+    if not context.scanner_errors and not counts["errors"] and not limited:
+        lines.append("No scanner errors, finding-level errors, or limitations were reported.")
 
     lines.extend([
         "",
@@ -214,8 +237,14 @@ def format_markdown_report(
 
 def summarize_findings(findings: list[NormalizedFinding]) -> dict[str, int]:
     by_source = Counter(finding.source_type for finding in findings)
+    # Coverage-limitation findings (an unreadable directory, a directory beyond
+    # max_depth, a symlink/special file skipped for safety) are deliberately
+    # excluded: they record scope that was *not* inspected, so counting them as
+    # files scanned would overstate coverage.
     filesystem_locations = {
-        finding.location for finding in findings if finding.source_type == "local_filesystem"
+        finding.location
+        for finding in findings
+        if finding.source_type == "local_filesystem" and finding.asset_type == "file"
     }
     certificates = [
         finding for finding in findings if "Certificate" in finding.asset_type
@@ -233,6 +262,44 @@ def summarize_findings(findings: list[NormalizedFinding]) -> dict[str, int]:
         "malformed_assets": sum("Malformed" in finding.asset_type for finding in findings),
         "errors": sum(1 for finding in findings if finding.errors),
     }
+
+
+def _limitation_findings(findings: list[NormalizedFinding]) -> list[NormalizedFinding]:
+    """Findings that record a constraint on coverage or on the observation itself."""
+    return [finding for finding in findings if finding.limitations]
+
+
+def _limitation_kind(finding: NormalizedFinding) -> str:
+    """Grouping label for a limitation finding: its rule_id when the scanner
+    supplied one (``max_depth_boundary``, ``directory_traversal_error``,
+    ``skipped_special_file``, ...), otherwise its source type."""
+    return finding.rule_id or finding.source_type
+
+
+def _coverage_statement(
+    findings: list[NormalizedFinding], context: ScanReportContext
+) -> str | None:
+    """A truthful coverage caveat, or None when nothing constrained the scan.
+
+    Evidence-only: it states what was not inspected and why the report cannot
+    be read as proof of complete coverage. It draws no conclusion and assigns
+    no score.
+    """
+    limited = _limitation_findings(findings)
+    if not limited and not context.scanner_errors:
+        return None
+    parts = []
+    if context.scanner_errors:
+        parts.append(f"{len(context.scanner_errors)} scanner error(s)")
+    if limited:
+        parts.append(f"{len(limited)} finding(s) with recorded limitations")
+    return (
+        "Coverage was not complete: this scan recorded "
+        + " and ".join(parts)
+        + ". Absence of a finding is not evidence that an asset was inspected "
+        "and found clean; see Errors and Warnings and each finding's "
+        "`limitations` field."
+    )
 
 
 def _executive_summary(counts: dict[str, int], findings: list[NormalizedFinding]) -> str:

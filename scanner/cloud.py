@@ -6,7 +6,7 @@ from botocore.exceptions import ClientError
 
 from finding_adapters import normalize_s3_df
 from findings import NormalizedFinding
-from scanner.errors import CloudScanError
+from scanner.errors import CloudScanError, sanitize_provider_error
 
 
 def scan_s3_bucket(bucket_name: str, prefix: str = "", errors: list[str] | None = None):
@@ -53,14 +53,26 @@ def scan_s3_bucket(bucket_name: str, prefix: str = "", errors: list[str] | None 
                         "Risk": "Low" if enc_status != "None" else "High"
                     })
                 except ClientError as e:
-                    _record(f"Error reading encryption status for s3://{bucket_name}/{key}: {e}")
+                    _record(
+                        f"Error reading encryption status for s3://{bucket_name}/{key}: "
+                        f"{sanitize_provider_error(e)}"
+                    )
             if not response.get('IsTruncated'):
                 break
             continuation_token = response.get('NextContinuationToken')
             if not continuation_token:
+                # Truncated response with no token: the provider cannot tell us
+                # where to resume, so the remaining objects are unreachable.
+                # Recorded as a coverage failure rather than treated as the end
+                # of the listing, which would report a partial scan as complete.
+                _record(
+                    f"Error scanning S3: truncated list_objects_v2 response for "
+                    f"s3://{bucket_name}/{prefix} returned no continuation token; "
+                    "later pages were not scanned."
+                )
                 break
     except Exception as e:
-        _record(f"Error scanning S3: {e}")
+        _record(f"Error scanning S3: {sanitize_provider_error(e)}")
 
     return pd.DataFrame(results)
 

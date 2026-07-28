@@ -82,6 +82,11 @@ explicitly rather than dropping it:
   and `unknowns`, rather than fabricating file-level records or silently
   omitting the region. See "Coverage Limitations" in
   [NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md).
+- **Deliberately skipped entries** — symlinks, FIFOs, sockets, and device files
+  are not followed or opened by the normalized evidence path, and are recorded
+  as `asset_type = "special_file"` findings with `rule_id =
+  "skipped_special_file"` so "not inspected" is never presented as "inspected
+  and nothing found".
 - **Constrained observations** — conditions that limited a specific
   observation (permission denied, volume-level fallback used because file-level
   status could not be determined, platform limits) are recorded in
@@ -103,6 +108,10 @@ explicitly rather than dropping it:
 - **Confidence** — records whose evidence is indirect or incomplete carry a
   lower `confidence` (and, for the filesystem reference adapter, a
   `confidence_rationale`) rather than being presented as certain.
+
+Scan-limit, pagination, and partial-result semantics — what "complete" means,
+how a configured limit differs from a failure, and where each gap appears in the
+output — are documented in [SCAN_COVERAGE.md](SCAN_COVERAGE.md).
 
 ## Privacy
 

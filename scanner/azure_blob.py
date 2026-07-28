@@ -9,7 +9,7 @@ from azure.storage.blob import BlobServiceClient
 
 from finding_adapters import normalize_azure_blob_df
 from findings import NormalizedFinding
-from scanner.errors import CloudScanError
+from scanner.errors import CloudScanError, sanitize_provider_error
 
 
 def _encryption_status(blob) -> str:
@@ -46,6 +46,13 @@ def scan_azure_container(
             account_url=account_url, credential=DefaultAzureCredential()
         )
         container_client = service_client.get_container_client(container_name)
+        # list_blobs returns the SDK's own ItemPaged iterator: it fetches each
+        # provider page lazily as iteration advances, so every blob under the
+        # prefix is visited without HarvestGuard tracking continuation markers
+        # itself. Results are appended per blob, so a failure partway through
+        # iteration (a later page, expired credentials) leaves the blobs
+        # already observed in `results` -- they are returned rather than
+        # discarded, while the failure is still recorded below.
         for blob in container_client.list_blobs(name_starts_with=prefix):
             encryption = _encryption_status(blob)
             results.append({
@@ -56,7 +63,7 @@ def scan_azure_container(
                 "Risk": _risk_for_encryption(encryption),
             })
     except AzureError as e:
-        message = f"Error scanning Azure Blob: {e}"
+        message = f"Error scanning Azure Blob: {sanitize_provider_error(e)}"
         if errors is None:
             print(message)
         else:

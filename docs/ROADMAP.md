@@ -177,12 +177,24 @@ Key product constraints:
 - **Title:** Scale, pagination, and safety
 - **Purpose:** Avoid incomplete or unsafe scans when targets contain many
   files, large cloud buckets, inaccessible paths, or permission failures.
-- **Status:** Partial
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-001, HG-003
-- **Acceptance criteria:** Cloud scanners handle pagination; filesystem scans
-  prune traversal safely; scan limits are visible; permission and API errors
-  are represented without crashing or silently changing findings.
+- **Acceptance criteria:** S3 pagination, prefix, and later-page-failure
+  behavior are correct and tested; GCS and Azure Blob SDK iterators are
+  processed fully with partial findings preserved on later failure;
+  filesystem `max_depth` treats root as depth 0 and prunes before descent;
+  symlinks, FIFOs, sockets, and device files are never followed or opened,
+  and are reported as explicit `skipped_special_file` findings rather than
+  silently omitted; provider/auth/API failures surface as `scanner_errors`
+  with a nonzero CLI exit while preserving `CloudScanError.partial_findings`;
+  CLI JSON stays valid and Markdown/console reports state plainly when
+  coverage was not complete. See
+  [SCAN_COVERAGE.md](SCAN_COVERAGE.md) for the full semantics, which also
+  covers provider-error sanitization
+  (`scanner.errors.sanitize_provider_error`). No new `NormalizedFinding`
+  schema fields were needed; no scanner algorithm or credential-management
+  change was made.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/17
 
 ### HG-006

@@ -143,6 +143,89 @@ def test_scan_s3_bucket_paginates_all_pages(mock_client):
 
 
 @patch("scanner.cloud.boto3.client")
+def test_scan_s3_bucket_passes_prefix_on_every_page(mock_client):
+    # The requested prefix must be preserved verbatim on the first request and
+    # on every continuation request -- a dropped prefix on page 2 would widen
+    # the scan beyond the scope the user asked for.
+    client = MagicMock()
+    client.list_objects_v2.side_effect = [
+        {
+            "Contents": [{"Key": "logs/a.txt", "Size": 1, "LastModified": "2026-01-01"}],
+            "IsTruncated": True,
+            "NextContinuationToken": "token-1",
+        },
+        {
+            "Contents": [{"Key": "logs/b.txt", "Size": 2, "LastModified": "2026-01-02"}],
+            "IsTruncated": False,
+        },
+    ]
+    client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+    mock_client.return_value = client
+
+    scan_s3_bucket("my-bucket", prefix="logs/")
+
+    for call in client.list_objects_v2.call_args_list:
+        assert call.kwargs["Bucket"] == "my-bucket"
+        assert call.kwargs["Prefix"] == "logs/"
+
+
+@patch("scanner.cloud.boto3.client")
+def test_scan_s3_bucket_does_not_duplicate_findings_across_pages(mock_client):
+    # Three pages, more objects than a single provider page would carry: every
+    # key appears exactly once, in listing order, with no page re-read.
+    pages = [
+        {
+            "Contents": [
+                {"Key": f"k{index:03d}.txt", "Size": index, "LastModified": "2026-01-01"}
+                for index in range(page * 3, page * 3 + 3)
+            ],
+            "IsTruncated": page < 2,
+            "NextContinuationToken": f"token-{page + 1}",
+        }
+        for page in range(3)
+    ]
+    client = MagicMock()
+    client.list_objects_v2.side_effect = pages
+    client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+    mock_client.return_value = client
+
+    findings = scan_s3_bucket_findings("my-bucket")
+    locations = [finding.location for finding in findings]
+
+    assert client.list_objects_v2.call_count == 3
+    assert len(locations) == len(set(locations)) == 9
+    assert locations[0] == "s3://my-bucket/k000.txt"
+    assert locations[-1] == "s3://my-bucket/k008.txt"
+    # finding_id is derived from identity, so uniqueness there is the real
+    # guarantee that no object was normalized twice.
+    assert len({finding.finding_id for finding in findings}) == 9
+
+
+@patch("scanner.cloud.boto3.client")
+def test_scan_s3_bucket_truncated_response_without_token_is_a_coverage_failure(mock_client):
+    # A truncated response with no NextContinuationToken leaves the scanner
+    # unable to resume. Treating that as the end of the listing would report a
+    # partial scan as complete, so it is recorded as an error instead.
+    client = MagicMock()
+    client.list_objects_v2.return_value = {
+        "Contents": [{"Key": "page1.txt", "Size": 10, "LastModified": "2026-01-01"}],
+        "IsTruncated": True,
+    }
+    client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+    mock_client.return_value = client
+
+    errors: list[str] = []
+    df = scan_s3_bucket("my-bucket", prefix="logs/", errors=errors)
+
+    assert len(df) == 1  # the page-1 finding is preserved
+    assert errors and "no continuation token" in errors[0]
+
+    with pytest.raises(CloudScanError) as exc_info:
+        scan_s3_bucket_findings("my-bucket", prefix="logs/")
+    assert len(exc_info.value.partial_findings) == 1
+
+
+@patch("scanner.cloud.boto3.client")
 def test_scan_s3_bucket_findings_raises_on_per_object_client_error(mock_client):
     # The findings wrapper must not return empty/exit clean when head_object
     # coverage failed: it propagates the coverage gap as a CloudScanError.
