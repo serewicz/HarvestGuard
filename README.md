@@ -95,8 +95,14 @@ evidence and must remain traceable back to it.
   subject, expiration, fingerprint, confidence, and parsing errors. See
   [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Unified CLI** — runs local scanners through the normalized finding model
-  with summary, JSON, and professional Markdown report output. See
-  [docs/CLI.md](docs/CLI.md).
+  with summary, JSON, and Markdown report output. `--json` emits an array of
+  normalized findings; `--markdown` emits a local, evidence-only report
+  covering scan context, scanner versions, detailed findings with confidence,
+  unknowns, limitations, errors, and coverage caveats — no risk score, HNDL
+  exposure, remediation advice, business impact, or quantum-readiness
+  conclusion. Reports can contain sensitive identifiers (paths, object and
+  bucket names, ownership signals), so handle the generated files
+  accordingly. See [docs/CLI.md](docs/CLI.md).
 - **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
   exposure scoring (High/Medium/Low) layered on top of encryption status.
 - **Streamlit dashboard** — pie/bar charts and a results table per scan.

@@ -160,9 +160,10 @@ def format_markdown_report(
                 f"### {asset_type}",
                 "",
                 "| Location | Asset Type | Algorithm | Key Size | Expiration | Issuer | "
-                "Subject | Fingerprint | Confidence | Observed Evidence | Limitations | "
-                "Errors |",
-                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+                "Subject | Fingerprint | Confidence | Observed Evidence | Unknowns | "
+                "Limitations | Errors |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | "
+                "--- | --- |",
             ])
             for finding in items:
                 metadata = finding.technical_metadata
@@ -180,9 +181,11 @@ def format_markdown_report(
                             _md(metadata.get("Fingerprint")),
                             _md(finding.confidence),
                             _md(finding.evidence),
-                            # Rendered in full rather than counted: a reviewer
-                            # needs to see exactly which scope was skipped or
-                            # only partially observed.
+                            # Unknowns and limitations are rendered in full
+                            # rather than counted: a reviewer needs to see
+                            # exactly what could not be established and which
+                            # scope was skipped or only partially observed.
+                            _md("; ".join(finding.unknowns)),
                             _md("; ".join(finding.limitations)),
                             _md("; ".join(finding.errors)),
                         ]

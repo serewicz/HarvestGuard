@@ -119,7 +119,8 @@ def test_scan_command_markdown_output(tmp_path, capsys, monkeypatch):
     assert "## Detailed Findings" in output
     assert (
         "| Location | Asset Type | Algorithm | Key Size | Expiration | Issuer | "
-        "Subject | Fingerprint | Confidence | Observed Evidence | Limitations | Errors |"
+        "Subject | Fingerprint | Confidence | Observed Evidence | Unknowns | "
+        "Limitations | Errors |"
     ) in output
     assert str(tmp_path / "data.csv") in output
 
@@ -524,6 +525,88 @@ def test_scan_type_s3_partial_failure_markdown_shows_findings_and_errors(capsys,
     assert "ExpiredToken" in output
     assert "Coverage was not complete" in output
     assert "| Coverage | Not complete |" in output
+
+
+def test_scan_type_s3_partial_failure_json_keeps_collected_findings(capsys, monkeypatch):
+    # JSON must carry the same truth as Markdown on a partial cloud failure: the
+    # page-1 finding survives in a still-valid JSON array on stdout, while the
+    # page-2 failure remains visible through the nonzero exit code and stderr.
+    from botocore.exceptions import ClientError
+
+    client = MagicMock()
+    client.list_objects_v2.side_effect = [
+        {
+            "Contents": [{"Key": "good.txt", "Size": 10, "LastModified": "2026-01-01"}],
+            "IsTruncated": True,
+            "NextContinuationToken": "token-1",
+        },
+        ClientError({"Error": {"Code": "ExpiredToken"}}, "ListObjectsV2"),
+    ]
+    client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+    monkeypatch.setattr("scanner.cloud.boto3.client", lambda *a, **k: client)
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--json"])
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert exit_code == 1
+    assert [item["location"] for item in payload] == ["s3://my-bucket/good.txt"]
+    assert payload[0]["source_type"] == "aws_s3"
+    # Scan-level scanner errors stay outside the JSON array (stderr + exit code).
+    assert "ExpiredToken" in captured.err
+
+
+def test_scan_command_json_preserves_finding_fields_as_plain_json(tmp_path, capsys):
+    # Real filesystem scan, no mocks: the normalized schema fields the CLI
+    # promises must survive serialization as plain JSON types.
+    (tmp_path / "notes.txt").write_text("hello world", encoding="utf-8")
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "filesystem", "--json", "--quiet"]
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    item = next(item for item in payload if item["asset_type"] == "file")
+    for key in [
+        "finding_id",
+        "schema_version",
+        "observed_at",
+        "evidence",
+        "confidence",
+        "confidence_rationale",
+        "collection_method",
+        "collection_source",
+        "rule_id",
+        "provenance",
+        "ownership_signals",
+        "unknowns",
+        "limitations",
+        "errors",
+        "technical_metadata",
+    ]:
+        assert key in item
+    assert isinstance(item["technical_metadata"], dict)
+    assert isinstance(item["ownership_signals"], dict)
+    assert isinstance(item["unknowns"], list) and item["unknowns"]
+    assert isinstance(item["limitations"], list)
+    assert isinstance(item["errors"], list)
+    assert item["provenance"]["scanner_name"] == "filesystem"
+
+
+def test_scan_sensitive_data_markdown_never_contains_raw_matched_values(tmp_path, capsys):
+    (tmp_path / "contacts.txt").write_text("reach me at alice@example.com", encoding="utf-8")
+
+    exit_code = harvestguard.main(
+        ["scan", str(tmp_path), "--type", "sensitive-data", "--markdown", "--quiet"]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    # Category names and counts only -- never the matched value itself.
+    assert "Email" in captured.out
+    assert "alice@example.com" not in captured.out
+    assert "alice@example.com" not in captured.err
 
 
 def test_scan_type_filesystem_markdown_shows_coverage_limitations(tmp_path, capsys):
