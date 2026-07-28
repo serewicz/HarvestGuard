@@ -58,18 +58,23 @@ Grafana -> Future Executive Priority Index.
 
 ## Quantum Risk Taxonomy
 
-1. **Harvest Now, Decrypt Later (HNDL)** — done. Pillar 1's encryption
-   detection + HNDL exposure scoring.
+1. **Harvest Now, Decrypt Later (HNDL)** — encryption detection is
+   implemented and evidence-backed; HNDL exposure scoring is a heuristic
+   inference layered on top of that evidence and is **Needs Validation**
+   (see [TERMINOLOGY.md](TERMINOLOGY.md)). HNDL exposure must not be
+   presented as a validated, measured result.
 2. **Cryptographic inventory blind spots** — partially done. Pillar 1's
-   "Future scan surfaces" section covers this; code & binary crypto usage
-   analysis now ships (`code_analysis/`), network/cipher detection doesn't
-   yet — most companies have no map of what algorithms/key
+   "Future scan surfaces" section covers this; source-code crypto usage
+   analysis now ships (`code_analysis/`, a vendored Semgrep rule set) but
+   inspects source code only — binary and network/cipher detection don't
+   exist yet — most companies have no map of what algorithms/key
    lengths/libraries they're running, which is exactly what this section
    targets.
-3. **PQC migration debt / crypto-agility** — the code/binary analysis
+3. **PQC migration debt / crypto-agility** — the source-code analysis
    prerequisite now exists, but assessing crypto-agility itself (can a
-   system swap algorithms without a rewrite) remains unsolved — no clear
-   detection approach yet beyond "does the code use a crypto-agility
+   system swap algorithms without a rewrite) remains unsolved, and would
+   also benefit from binary-level analysis that does not exist yet — no
+   clear detection approach yet beyond "does the code use a crypto-agility
    abstraction," itself a further code-analysis question. See the Quantum
    Risk Engine section below.
 4. **Data ownership & classification gaps** — primarily an advisory/services
@@ -134,7 +139,7 @@ Key product constraints:
   Risk Score and HNDL Exposure as inferred heuristics (`Needs Validation`)
   with help text distinguishing them from observed evidence; rendering
   evidence and inference in fully separate labeled areas remains future UI
-  work under HG-011 and HG-013.
+  work under HG-012 and HG-014.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/14
 
 ### HG-003
@@ -148,12 +153,14 @@ Key product constraints:
 - **Acceptance criteria:** A documented schema contract represents asset
   identity, source, observed evidence, evidence source, scanner identity and
   version, collection timestamp, ownership signals, unknowns, confidence,
-  limitations, coverage or partial-scan status, derived exposure or topology
-  linkage, executive questions, immutable raw details, and separate mutable
-  assessment records; existing scanner outputs can be converted without
-  changing runtime behavior. This roadmap item describes the intended contract
-  for current and future scanner outputs; it does not require every future
-  field to be implemented by this documentation update. Implemented in
+  limitations, and coverage or partial-scan status as fields of the raw,
+  immutable `NormalizedFinding`; existing scanner outputs can be converted
+  without changing runtime behavior. Derived exposure or topology linkage,
+  executive questions, and mutable assessment records are explicitly out of
+  scope for this schema — they belong to a separate, downstream assessment
+  layer that would consume normalized findings by `finding_id` rather than
+  carrying that data inside the raw finding itself (see
+  [ARCHITECTURE.md](ARCHITECTURE.md#normalized-finding-model)). Implemented in
   `findings.py`, `finding_adapters.py`, and documented in
   `docs/NORMALIZED_FINDINGS.md`.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/15
@@ -222,262 +229,320 @@ Key product constraints:
 - **Title:** JSON and Markdown reports
 - **Purpose:** Produce reviewable artifacts that can be shared with technical
   teams and imported into downstream diligence workflows as evidence packages.
-- **Status:** Partial
+- **Status:** Complete
 - **Milestone:** 1 - MVP: Trustworthy Scanner
 - **Dependencies:** HG-003, HG-004
 - **Acceptance criteria:** CLI can export normalized findings as JSON and a
   human-readable Markdown report; reports separate evidence from inference;
-  sensitive matched values are never written to reports; report structure
-  supports scope and coverage, observed evidence, ownership signals, unknowns
-  and limitations, evidence-based risk topology, questions for management and
-  executive leadership, and a technical appendix. Current JSON and Markdown
-  report export is implemented in `reports.py`, exposed through
-  `harvestguard.py`, and documented in `docs/CLI.md`; the expanded evidence
-  package structure describes the intended reporting contract.
+  sensitive matched values are never written to reports; the Markdown report
+  includes scope and coverage, observed evidence, scanner versions, findings
+  summary and breakdown, errors and warnings, and known limitations sections.
+  Current JSON and Markdown report export is implemented in `reports.py`,
+  exposed through `harvestguard.py`, and documented in `docs/CLI.md`. An
+  expanded evidence package with ownership-signal summaries, evidence-based
+  risk topology, and framed executive questions is a future reporting
+  contract (see HG-017's HTML executive report and the "Future Executive
+  Priority Index" direction), not part of the current JSON/Markdown output.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/19
+
+## Milestone 2: HarvestGuard v0.1 - Controlled Diligence Pilot
+
+The evidence and scanner foundation (HG-001 through HG-007) is substantially
+complete. This milestone is the next concrete product objective: a
+controlled external pilot release.
+
+**Product gate:** a technically sophisticated CTO can install HarvestGuard
+without developer assistance, safely run the demo and representative scans,
+understand what was and was not inspected, interpret confidence and
+limitations correctly, generate a shareable evidence report, and identify
+exactly which HarvestGuard version produced it.
+
+HG-008 through HG-011 form this milestone. They are roadmap-level entries
+only; detailed implementation issues have not been written yet.
 
 ### HG-008
 
 - **Title:** End-to-end validation
-- **Purpose:** Prove the scanner can run from setup through output generation
-  on representative local and mocked cloud targets.
+- **Purpose:** Prove a fresh technically competent user can install
+  HarvestGuard, run the documented demo and representative scanner paths,
+  generate the supported evidence artifacts, and correctly understand
+  successful, partial, limited, and failed scans.
 - **Status:** Partial
-- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
 - **Dependencies:** HG-004, HG-006, HG-007
-- **Acceptance criteria:** CI covers local scan, classifier scan, cloud scanner
-  unit tests, CLI invocation, and report generation; validation instructions
-  are documented.
+- **Acceptance criteria:** CI already covers local scan, classifier scan,
+  cloud scanner unit tests, CLI invocation, and report generation for the
+  demo target. This item extends that coverage to a fresh-install path: a
+  technically competent user with no prior HarvestGuard exposure and no
+  developer assistance can follow published installation and demo
+  instructions, run representative local and cloud (mocked or sandboxed)
+  scans, generate JSON/Markdown reports, and correctly distinguish
+  successful, partial, limited, and failed scan outcomes from the output
+  alone. Detailed acceptance criteria and a test plan are defined in the
+  GitHub issue when it is written.
 - **GitHub issue:** TBD
 
 ### HG-009
 
-- **Title:** Confidence and false-positive handling
-- **Purpose:** Make uncertainty explicit so users can triage findings without
-  mistaking heuristics for proof.
+- **Title:** Confidence and detection characterization
+- **Purpose:** Characterize what each scanner detects, what it can miss,
+  important false-positive and false-negative conditions, what confidence
+  means, and how operators should interpret unknown or limited evidence.
+  This is evidence-characterization work, not risk scoring.
 - **Status:** Needs Validation
-- **Milestone:** 1 - MVP: Trustworthy Scanner
-- **Dependencies:** HG-002, HG-003
-- **Acceptance criteria:** Findings include confidence; scanner docs explain
-  known false positives and false negatives; dashboard and reports expose
-  confidence alongside risk language.
+- **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
+- **Dependencies:** HG-002, HG-003, HG-005
+- **Acceptance criteria:** Findings already carry `confidence` and
+  `confidence_rationale`; this item requires per-scanner documentation of
+  known detection scope, known false positives, known false negatives, and
+  what an `unknown` or a `limitations` entry means for that scanner, so an
+  operator reading a report can correctly interpret confidence and coverage
+  rather than mistaking a heuristic for proof. Detailed acceptance criteria
+  are defined in the GitHub issue when it is written.
 - **GitHub issue:** TBD
 
 ### HG-010
 
-- **Title:** Accurate product claims
-- **Purpose:** Keep README, dashboard text, and reports aligned with actual
-  repository evidence.
+- **Title:** Product claims and trust audit
+- **Purpose:** Reconcile public and product claims across README, CLI/help
+  output, reports, dashboard, architecture, terminology, and documentation
+  against behavior actually supported by implementation and tests. HG-008
+  and HG-009 should complete first so this final claims and trust audit can
+  draw on their validated end-to-end and detection-characterization results.
 - **Status:** Needs Validation
-- **Milestone:** 1 - MVP: Trustworthy Scanner
+- **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
 - **Dependencies:** HG-001 through HG-009
-- **Acceptance criteria:** README claims match implemented and tested behavior;
-  planned features are labelled as planned; no marketing copy implies
-  unsupported scanner coverage or certainty.
+- **Acceptance criteria:** Every reviewed product claim is classified as one
+  of: implemented and tested; implemented with known limitations;
+  experimental / needs validation; planned; or explicitly out of scope. The
+  evidence-versus-inference boundary (observed evidence vs. heuristic
+  inference such as risk score and HNDL exposure) is preserved and made
+  explicit everywhere a claim is made. Detailed acceptance criteria are
+  defined in the GitHub issue when it is written.
 - **GitHub issue:** TBD
 
-## Milestone 2: MVP+ - Visual and Operational Experience
-
 ### HG-011
+
+- **Title:** Versioned release and reproducibility
+- **Purpose:** Produce an identifiable, reproducible HarvestGuard release
+  suitable for a controlled external pilot.
+- **Status:** Planned
+- **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
+- **Dependencies:** HG-008, HG-009, HG-010
+- **Acceptance criteria:** At roadmap level, this item anticipates: an
+  explicit HarvestGuard version identifier; a versioned release/tag; release
+  notes; a reproducible or clearly identified container artifact; SBOM,
+  signing, and provenance expectations where appropriate; documented
+  dependency and reproducibility expectations; an explicit pre-1.0
+  support/status statement; and a way for a generated evidence report to
+  identify exactly which HarvestGuard version produced it. This is a
+  roadmap-level placeholder — detailed implementation scope, acceptance
+  criteria, and tests are defined in the GitHub issue when it is written.
+- **GitHub issue:** TBD
+
+## Milestone 3: MVP+ - Visual and Operational Experience
+
+### HG-012
 
 - **Title:** Built-in dashboard
 - **Purpose:** Let users inspect scan output locally without requiring Grafana
   or external services.
 - **Status:** Partial
-- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Milestone:** 3 - MVP+: Visual and Operational Experience
 - **Dependencies:** HG-003
 - **Acceptance criteria:** Dashboard reads normalized findings, shows evidence
   and inference separately, and remains usable without network access for
   local scans.
 - **GitHub issue:** TBD
 
-### HG-012
+### HG-013
 
 - **Title:** Finding filters and drill-down
 - **Purpose:** Help users move from summary charts to the underlying evidence
   for a specific asset or class of findings.
 - **Status:** Planned
-- **Milestone:** 2 - MVP+: Visual and Operational Experience
-- **Dependencies:** HG-011
+- **Milestone:** 3 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-012
 - **Acceptance criteria:** Users can filter by source, exposure state,
   confidence, scanner, owner state, and finding type; drill-down links back to
   technical evidence.
 - **GitHub issue:** TBD
 
-### HG-013
+### HG-014
 
 - **Title:** Color-coded exposure and ownership states
 - **Purpose:** Make remediation and ownership triage scannable without hiding
   the underlying evidence.
 - **Status:** Planned
-- **Milestone:** 2 - MVP+: Visual and Operational Experience
-- **Dependencies:** HG-002, HG-012
+- **Milestone:** 3 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-002, HG-013
 - **Acceptance criteria:** Colors map to documented exposure and ownership
   states; visual states never replace textual evidence or confidence.
 - **GitHub issue:** TBD
 
-### HG-014
+### HG-015
 
 - **Title:** Scan history
 - **Purpose:** Track repeat scans over time for diligence follow-up and
   ownership-period risk management.
 - **Status:** Planned
-- **Milestone:** 2 - MVP+: Visual and Operational Experience
+- **Milestone:** 3 - MVP+: Visual and Operational Experience
 - **Dependencies:** HG-003, ADR-002
 - **Acceptance criteria:** SQLite stores scan runs, immutable raw findings, and
   derived assessments; users can compare current and previous scans locally.
 - **GitHub issue:** TBD
 
-### HG-015
+### HG-016
 
 - **Title:** Technical remediation queue
 - **Purpose:** Turn findings into actionable remediation work without mutating
   the underlying raw evidence.
 - **Status:** Planned
-- **Milestone:** 2 - MVP+: Visual and Operational Experience
-- **Dependencies:** HG-014
+- **Milestone:** 3 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-015
 - **Acceptance criteria:** Users can assign remediation status, owner, notes,
   and priority in a separate assessment layer; raw findings remain unchanged.
 - **GitHub issue:** TBD
 
-### HG-016
+### HG-017
 
 - **Title:** HTML executive report
 - **Purpose:** Package report outputs into a polished local Technology Due
   Diligence Evidence Package or related executive deliverable for partners,
   GCs, boards, and deal teams.
 - **Status:** Planned
-- **Milestone:** 2 - MVP+: Visual and Operational Experience
-- **Dependencies:** HG-007, HG-015
+- **Milestone:** 3 - MVP+: Visual and Operational Experience
+- **Dependencies:** HG-007, HG-016
 - **Acceptance criteria:** HTML report summarizes exposure, confidence,
   remediation themes, and technical appendix links; it avoids raw sensitive
   matched values.
 - **GitHub issue:** TBD
 
-## Milestone 3: Operational Edition
+## Milestone 4: Operational Edition
 
-### HG-017
+### HG-018
 
 - **Title:** Prometheus metrics endpoint
 - **Purpose:** Expose operational metrics and high-level trends without storing
   detailed findings in Prometheus.
 - **Status:** Planned
-- **Milestone:** 3 - Operational Edition
-- **Dependencies:** HG-014, ADR-003
+- **Milestone:** 4 - Operational Edition
+- **Dependencies:** HG-015, ADR-003
 - **Acceptance criteria:** Endpoint exports scan counts, durations, failure
   counts, finding totals by class, and trend-safe aggregates only; no file
   paths, secrets, object names, or detailed findings are exported.
 - **GitHub issue:** TBD
 
-### HG-018
+### HG-019
 
 - **Title:** Grafana dashboard pack
 - **Purpose:** Offer optional operational visualization for teams already using
   Grafana.
 - **Status:** Planned
-- **Milestone:** 3 - Operational Edition
-- **Dependencies:** HG-017
+- **Milestone:** 4 - Operational Edition
+- **Dependencies:** HG-018
 - **Acceptance criteria:** Grafana dashboards import cleanly; first use of
   HarvestGuard does not require Grafana; dashboards use only Prometheus-safe
   aggregate metrics.
 - **GitHub issue:** TBD
 
-### HG-019
+### HG-020
 
 - **Title:** Scheduled scans
 - **Purpose:** Support ownership-period monitoring after diligence or
   acquisition.
 - **Status:** Planned
-- **Milestone:** 3 - Operational Edition
-- **Dependencies:** HG-014, HG-017
+- **Milestone:** 4 - Operational Edition
+- **Dependencies:** HG-015, HG-018
 - **Acceptance criteria:** Users can schedule repeat local or cloud scans;
   schedule config is local; failures are visible in history and metrics.
 - **GitHub issue:** TBD
 
-### HG-020
+### HG-021
 
 - **Title:** Baseline drift detection
 - **Purpose:** Identify changes in crypto exposure, sensitive-data placement,
   and scanner confidence over time.
 - **Status:** Planned
-- **Milestone:** 3 - Operational Edition
-- **Dependencies:** HG-014, HG-019
+- **Milestone:** 4 - Operational Edition
+- **Dependencies:** HG-015, HG-020
 - **Acceptance criteria:** Users can compare scans against a chosen baseline;
   added, removed, and changed findings are reported separately from raw
   findings.
 - **GitHub issue:** TBD
 
-### HG-021
+### HG-022
 
 - **Title:** Portfolio and multi-entity comparison
 - **Purpose:** Help PE/VC and advisory users compare exposure across companies,
   business units, or diligence targets.
 - **Status:** Planned
-- **Milestone:** 3 - Operational Edition
-- **Dependencies:** HG-020
+- **Milestone:** 4 - Operational Edition
+- **Dependencies:** HG-021
 - **Acceptance criteria:** Users can tag scans by entity; comparisons use
   aggregate and normalized fields; entity-level reports avoid leaking raw
   detail across boundaries.
 - **GitHub issue:** TBD
 
-### HG-022
+### HG-023
 
 - **Title:** Optional PostgreSQL deployment
 - **Purpose:** Support larger operational deployments while keeping SQLite as
   the first-use local system of record.
 - **Status:** Planned
-- **Milestone:** 3 - Operational Edition
-- **Dependencies:** HG-014
+- **Milestone:** 4 - Operational Edition
+- **Dependencies:** HG-015
 - **Acceptance criteria:** PostgreSQL is optional; SQLite remains supported;
   migration strategy is documented; first use does not require external
   infrastructure.
 - **GitHub issue:** TBD
 
-## Milestone 4: Decision-Support Edition
+## Milestone 5: Decision-Support Edition
 
-### HG-023
+### HG-024
 
 - **Title:** Ownership-horizon model
 - **Purpose:** Connect findings to diligence, holding period, and remediation
   horizon decisions.
 - **Status:** Planned
-- **Milestone:** 4 - Decision-Support Edition
-- **Dependencies:** HG-020, HG-021
+- **Milestone:** 5 - Decision-Support Edition
+- **Dependencies:** HG-021, HG-022
 - **Acceptance criteria:** Users can model short, medium, and long ownership
   horizons; outputs are labelled as decision support, not observed evidence.
 - **GitHub issue:** TBD
 
-### HG-024
+### HG-025
 
 - **Title:** Crypto-agility and migration-difficulty models
 - **Purpose:** Estimate how hard it may be to migrate crypto usage after
   inventory and code-analysis signals exist.
 - **Status:** Planned
-- **Milestone:** 4 - Decision-Support Edition
+- **Milestone:** 5 - Decision-Support Edition
 - **Dependencies:** HG-003, future code and binary crypto analysis
 - **Acceptance criteria:** Model inputs are documented; assumptions are visible;
   migration difficulty is stored as assessment data separate from raw findings.
 - **GitHub issue:** TBD
 
-### HG-025
+### HG-026
 
 - **Title:** Long-lived data exposure model
 - **Purpose:** Prioritize data whose useful lifetime exceeds plausible
   cryptographic protection windows.
 - **Status:** Planned
-- **Milestone:** 4 - Decision-Support Edition
-- **Dependencies:** HG-002, HG-023, HG-024
+- **Milestone:** 5 - Decision-Support Edition
+- **Dependencies:** HG-002, HG-024, HG-025
 - **Acceptance criteria:** Reports distinguish long-lived data exposure from
   generic sensitive data; assumptions are configurable and documented.
 - **GitHub issue:** TBD
 
-### HG-026
+### HG-027
 
 - **Title:** Executive Priority Index and board/M&A report
 - **Purpose:** Translate evidence and assessment into a concise executive
   priority view for board, buyer, GC, and integration planning conversations.
 - **Status:** Planned
-- **Milestone:** 4 - Decision-Support Edition
-- **Dependencies:** HG-016, HG-021, HG-023, HG-024, HG-025
+- **Milestone:** 5 - Decision-Support Edition
+- **Dependencies:** HG-017, HG-022, HG-024, HG-025, HG-026
 - **Acceptance criteria:** Index combines normalized findings, confidence,
   ownership horizon, migration difficulty, and long-lived exposure; report
   explains assumptions and links to technical evidence.
@@ -498,3 +563,11 @@ These existing decisions remain part of the roadmap context:
   Semgrep rule set; network, deeper binary, entropy, and runtime crypto
   analysis remain future scan surfaces and should integrate mature third-party
   scanners where appropriate.
+- Broader crypto-container and keystore coverage (for example Java keystores,
+  HSM/KMS integrations beyond current cloud provider metadata, and additional
+  certificate/key container formats) is a future scan surface, not yet
+  implemented.
+- Filename- and path-based regulated-data classification signals, if added,
+  are a heuristic classification/ownership signal only — a filename or path
+  match is never proof that regulated data exists in a file, and must carry
+  the same evidence/inference discipline as other ownership signals.
