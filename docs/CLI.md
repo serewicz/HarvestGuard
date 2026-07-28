@@ -268,8 +268,10 @@ Exit code `2` always means invalid input, and `1` always means a scan
 execution failure, so automation can branch on the difference.
 
 A scope you asked for is not a failure: a cloud `--prefix`, an `--exclude`
-pattern, or a `--max-depth` boundary still exits `0`. Boundaries the scanner
-knows about are reported as explicit findings instead.
+pattern, or a `--max-depth` boundary still exits `0`. Boundaries the filesystem
+scanner knows about are reported as explicit findings instead; see
+[Partial and limited scans](#partial-and-limited-scans) for which constraints
+produce findings and which are reported only as scope.
 
 ## Scan Coverage and Partial Results
 
@@ -359,11 +361,21 @@ A scope you configured (`--max-depth`, `--prefix`, `--exclude`) is not a
 failure, but it does bound coverage. How each constraint is represented differs,
 and the report distinguishes them:
 
-- `--max-depth` produces explicit limitation findings. A directory past the
-  configured depth is reported as a `max_depth_boundary` finding with a
-  populated `limitations` field, alongside the `directory_traversal_error` and
-  `skipped_special_file` findings the filesystem scanner records for entries it
-  could not read or could not safely inspect.
+- `--max-depth` produces explicit limitation findings **in the filesystem
+  scanner only** (`--type filesystem`, and the filesystem pass of `--type
+  all`). A directory past the configured depth is reported as a
+  `max_depth_boundary` finding with a populated `limitations` field, alongside
+  the `directory_traversal_error` and `skipped_special_file` findings the
+  filesystem scanner records for entries it could not read or could not safely
+  inspect.
+- `--type sensitive-data` honors the same depth boundary — it inspects files in
+  directories up to and including the configured depth — but does **not** emit
+  boundary findings of its own: content below the boundary is skipped without a
+  `max_depth_boundary` record. In a `--type all` run the filesystem pass still
+  records the boundary directories. In a `--type sensitive-data` run the depth
+  constraint is visible only in the report's *Scope* section, so read that
+  section, not the absence of limitation findings, as the statement of how far
+  a sensitive-data scan reached.
 - `--prefix` and `--exclude` do **not** produce limitation findings.
   A cloud prefix narrows what the provider is asked to list, and an exclude
   pattern drops matching findings from output; in neither case does the scanner

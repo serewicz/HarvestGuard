@@ -721,6 +721,36 @@ def test_scan_type_filesystem_markdown_shows_coverage_limitations(tmp_path, caps
     assert str(tmp_path / "deeper" / "buried.txt") not in output
 
 
+def test_scan_type_sensitive_data_max_depth_is_scope_not_a_boundary_finding(tmp_path, capsys):
+    # The sensitive-data scanner honors --max-depth but, unlike the filesystem
+    # scanner, records no max_depth_boundary finding for what it skipped. The
+    # depth constraint is only visible as report Scope -- docs/CLI.md
+    # ("Partial and limited scans") documents exactly this asymmetry.
+    (tmp_path / "top.txt").write_text("reach me at alice@example.com", encoding="utf-8")
+    (tmp_path / "deeper").mkdir()
+    (tmp_path / "deeper" / "buried.txt").write_text("reach me at bob@example.com", encoding="utf-8")
+
+    exit_code = harvestguard.main(
+        [
+            "scan",
+            str(tmp_path),
+            "--type",
+            "sensitive-data",
+            "--max-depth",
+            "0",
+            "--markdown",
+            "--quiet",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0  # a configured limit is not a scanner failure
+    assert str(tmp_path / "top.txt") in output
+    assert str(tmp_path / "deeper" / "buried.txt") not in output
+    assert "max_depth_boundary" not in output
+    assert "Maximum directory depth: 0" in output
+
+
 def test_scan_type_azure_invalid_target_is_usage_error(capsys):
     exit_code = harvestguard.main(["scan", "no-slash", "--type", "azure", "--json"])
 
