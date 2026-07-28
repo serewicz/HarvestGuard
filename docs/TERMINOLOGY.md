@@ -124,7 +124,7 @@ This table is the path from today's language to a clean evidence/inference
 separation. It records which current labels are observed evidence, which are
 inference, and where current behavior still needs validation before it can be
 relied on for release claims. Future UI or report work (see roadmap HG-009,
-HG-011, HG-013) should carry these labels into the interface itself and, per
+HG-012, HG-014) should carry these labels into the interface itself and, per
 the issue's testing requirements, verify the terminology with tests or review
 fixtures.
 
@@ -145,8 +145,8 @@ fixtures.
 - The Streamlit dashboard labels `Risk Score` and `HNDL Exposure` as
   inferred heuristics (**Needs Validation**), with help text distinguishing
   them from observed evidence. Rendering evidence and inference in fully
-  separate labeled areas remains future UI work (HG-011 "shows evidence and
-  inference separately", HG-013 color-coded exposure states). The fields stay
+  separate labeled areas remains future UI work (HG-012 "shows evidence and
+  inference separately", HG-014 color-coded exposure states). The fields stay
   marked **Needs Validation** here and in `analyzer/risk.py` so no release
   claim treats them as measured.
 - When the dashboard migrates to the normalized finding model, evidence fields
@@ -165,6 +165,5 @@ verbatim there rather than re-invented:
   raw finding.
 - Reports ([reports.py](../reports.py), roadmap HG-007) use the evidence-layer
   terms and keep inference/assessment terms out of evidence output.
-- Confidence and false-positive/false-negative handling (roadmap HG-009) builds
-  directly on the confidence, false positive, and false negative definitions
-  here.
+- Confidence and detection characterization (roadmap HG-009) builds directly
+  on the confidence, false positive, and false negative definitions here.
