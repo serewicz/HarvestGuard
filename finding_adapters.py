@@ -17,9 +17,11 @@ def normalize_filesystem_df(
 def _filesystem_finding_from_row(
     row: dict[str, Any], scan_id: str | None
 ) -> NormalizedFinding:
-    # "directory" rows are coverage-limitation findings (unreadable
-    # directory, or a directory beyond the configured max_depth boundary)
-    # -- they never have file-level metadata to report, unlike "file" rows.
+    # "directory" and "special_file" rows are coverage-limitation findings
+    # (an unreadable directory, a directory beyond the configured max_depth
+    # boundary, or a symlink/FIFO/socket/device entry skipped for safety) --
+    # they never have file-level metadata to report, unlike "file" rows, and
+    # must not carry encryption metadata that was never observed.
     asset_type = row.get("Asset Type", "file")
     is_file = asset_type == "file"
     return NormalizedFinding(

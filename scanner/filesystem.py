@@ -443,6 +443,75 @@ def _directory_traversal_error_record(
     }
 
 
+def _special_entry_kind(mode: int) -> str:
+    """Human-readable kind for a non-regular directory entry."""
+    if stat.S_ISLNK(mode):
+        return "symbolic link"
+    if stat.S_ISDIR(mode):
+        return "directory"
+    if stat.S_ISFIFO(mode):
+        return "FIFO (named pipe)"
+    if stat.S_ISSOCK(mode):
+        return "socket"
+    if stat.S_ISBLK(mode):
+        return "block device"
+    if stat.S_ISCHR(mode):
+        return "character device"
+    return "special file"
+
+
+def _skipped_special_file_record(
+    full_path: str, kind: str, collected_at: datetime, collection_source: str
+) -> dict:
+    """A Finding for a directory entry that exists but was intentionally not
+    followed or opened: a symlink, FIFO, socket, or device file.
+
+    These are skipped for safety (see scan_filesystem_evidence), but skipping
+    them silently would make an inspected-and-clean asset indistinguishable
+    from one that was never looked at. The entry is therefore reported as an
+    explicit skipped-asset limitation with no file-content evidence attached.
+    """
+    return {
+        "Asset Type": "special_file",
+        "Location": full_path,
+        "Size": None,
+        "Modified": None,
+        "Encryption": None,
+        "Evidence": (
+            f"Entry was identified as a {kind} and was not followed or opened, "
+            "so its encryption status was not inspected."
+        ),
+        "Rule ID": "skipped_special_file",
+        "Verification Rationale": (
+            f"os.lstat identified this entry as a {kind} rather than a regular file."
+        ),
+        "Confidence": "High",
+        "Confidence Rationale": (
+            "The entry type was directly observed via lstat; the skip is a "
+            "deterministic safety rule, not an inference about content."
+        ),
+        "Repeatable": True,
+        "UID": None,
+        "Owner Name": None,
+        "GID": None,
+        "Group Name": None,
+        "Mode Octal": None,
+        "Permissions": None,
+        "ACL Present": None,
+        "Unknowns": [
+            "Encryption status of this entry, and of whatever it refers to, "
+            "cannot be established because it was not followed or opened.",
+        ],
+        "Limitations": [
+            f"Not inspected: {kind} skipped for safety by the normalized "
+            "filesystem evidence path.",
+        ],
+        "Collection Method": _COLLECTION_METHOD,
+        "Collection Source": collection_source,
+        "Collected At": collected_at,
+    }
+
+
 def _max_depth_limitation_record(
     dir_path: str, collected_at: datetime, collection_source: str, max_depth: int
 ) -> dict:
@@ -499,9 +568,12 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
     Only regular files are inspected. Symlinks (including broken ones),
     FIFOs, sockets, and device files are skipped by design, not opened --
     opening a FIFO with no writer blocks indefinitely, and following a
-    symlink can read data outside the intended scan root. A permission
-    failure or a file that disappears mid-scan still produces a Finding with
-    a limitation, rather than silently vanishing from the results.
+    symlink can read data outside the intended scan root. They are still
+    reported, as explicit skipped-asset limitation Findings (see
+    _skipped_special_file_record), so "not inspected" is never presented as
+    "inspected and nothing found". A permission failure or a file that
+    disappears mid-scan likewise still produces a Finding with a limitation,
+    rather than silently vanishing from the results.
 
     Coverage gaps are also reported explicitly rather than silently treated
     as "no findings": a directory os.walk cannot list at all produces a
@@ -510,9 +582,18 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
     beyond max_depth produces a distinct directory-level Finding noting the
     configured boundary (see _max_depth_limitation_record). Neither
     fabricates file-level observations for what might be underneath.
+
+    Depth semantics: the scan root is depth 0, a direct child directory of
+    the root is depth 1, and ``max_depth=N`` inspects files in directories up
+    to and including depth N. Child directories below depth N are pruned
+    before descent, so nothing beneath them is opened or stat'd.
     """
     records: list[dict] = []
     volume_status = _detect_volume_encryption(_volume_root(path))
+    # Depth is measured against the *normalized* root so that a trailing
+    # separator ("/data/" vs "/data") cannot shift every depth by one and
+    # silently scan a level deeper or shallower than requested.
+    root_separators = os.path.normpath(path).count(os.sep)
     # Describes the scanned target, not the machine running the scan --
     # collection_source must not leak workstation identity, and the same
     # target scanned from two different machines should be recognizable as
@@ -527,10 +608,37 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
         )
 
     for root, dirs, files in os.walk(path, onerror=_on_walk_error, followlinks=False):
-        depth = root.count(os.sep) - path.count(os.sep)
+        depth = os.path.normpath(root).count(os.sep) - root_separators
 
-        if depth >= max_depth and dirs:
+        # Symlinked directories are never descended into (followlinks=False)
+        # regardless of depth, and are always reported as skipped special
+        # files -- checked before the max-depth branch below so a symlinked
+        # directory's classification can never be shadowed by max-depth
+        # boundary logic, even when it sits exactly at or beyond the
+        # boundary. Each is reported exactly once, here.
+        symlinked_dirs = {
+            subdir for subdir in dirs if os.path.islink(os.path.join(root, subdir))
+        }
+        for subdir in symlinked_dirs:
+            records.append(
+                _skipped_special_file_record(
+                    os.path.join(root, subdir),
+                    "symbolic link to a directory",
+                    datetime.now(timezone.utc),
+                    collection_source,
+                )
+            )
+
+        if depth >= max_depth:
+            # Pruned before descent: os.walk consults `dirs` in place, so
+            # clearing it here means nothing beneath the boundary is listed,
+            # stat'd, or opened at all. The boundary itself is reported per
+            # non-symlink child directory so the un-inspected scope stays
+            # visible; symlinked directories were already reported above and
+            # must not also get a max_depth_boundary finding.
             for subdir in dirs:
+                if subdir in symlinked_dirs:
+                    continue
                 records.append(
                     _max_depth_limitation_record(
                         os.path.join(root, subdir),
@@ -539,10 +647,9 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
                         max_depth,
                     )
                 )
-        if depth >= max_depth:
             dirs[:] = []
-        if depth > max_depth:
-            continue
+        elif symlinked_dirs:
+            dirs[:] = [subdir for subdir in dirs if subdir not in symlinked_dirs]
 
         for name in files:
             full_path = os.path.join(root, name)
@@ -582,7 +689,17 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
                 continue
 
             if not stat.S_ISREG(lst.st_mode):
-                # Symlink / FIFO / socket / device: not inspected by design.
+                # Symlink / FIFO / socket / device: not followed or opened by
+                # design, but still reported as an explicit skipped asset so
+                # the gap in coverage stays visible.
+                records.append(
+                    _skipped_special_file_record(
+                        full_path,
+                        _special_entry_kind(lst.st_mode),
+                        collected_at,
+                        collection_source,
+                    )
+                )
                 continue
 
             records.append(

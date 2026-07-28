@@ -150,6 +150,21 @@ Both carry an `unknowns` entry stating that encryption status beneath that
 directory cannot be established, and never claim anything about specific
 files that were never visited.
 
+Entries that exist but are deliberately not followed or opened use the same
+pattern with `asset_type = "special_file"`:
+
+- `rule_id = "skipped_special_file"`: a symlink (including a symlink to a
+  directory), FIFO, socket, or device file. Skipped for safety rather than
+  inspected, so `limitations` records the skip and `unknowns` records that
+  nothing can be established about the entry or its target. Repeatable
+  (`repeatable = True`): the entry type is directly observed via `lstat` and
+  the skip is a deterministic rule.
+
+Coverage findings of both kinds carry no encryption `technical_metadata` and no
+`ownership_signals`, because nothing was inspected to produce them. Full scan
+limit, pagination, and partial-result semantics are documented in
+[SCAN_COVERAGE.md](SCAN_COVERAGE.md).
+
 ## Technical Metadata
 
 Scanner-specific values that do not belong in common fields are preserved in

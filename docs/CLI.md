@@ -277,11 +277,38 @@ for seeing real output.
 Exit code `2` always means invalid input, and `1` always means a scan
 execution failure, so automation can branch on the difference.
 
+A scope you asked for is not a failure: a cloud `--prefix`, an `--exclude`
+pattern, or a `--max-depth` boundary still exits `0`. Boundaries the scanner
+knows about are reported as explicit findings instead.
+
+## Scan Coverage and Partial Results
+
+[SCAN_COVERAGE.md](SCAN_COVERAGE.md) documents what "complete" means for a
+scan, `--max-depth` depth semantics and boundary findings, S3 pagination and
+prefix behavior, GCS/Azure SDK iterator behavior, cloud provider/auth/API
+failure handling, and how partial findings are preserved alongside a nonzero
+exit code.
+
+In short: when a scanner fails partway through, the findings it already
+collected are still emitted, the failure is still reported, and the exit code is
+still `1`. Reports and JSON that record scanner errors or limitation findings
+must not be read as proof of complete coverage.
+
 ## Output Notes
 
 JSON output serializes normalized findings from
 [NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md) without changing the schema.
+Even when a scanner fails partway through, `--json` stdout remains valid,
+machine-readable JSON containing the partial findings; progress and failure
+messages go to stderr.
+
 Markdown output is a professional evidence report suitable for attaching to an
 issue, email, or advisory note. It reports observed evidence only. It does not
 add executive priority, risk scoring, remediation recommendations, ownership,
-persistence, or telemetry.
+persistence, or telemetry. It does include each finding's `limitations`, any
+scanner errors, and an explicit coverage statement when the scan was limited or
+incomplete.
+
+Provider credentials always come from each cloud SDK's own default credential
+resolution. HarvestGuard does not manage, store, or emit credentials, and
+provider error text is sanitized before it appears in output.

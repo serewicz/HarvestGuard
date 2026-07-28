@@ -9,7 +9,7 @@ from google.cloud import storage
 
 from finding_adapters import normalize_gcs_df
 from findings import NormalizedFinding
-from scanner.errors import CloudScanError
+from scanner.errors import CloudScanError, sanitize_provider_error
 
 
 def _encryption_status(blob) -> str:
@@ -40,6 +40,13 @@ def scan_gcs_bucket(
 
     try:
         client = storage.Client()
+        # list_blobs returns the SDK's own paging iterator: it fetches each
+        # provider page lazily as iteration advances, so every blob under the
+        # prefix is visited without HarvestGuard tracking page tokens itself.
+        # Results are appended per blob, so a failure partway through
+        # iteration (a later page, expired credentials) leaves the blobs
+        # already observed in `results` -- they are returned rather than
+        # discarded, while the failure is still recorded below.
         for blob in client.list_blobs(bucket_name, prefix=prefix):
             encryption = _encryption_status(blob)
             results.append({
@@ -53,7 +60,7 @@ def scan_gcs_bucket(
         # DefaultCredentialsError comes from google.auth, not google.api_core --
         # storage.Client() resolves credentials eagerly at construction time,
         # so an auth failure surfaces here rather than from a list_blobs() call.
-        message = f"Error scanning GCS: {e}"
+        message = f"Error scanning GCS: {sanitize_provider_error(e)}"
         if errors is None:
             print(message)
         else:

@@ -108,6 +108,39 @@ def test_scan_gcs_bucket_findings_returns_findings_on_success(mock_client_cls):
     assert findings[0].location == "gs://my-bucket/data.csv"
 
 
+@patch("scanner.gcs.storage.Client")
+def test_scan_gcs_bucket_processes_every_yielded_blob_exactly_once(mock_client_cls):
+    # google-cloud-storage returns its own paging iterator from list_blobs and
+    # fetches later provider pages transparently as iteration advances, so
+    # HarvestGuard does not track page tokens itself. A generator that yields
+    # more blobs than one provider page would hold stands in for that: the
+    # scanner must process every blob the iterator produces, exactly once.
+    def blobs_across_pages():
+        for index in range(5):
+            yield _make_blob(f"page{index // 2}/obj{index}.csv", index, "2026-01-01")
+
+    mock_client_cls.return_value.list_blobs.return_value = blobs_across_pages()
+
+    findings = scan_gcs_bucket_findings("my-bucket")
+    locations = [finding.location for finding in findings]
+
+    assert len(locations) == len(set(locations)) == 5
+    assert locations[0] == "gs://my-bucket/page0/obj0.csv"
+    assert locations[-1] == "gs://my-bucket/page2/obj4.csv"
+    assert len({finding.finding_id for finding in findings}) == 5
+
+
+@patch("scanner.gcs.storage.Client")
+def test_scan_gcs_bucket_passes_prefix_to_list_blobs(mock_client_cls):
+    client = mock_client_cls.return_value
+    client.list_blobs.return_value = [_make_blob("logs/data.csv", 50, "2026-01-01")]
+
+    scan_gcs_bucket("my-bucket", prefix="logs/")
+
+    assert client.list_blobs.call_args.args[0] == "my-bucket"
+    assert client.list_blobs.call_args.kwargs["prefix"] == "logs/"
+
+
 def _mixed_result_blobs():
     """Yield one good blob, then fail partway through iteration."""
     yield _make_blob("good.csv", 10, "2026-01-01")
@@ -128,3 +161,22 @@ def test_mixed_result_scan_keeps_partial_findings_on_the_exception(mock_client_c
     assert len(partial) == 1
     assert partial[0].location == "gs://my-bucket/good.csv"
     assert "boom" in str(exc_info.value)
+
+
+@patch("scanner.gcs.storage.Client")
+def test_cli_gcs_partial_failure_keeps_partials_and_exits_nonzero(mock_client_cls, capsys):
+    # End-to-end through the CLI (only the GCS SDK stubbed): the blob observed
+    # before the iterator failed appears in parseable JSON stdout, and the
+    # failure still produces the scanner-error exit code.
+    import json
+
+    import harvestguard
+
+    mock_client_cls.return_value.list_blobs.return_value = _mixed_result_blobs()
+
+    exit_code = harvestguard.main(["scan", "my-bucket", "--type", "gcs", "--json", "--quiet"])
+
+    captured = capsys.readouterr()
+    assert exit_code == harvestguard.EXIT_SCAN_ERROR
+    payload = json.loads(captured.out)  # stdout stays machine-readable
+    assert [item["location"] for item in payload] == ["gs://my-bucket/good.csv"]
