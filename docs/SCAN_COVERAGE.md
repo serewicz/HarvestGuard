@@ -19,15 +19,21 @@ schema fields.
 - **Limited scan** — the user intentionally bounded scope (an S3/GCS/Azure
   prefix, a CLI `--exclude` pattern, or filesystem `max_depth`). A configured
   limit is not a scanner failure — it exits `0` — but the resulting boundary
-  is still recorded as an explicit finding wherever the scanner knows about
-  it, so it stays visible.
+  is still recorded: as an explicit finding where the scanner enumerates the
+  scope it skipped, and otherwise as a configured scope constraint in the
+  report's *Scope* section, so it stays visible either way.
 - **Partial scan** — the scanner collected some valid findings but could not
   complete the configured scope because of a permission, provider,
   authentication, API, page, object/blob, or traversal failure.
 - **Skipped asset** — a known asset or scope boundary intentionally not
   inspected: a directory beyond `max_depth`, or a symlink/FIFO/socket/device
-  file skipped for safety. Represented as an explicit finding, never as
-  silent absence.
+  file skipped for safety. Represented as an explicit finding by the
+  filesystem scanner, which enumerates what it skipped. Scanners that do not
+  enumerate skipped scope — the sensitive-data classifier under `max_depth`,
+  and any cloud scanner under `--prefix` — skip that content without emitting
+  a boundary finding; the constraint is recorded in the report's *Scope*
+  section instead. See
+  [CLI.md § Partial and limited scans](CLI.md#partial-and-limited-scans).
 - **Inaccessible asset** — an asset HarvestGuard attempted to inspect but
   could not access. Represented as a finding-level `limitations` entry where
   a normalized finding exists, or as a scan-level scanner error where no safe
@@ -41,14 +47,22 @@ schema fields.
   `errors`; never turned into an absence of findings.
 - **Max-depth boundary** — a configured filesystem recursion boundary. The
   scan root is depth 0. Child directories below a directory at `max_depth`
-  are not descended into and are represented by explicit boundary findings.
+  are not descended into. The filesystem scanner represents each one with an
+  explicit boundary finding; the sensitive-data classifier honors the same
+  boundary but emits no boundary findings of its own, so in a
+  `--type sensitive-data` run the boundary is visible only as a configured
+  scope constraint.
 - **Pagination boundary** — a normal provider page boundary is not a
   limitation by itself. A *failed* later page is a partial scan.
 
 The rule threading through all of these: **absence of a finding is never
 proof that an asset was inspected and found clean.** Where coverage was
-bounded, skipped, or interrupted, that fact is a finding (or a
-`scanner_errors` entry), not silence.
+bounded, skipped, or interrupted, that fact is recorded somewhere the reader
+can see it — as a finding, as a `scanner_errors` entry, or, for constraints
+the scanner does not enumerate (`--prefix`, `--exclude`, and the
+sensitive-data classifier's `max_depth` bound), as a configured scope
+constraint in the report's *Scope* section. What is never acceptable is
+silence with nothing recorded anywhere.
 
 ## Filesystem: `max_depth` and traversal safety
 
@@ -165,8 +179,9 @@ Given findings A and B were collected before a later failure:
 
 - The Markdown report's **Scan Information** table includes a `Coverage`
   row: `Not complete` whenever any finding carries a `limitations` entry or
-  the scan recorded a `scanner_errors` entry, `No limits recorded`
-  otherwise.
+  the scan recorded a `scanner_errors` entry; `Bounded by configured scan
+  scope` when neither holds but a scope constraint (`--max-depth`,
+  `--prefix`, `--exclude`) was configured; `No limits recorded` otherwise.
 - A **Coverage was not complete** statement appears (in both the Markdown
   report and the console summary) whenever that condition holds, naming how
   many scanner errors and how many limitation-carrying findings were

@@ -10,6 +10,16 @@ from typing import Callable
 
 from classifier.scanner import scan_filesystem_for_sensitive_data_findings
 from code_analysis.scanner import scan_source_for_crypto_usage_findings
+from finding_adapters import (
+    AZURE_BLOB_SCANNER,
+    CODE_ANALYSIS_SCANNER,
+    CRYPTO_INVENTORY_SCANNER,
+    FILESYSTEM_SCANNER,
+    GCS_SCANNER,
+    S3_SCANNER,
+    SENSITIVE_DATA_SCANNER,
+    ScannerIdentity,
+)
 from findings import NormalizedFinding
 from reports import (
     findings_json,
@@ -35,6 +45,23 @@ DEFAULT_MAX_DEPTH = 3
 LOCAL_SCAN_TYPES = ("all", "filesystem", "crypto", "sensitive-data", "code")
 CLOUD_SCAN_TYPES = ("s3", "gcs", "azure")
 SCAN_TYPES = LOCAL_SCAN_TYPES + CLOUD_SCAN_TYPES
+
+# Scanner labels (as used in the scanner specs below) whose coverage is
+# bounded by --max-depth; the other scanners ignore it.
+DEPTH_BOUNDED_SCANNERS = ("filesystem", "sensitive data")
+
+# Scanner label -> the normalized scanner identity its findings carry. The
+# report needs this for every scanner that was invoked, including one that
+# returned nothing or failed, so it cannot be read back off the findings.
+SCANNER_IDENTITIES: dict[str, ScannerIdentity] = {
+    "filesystem": FILESYSTEM_SCANNER,
+    "crypto inventory": CRYPTO_INVENTORY_SCANNER,
+    "sensitive data": SENSITIVE_DATA_SCANNER,
+    "code analysis": CODE_ANALYSIS_SCANNER,
+    "s3": S3_SCANNER,
+    "gcs": GCS_SCANNER,
+    "azure blob": AZURE_BLOB_SCANNER,
+}
 
 # Exit codes deliberately separate invalid CLI input (2) from scan
 # execution failures (1) so automation can branch on the difference.
@@ -179,6 +206,10 @@ def run_scan_command(args: argparse.Namespace) -> int:
         duration_seconds=duration_seconds,
         excluded_paths=args.exclude,
         scanner_errors=scanner_errors,
+        scan_type=args.type,
+        scanners=[label for label, _ in specs],
+        scope_constraints=_scope_constraints(args, specs),
+        scanner_versions=_scanner_versions(specs),
     )
 
     if args.json is not None:
@@ -251,6 +282,37 @@ def _cloud_scanner_specs(
             None,
         )
     return None, f"unknown scan type: {scan_type}"
+
+
+def _scope_constraints(
+    args: argparse.Namespace, specs: list[tuple[str, ScannerThunk]]
+) -> list[str]:
+    """Constraints that actually bounded this run, for the report's Scope.
+
+    Only options the selected scanners honor are recorded: `--max-depth` is
+    ignored by the crypto-inventory, code-analysis, and cloud scanners, and
+    `--prefix` is ignored by every local scanner.
+    """
+    labels = [label for label, _ in specs]
+    constraints: list[str] = []
+    if any(label in DEPTH_BOUNDED_SCANNERS for label in labels):
+        constraints.append(f"Maximum directory depth: {args.max_depth}")
+    if args.type in CLOUD_SCAN_TYPES and args.prefix:
+        constraints.append(f"Object/blob prefix: {args.prefix}")
+    return constraints
+
+
+def _scanner_versions(specs: list[tuple[str, ScannerThunk]]) -> dict[str, str]:
+    """Normalized name -> version for every scanner this run invoked.
+
+    Recorded before the scanners run, so the report can still name a scanner
+    that produced no findings or failed outright.
+    """
+    return {
+        SCANNER_IDENTITIES[label].name: SCANNER_IDENTITIES[label].version
+        for label, _ in specs
+        if label in SCANNER_IDENTITIES
+    }
 
 
 def _run_scanners(

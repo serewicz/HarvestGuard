@@ -1,11 +1,34 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple
 
 import pandas as pd
 
 from findings import NormalizedFinding
+
+
+class ScannerIdentity(NamedTuple):
+    """The scanner name and version an adapter stamps onto its findings."""
+
+    name: str
+    version: str
+
+
+# Declared here rather than only inline below so a caller can name a scanner it
+# invoked without having a finding to read the identity off: a scanner that
+# produced nothing, or failed before producing anything, still has to appear in
+# the report's Scanner Versions table with its version.
+FILESYSTEM_SCANNER = ScannerIdentity("filesystem", "0.1.0")
+S3_SCANNER = ScannerIdentity("s3", "0.1.0")
+GCS_SCANNER = ScannerIdentity("gcs", "0.1.0")
+AZURE_BLOB_SCANNER = ScannerIdentity("azure_blob", "0.1.0")
+SENSITIVE_DATA_SCANNER = ScannerIdentity("sensitive_data_classifier", "0.1.0")
+CODE_ANALYSIS_SCANNER = ScannerIdentity("semgrep_crypto_rules", "0.1.0")
+# scanner/crypto_inventory.py stamps its own SCANNER_NAME/SCANNER_VERSION onto
+# each row; these are the fallbacks used when a row omits them. They are
+# duplicated as literals because scanner.crypto_inventory imports this module.
+CRYPTO_INVENTORY_SCANNER = ScannerIdentity("crypto_inventory", "0.1.0")
 
 
 def normalize_filesystem_df(
@@ -29,8 +52,8 @@ def _filesystem_finding_from_row(
         source_type="local_filesystem",
         asset_type=asset_type,
         location=row["Location"],
-        scanner_name="filesystem",
-        scanner_version="0.1.0",
+        scanner_name=FILESYSTEM_SCANNER.name,
+        scanner_version=FILESYSTEM_SCANNER.version,
         observed_at=row.get("Collected At"),
         evidence=row.get("Evidence"),
         confidence=row.get("Confidence"),
@@ -76,8 +99,8 @@ def normalize_s3_df(
             source_type="aws_s3",
             asset_type="object",
             location=row["Location"],
-            scanner_name="s3",
-            scanner_version="0.1.0",
+            scanner_name=S3_SCANNER.name,
+            scanner_version=S3_SCANNER.version,
             observed_at=observed_at,
             evidence=f"S3 ServerSideEncryption metadata: {row.get('Encryption')}",
             confidence="High",
@@ -98,8 +121,8 @@ def normalize_gcs_df(
             source_type="gcs",
             asset_type="object",
             location=row["Location"],
-            scanner_name="gcs",
-            scanner_version="0.1.0",
+            scanner_name=GCS_SCANNER.name,
+            scanner_version=GCS_SCANNER.version,
             observed_at=observed_at,
             evidence=f"GCS encryption metadata: {row.get('Encryption')}",
             confidence="High",
@@ -120,8 +143,8 @@ def normalize_azure_blob_df(
             source_type="azure_blob",
             asset_type="blob",
             location=row["Location"],
-            scanner_name="azure_blob",
-            scanner_version="0.1.0",
+            scanner_name=AZURE_BLOB_SCANNER.name,
+            scanner_version=AZURE_BLOB_SCANNER.version,
             observed_at=observed_at,
             evidence=f"Azure Blob encryption metadata: {row.get('Encryption')}",
             confidence="High",
@@ -146,8 +169,8 @@ def normalize_sensitive_data_df(
             source_type="local_sensitive_data",
             asset_type="file",
             location=row["Location"],
-            scanner_name="sensitive_data_classifier",
-            scanner_version="0.1.0",
+            scanner_name=SENSITIVE_DATA_SCANNER.name,
+            scanner_version=SENSITIVE_DATA_SCANNER.version,
             observed_at=observed_at,
             evidence=(
                 f"Sensitive data categories detected: {row.get('Categories')}; "
@@ -176,8 +199,8 @@ def normalize_code_analysis_df(
             source_type="code_analysis",
             asset_type="source_code",
             location=row["Location"],
-            scanner_name="semgrep_crypto_rules",
-            scanner_version="0.1.0",
+            scanner_name=CODE_ANALYSIS_SCANNER.name,
+            scanner_version=CODE_ANALYSIS_SCANNER.version,
             observed_at=observed_at,
             evidence=f"Semgrep rule matched: {row.get('Rule')}",
             confidence="High",
@@ -203,8 +226,8 @@ def normalize_crypto_inventory_df(
             source_type="crypto_inventory",
             asset_type=row["Asset Type"],
             location=row["Location"],
-            scanner_name=row.get("Scanner", "crypto_inventory"),
-            scanner_version=row.get("Scanner Version", "0.1.0"),
+            scanner_name=row.get("Scanner", CRYPTO_INVENTORY_SCANNER.name),
+            scanner_version=row.get("Scanner Version", CRYPTO_INVENTORY_SCANNER.version),
             observed_at=row.get("Observed At"),
             evidence=row.get("Evidence", ""),
             confidence=row.get("Confidence", "Low"),

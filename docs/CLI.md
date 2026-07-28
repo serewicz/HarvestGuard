@@ -141,18 +141,8 @@ Scan an Azure Blob container:
 harvestguard scan my-account/my-container --type azure --json --quiet
 ```
 
-The Markdown report includes:
-
-- Executive Summary
-- Scan Information
-- Scanner Versions
-- Scope
-- Findings Summary
-- Finding Breakdown by Type
-- Detailed Findings
-- Errors and Warnings
-- Known Limitations
-- Appendix
+The Markdown report's sections are listed under
+[Markdown output](#markdown-output).
 
 ## Demo Walkthrough
 
@@ -278,8 +268,10 @@ Exit code `2` always means invalid input, and `1` always means a scan
 execution failure, so automation can branch on the difference.
 
 A scope you asked for is not a failure: a cloud `--prefix`, an `--exclude`
-pattern, or a `--max-depth` boundary still exits `0`. Boundaries the scanner
-knows about are reported as explicit findings instead.
+pattern, or a `--max-depth` boundary still exits `0`. Boundaries the filesystem
+scanner knows about are reported as explicit findings instead; see
+[Partial and limited scans](#partial-and-limited-scans) for which constraints
+produce findings and which are reported only as scope.
 
 ## Scan Coverage and Partial Results
 
@@ -296,18 +288,125 @@ must not be read as proof of complete coverage.
 
 ## Output Notes
 
-JSON output serializes normalized findings from
-[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md) without changing the schema.
-Even when a scanner fails partway through, `--json` stdout remains valid,
-machine-readable JSON containing the partial findings; progress and failure
-messages go to stderr.
+### JSON output shape
 
-Markdown output is a professional evidence report suitable for attaching to an
-issue, email, or advisory note. It reports observed evidence only. It does not
-add executive priority, risk scoring, remediation recommendations, ownership,
-persistence, or telemetry. It does include each finding's `limitations`, any
-scanner errors, and an explicit coverage statement when the scan was limited or
-incomplete.
+`--json` emits a **JSON array of normalized findings** — one serialized
+[NORMALIZED_FINDINGS.md](NORMALIZED_FINDINGS.md) record per array element, with
+the schema unchanged. It is not a report envelope: there is no wrapper object,
+and scan-level run metadata is not part of the array. Each element preserves
+`schema_version`, `finding_id`, provenance fields (`scanner_name`,
+`scanner_version`, `collection_method`, `collection_source`, `rule_id`,
+`observed_at`, `repeatable`, `verification_rationale`), `evidence`,
+`confidence`, `confidence_rationale`, `ownership_signals`, `unknowns`,
+`limitations`, `errors`, and `technical_metadata`, serialized as plain JSON
+objects, arrays, and scalars.
+
+Scan-level scanner errors are deliberately outside that array. They are
+reported through stderr, the exit code (see [Exit Codes](#exit-codes)), and the
+Markdown report's *Errors and Warnings* section. Even when a scanner fails
+partway through, `--json` stdout stays valid, machine-readable JSON containing
+the findings collected before the failure; progress and failure messages never
+mix into stdout.
+
+With `--json PATH` the same JSON is written to `PATH`; with `--quiet` stdout
+stays empty.
+
+### Markdown output
+
+`--markdown` emits a human-readable **evidence report** generated locally,
+suitable for attaching to an issue, email, or advisory note. Its major sections
+are stable:
+
+- Executive Summary — evidence counts and scan context only
+- Scan Information — scan time, report generator/version, target, duration,
+  files scanned, excluded paths, coverage status
+- Scanner Versions — scanner name, version, and finding count, listing every
+  scanner the run invoked; a scanner that produced no findings, or that failed
+  before producing any, still appears with its version and a count of `0`
+- Scope — target, scan type, the scanners that actually ran for that scan
+  type, and the scope constraints that bounded the run
+- Findings Summary
+- Finding Breakdown by Type
+- Detailed Findings — per finding: location, asset type, the scanner name and
+  version that produced it, when it was collected (`observed_at`), observed
+  technical metadata, confidence, observed evidence, unknowns, limitations, and
+  finding-level errors
+- Errors and Warnings — scanner errors and coverage-limitation counts by type
+- Known Limitations
+- Appendix — normalized schema version and schema-preservation note
+
+The report is evidence-only. It does not provide a risk score, HNDL exposure,
+remediation advice or priority, business impact, ownership conclusions,
+recommendations, compliance conclusions, quantum-readiness conclusions, or an
+executive priority score. "Executive Summary" here means a concise summary of
+what was observed, not an executive assessment. See
+[TERMINOLOGY.md](TERMINOLOGY.md) for the evidence-versus-inference vocabulary.
+
+The Scope section reports only the scanners the selected `--type` actually
+ran — a `--type filesystem` or `--type s3` report never claims the other
+scanners ran — together with the constraints those scanners honored
+(`--max-depth` for `filesystem`/`sensitive-data`, `--prefix` for cloud scans,
+and any `--exclude` patterns).
+
+With `--markdown PATH` the report is written to `PATH`; with `--quiet` stdout
+stays empty. Both `--json` and `--markdown` produce deterministic output apart
+from genuinely volatile values (scan time, duration, and the host-dependent
+fields noted above): findings are ordered by asset type, then location, then
+finding ID, in both outputs.
+
+PDF and HTML reports, hosted report sharing, and a JSON report envelope with
+run metadata are not implemented; see [ROADMAP.md](ROADMAP.md).
+
+### Partial and limited scans
+
+A scope you configured (`--max-depth`, `--prefix`, `--exclude`) is not a
+failure, but it does bound coverage. How each constraint is represented differs,
+and the report distinguishes them:
+
+- `--max-depth` produces explicit limitation findings **in the filesystem
+  scanner only** (`--type filesystem`, and the filesystem pass of `--type
+  all`). A directory past the configured depth is reported as a
+  `max_depth_boundary` finding with a populated `limitations` field, alongside
+  the `directory_traversal_error` and `skipped_special_file` findings the
+  filesystem scanner records for entries it could not read or could not safely
+  inspect.
+- `--type sensitive-data` honors the same depth boundary — it inspects files in
+  directories up to and including the configured depth — but does **not** emit
+  boundary findings of its own: content below the boundary is skipped without a
+  `max_depth_boundary` record. In a `--type all` run the filesystem pass still
+  records the boundary directories. In a `--type sensitive-data` run the depth
+  constraint is visible only in the report's *Scope* section, so read that
+  section, not the absence of limitation findings, as the statement of how far
+  a sensitive-data scan reached.
+- `--prefix` and `--exclude` do **not** produce limitation findings.
+  A cloud prefix narrows what the provider is asked to list, and an exclude
+  pattern drops matching findings from output; in neither case does the scanner
+  enumerate what it skipped. These constraints are visible in the report's
+  *Scope* section (and `--exclude` in *Scan Information*), not as per-finding
+  `limitations`.
+
+Uninspected scope is never counted as a scanned file. When any scanner error or
+limitation finding exists, the Markdown report states that coverage was not
+complete and repeats that absence of a finding is not evidence that an asset was
+inspected and found clean. When no error or limitation finding exists but a
+scope constraint was configured, *Scan Information* reports coverage as
+`Bounded by configured scan scope` rather than as unlimited; only a run with no
+recorded constraint, error, or limitation reports `No limits recorded`. See
+[SCAN_COVERAGE.md](SCAN_COVERAGE.md) for the full coverage semantics.
+
+### Handling report output
+
+Report generation is entirely local. HarvestGuard does not send findings or
+reports to any external service, and it does not persist raw file contents.
+Sensitive-data findings report category names and counts only — never the
+matched values.
+
+Even so, **treat generated reports as potentially sensitive artifacts**. File
+paths, object and blob keys, bucket and container names, certificate subjects
+and issuers, usernames, and other ownership signals can each be sensitive on
+their own, and a report aggregates them. Store, transmit, and share
+`findings.json` and `report.md` with the same care as the environment they
+describe.
 
 Provider credentials always come from each cloud SDK's own default credential
 resolution. HarvestGuard does not manage, store, or emit credentials, and
