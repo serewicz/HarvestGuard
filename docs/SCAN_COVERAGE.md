@@ -197,6 +197,27 @@ Given findings A and B were collected before a later failure:
   a skipped special file) are never counted toward "Files Scanned" — they
   record scope that was *not* inspected, so counting them would overstate
   coverage.
+- A **finding-level `errors` entry does not change the `Coverage` row**. An
+  unparsable PEM, a JKS entry the current scanner cannot read, or an
+  encrypted key whose metadata needs a passphrase is an *unsupported or
+  failed observation* of an asset that was reached, not a scanner execution
+  failure and not un-traversed scope: the scan exits `0`. Errors and Warnings
+  states that finding-level errors exist, and each reason is rendered in that
+  finding's `Errors` column in Detailed Findings, so a report showing
+  `No limits recorded` alongside finding-level errors must be read as "the
+  configured scope was traversed, and some individual observations failed."
+  See [CLI.md § Reading coverage from an artifact](CLI.md#reading-coverage-from-an-artifact)
+  for the full complete/limited/partial/failed reading.
+
+## Validation
+
+`tests/test_end_to_end_validation.py` (roadmap HG-008) exercises these
+semantics through the public CLI: complete, limited (`--max-depth`,
+`--prefix`, `--exclude`), partial (S3 page failure, GCS/Azure iterator
+failure after yielding blobs), and failed scans, in summary, JSON, and
+Markdown output. Cloud behavior is faked at the provider SDK boundary only,
+so the scanner adapters, normalization, report generation, and CLI exit
+handling all run for real.
 
 ## Credentials
 
