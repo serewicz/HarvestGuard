@@ -165,5 +165,7 @@ verbatim there rather than re-invented:
   raw finding.
 - Reports ([reports.py](../reports.py), roadmap HG-007) use the evidence-layer
   terms and keep inference/assessment terms out of evidence output.
-- Confidence and detection characterization (roadmap HG-009) builds directly
-  on the confidence, false positive, and false negative definitions here.
+- Confidence and detection characterization
+  ([DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md), roadmap
+  HG-009) builds directly on the confidence, false positive, and false
+  negative definitions here, and applies them scanner by scanner.

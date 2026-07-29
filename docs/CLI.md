@@ -354,6 +354,17 @@ collected are still emitted, the failure is still reported, and the exit code is
 still `1`. Reports and JSON that record scanner errors or limitation findings
 must not be read as proof of complete coverage.
 
+## What Each Scanner Can Miss
+
+Coverage semantics answer "was the configured scope processed?"
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md) answers the
+other half: for each scan type above, what evidence that scanner actually
+supports, what formats and inputs it does not recognize, its likely
+false-positive and false-negative conditions, what its `confidence` value
+means, and when a clean result must not be read as proof that no cryptographic
+asset, sensitive data, weak crypto usage, or encryption gap exists. Read it
+before treating any `--type` result as complete.
+
 ## Output Notes
 
 ### JSON output shape

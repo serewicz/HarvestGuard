@@ -55,6 +55,15 @@ schema fields.
 - **Pagination boundary** — a normal provider page boundary is not a
   limitation by itself. A *failed* later page is a partial scan.
 
+Coverage is about scope: whether the configured target was processed. It is
+separate from *detection scope* — what a scanner can recognize in the assets it
+did inspect. A complete scan of a fully inspected target can still miss real
+conditions, because each scanner's detector set is deliberately narrow. Those
+per-scanner limits, false positives, false negatives, and confidence semantics
+are characterized in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md); read both
+before concluding a target is clean.
+
 The rule threading through all of these: **absence of a finding is never
 proof that an asset was inspected and found clean.** Where coverage was
 bounded, skipped, or interrupted, that fact is recorded somewhere the reader
