@@ -21,11 +21,20 @@ For an editable install that exposes the `harvestguard` command:
 pip install -e .
 ```
 
-Without installing the console script, run the same CLI as a module:
+After that, `harvestguard scan <target>` works from any directory, not just the
+repository root. The install covers the CLI and the scanners only; the
+Streamlit dashboard is run from the repository root with
+`streamlit run main.py` and is not part of the installed package.
+
+Without installing the console script, run the same CLI as a module from the
+repository root:
 
 ```bash
 python -m harvestguard scan ./target
 ```
+
+Both paths run the same code. To confirm either one works before you trust its
+output, see [Validating an install end to end](#validating-an-install-end-to-end).
 
 ## Usage
 
@@ -255,6 +264,65 @@ terminology document marks as inferred heuristics (`Needs Validation`) and
 which must never be read as measured facts. Nothing in this walkthrough is a
 complete quantum-readiness assessment; it is a small, fixed evidence sample
 for seeing real output.
+
+## Validating an Install End to End
+
+Everything below is exercised automatically by
+`tests/test_end_to_end_validation.py` (roadmap HG-008), which runs the same
+documented commands: a real `pip install .` and `pip install -e .` of this
+repository into a throwaway virtual environment whose installed `harvestguard`
+console script is then invoked from outside the checkout, the demo fixture, a
+representative non-demo target built at runtime, and S3/GCS/Azure scans faked at
+the provider SDK boundary only. Run
+`pytest -v tests/test_end_to_end_validation.py` to check an environment, or walk
+the steps yourself:
+
+1. **Install and invoke.** `pip install -e .` then `harvestguard scan
+   demo/sample_target --type all --summary` (or `python -m harvestguard scan
+   demo/sample_target --type all --summary` without installing). Expect exit
+   code `0` and the summary shown in [Demo Walkthrough](#demo-walkthrough).
+   Progress lines (`Running filesystem scanner...`) go to stderr, so stdout is
+   safe to pipe.
+2. **Demo artifacts.** Add `--json findings.json` and `--markdown report.md`.
+   Expect three findings in the JSON array and every section listed under
+   [Markdown output](#markdown-output) in the report.
+3. **A representative target.** Point the same commands at a real repository or
+   directory (`harvestguard scan /path/to/repo --type all --json findings.json`).
+   Nothing about the output shape depends on the demo fixture. Individual scan
+   types are worth running on their own too: `--type crypto` for certificate and
+   key inventory, `--type code` for Semgrep crypto findings, `--type
+   sensitive-data` for category counts.
+4. **Cloud targets.** `--type s3`, `--type gcs`, and `--type azure` need working
+   provider credentials from that SDK's own default chain (HarvestGuard never
+   prompts for or stores them). A successful cloud scan with no `--prefix`
+   reports `Coverage: No limits recorded`.
+5. **Read the coverage status.** Use the table below to tell a complete scan
+   from a limited, partial, or failed one. This is the only thing you need in
+   order to interpret an artifact — no source-code reading required.
+
+### Reading coverage from an artifact
+
+| What happened | Exit code | Markdown `Coverage` row | Other evidence in the artifact |
+| --- | --- | --- | --- |
+| **Complete** — the configured scope was processed, nothing was skipped | `0` | `No limits recorded` | *Errors and Warnings* says no scanner errors, finding-level errors, or limitations were reported |
+| **Limited** — you configured `--prefix`, `--exclude`, or a depth bound the scanner does not enumerate | `0` | `Bounded by configured scan scope` | *Scope* lists each configured constraint; `--exclude` also appears in *Scan Information* |
+| **Limited with enumerated boundaries** — a filesystem `--max-depth` boundary, unreadable directory, or skipped special file | `0` | `Not complete` | "Coverage was not complete: … N finding(s) with recorded limitations", a `max_depth_boundary`/`directory_traversal_error`/`skipped_special_file` count, and **no** `Scanner error:` line |
+| **Partial** — findings were collected, then a provider, credential, or traversal failure stopped the scan | `1` | `Not complete` | The collected findings are still listed in *Detailed Findings*, and a `- Scanner error:` line names the failure |
+| **Failed** — a scanner errored before producing anything | `1` | `Not complete` | A `- Scanner error:` line, plus a *Scanner Versions* row for that scanner with a finding count of `0`, so it is never silently dropped |
+
+A per-finding `errors` entry is a different thing from a scanner failure: it
+records an observation that partly failed (an unparsable PEM, a JKS entry the
+current scanner cannot read, an encrypted key whose metadata needs a
+passphrase). The scan still exits `0`, and the `Coverage` row does not change;
+the fact is reported as "Finding-level errors are listed in Detailed Findings"
+in *Errors and Warnings*, with the reason in that finding's `Errors` column (and
+its `errors` array in JSON). Read those two places, not just the `Coverage` row,
+before treating a scan as clean.
+
+With `--json`, the same distinctions come from the exit code, the stderr
+messages, and each finding's `limitations` and `errors` arrays; scan-level
+scanner errors are deliberately not part of the JSON array (see
+[JSON output shape](#json-output-shape)).
 
 ## Exit Codes
 

@@ -267,7 +267,7 @@ only; detailed implementation issues have not been written yet.
   HarvestGuard, run the documented demo and representative scanner paths,
   generate the supported evidence artifacts, and correctly understand
   successful, partial, limited, and failed scans.
-- **Status:** Partial
+- **Status:** Complete
 - **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
 - **Dependencies:** HG-004, HG-006, HG-007
 - **Acceptance criteria:** CI already covers local scan, classifier scan,
@@ -278,9 +278,20 @@ only; detailed implementation issues have not been written yet.
   instructions, run representative local and cloud (mocked or sandboxed)
   scans, generate JSON/Markdown reports, and correctly distinguish
   successful, partial, limited, and failed scan outcomes from the output
-  alone. Detailed acceptance criteria and a test plan are defined in the
-  GitHub issue when it is written.
-- **GitHub issue:** TBD
+  alone. Implemented as `tests/test_end_to_end_validation.py`, which drives
+  the public CLI over the demo fixture, a representative non-demo target
+  built at runtime, and S3/GCS/Azure scans faked at the provider SDK
+  boundary only, across successful, limited, partial, and failed scans in
+  summary, JSON, and Markdown output. The fresh-install path is validated by
+  really installing the repository (both `pip install .` and `pip install -e .`)
+  into a throwaway virtual environment and running the installed `harvestguard`
+  console script from outside the checkout. Validation also fixed the documented
+  `pip install -e .` path, which the flat repository layout broke, and
+  documented how to read complete/limited/partial/failed coverage from an
+  artifact (`docs/CLI.md`, "Reading coverage from an artifact"). Per-scanner
+  detection characterization stays with HG-009 and final product-claims
+  reconciliation with HG-010.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/53
 
 ### HG-009
 
