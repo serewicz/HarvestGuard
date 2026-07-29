@@ -43,10 +43,14 @@ crypto code analysis scanner each ship as their own scan type. The unified CLI
 can produce console summaries, normalized JSON, and evidence-only Markdown
 reports that can contribute to a future Technology Due Diligence Evidence
 Package and other executive deliverables described in
-[EXECUTIVE_DELIVERABLES.md](EXECUTIVE_DELIVERABLES.md). Pillar 2 (containers)
-is done except the k8s manifest — signed, keylessly-attested images with an
-SBOM ship from CI. No CBOM/PDF export yet, no network-level crypto detection
-(TLS/cipher-suite scanning).
+[EXECUTIVE_DELIVERABLES.md](EXECUTIVE_DELIVERABLES.md). The container work is
+done except the k8s manifest: `.github/workflows/container-build.yml` builds a
+non-root distroless image and is configured to sign it keylessly and attach a
+CycloneDX SBOM attestation (see
+[SECURITY.md](../SECURITY.md#verifying-the-container-image) for what has and has
+not been exercised against a real published image; release identity and
+provenance are HG-011's scope). No CBOM/PDF export yet, no network-level crypto
+detection (TLS/cipher-suite scanning).
 
 ## Direction
 
@@ -63,10 +67,11 @@ Grafana -> Future Executive Priority Index.
    inference layered on top of that evidence and is **Needs Validation**
    (see [TERMINOLOGY.md](TERMINOLOGY.md)). HNDL exposure must not be
    presented as a validated, measured result.
-2. **Cryptographic inventory blind spots** — partially done. Pillar 1's
-   "Future scan surfaces" section covers this; source-code crypto usage
-   analysis now ships (`code_analysis/`, a vendored Semgrep rule set) but
-   inspects source code only — binary and network/cipher detection don't
+2. **Cryptographic inventory blind spots** — partially done. The future scan
+   surfaces listed under "Preserved Product Notes" below cover this;
+   source-code crypto usage analysis now ships (`code_analysis/`, a vendored
+   Semgrep rule set) but inspects source text only, and its current rules
+   target Python source only — binary and network/cipher detection don't
    exist yet — most companies have no map of what algorithms/key
    lengths/libraries they're running, which is exactly what this section
    targets.
@@ -81,8 +86,10 @@ Grafana -> Future Executive Priority Index.
    deliverable, not a tool feature. See "Advisory backlog" below.
 5. **Supply chain & third-party exposure (incl. shadow AI)** — explicitly out
    of scope for now; see bottom of this doc.
-6. **Valuation & integration impact** — Pillar 3's dollarized-risk and
-   partner-ready-summary items. Related existing work:
+6. **Valuation & integration impact** — the dollarized-risk and
+   partner-ready-summary direction, none of which is implemented; the closest
+   roadmap items are HG-024 through HG-027 in Milestone 5. Related existing
+   work:
    [technology-leadership-portfolio](https://github.com/serewicz/technology-leadership-portfolio).
 7. **Talent & governance gaps** — not scannable; advisory-only, with one
    small tool-buildable nicety (see "Advisory backlog" below).
@@ -300,7 +307,7 @@ only; detailed implementation issues have not been written yet.
   important false-positive and false-negative conditions, what confidence
   means, and how operators should interpret unknown or limited evidence.
   This is evidence-characterization work, not risk scoring.
-- **Status:** Needs Validation
+- **Status:** Complete
 - **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
 - **Dependencies:** HG-002, HG-003, HG-005
 - **Acceptance criteria:** Findings already carry `confidence` and
@@ -308,8 +315,9 @@ only; detailed implementation issues have not been written yet.
   known detection scope, known false positives, known false negatives, and
   what an `unknown` or a `limitations` entry means for that scanner, so an
   operator reading a report can correctly interpret confidence and coverage
-  rather than mistaking a heuristic for proof. Detailed acceptance criteria
-  are defined in the GitHub issue when it is written.
+  rather than mistaking a heuristic for proof. Satisfied per scanner, including
+  the two narrow behavioral corrections (PGP armor prefix narrowed;
+  code-analysis failure diagnostics moved to stderr) documented there.
 - **Delivered by:** [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md),
   validated by `tests/test_detection_characterization.py`.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/54
@@ -330,9 +338,15 @@ only; detailed implementation issues have not been written yet.
   experimental / needs validation; planned; or explicitly out of scope. The
   evidence-versus-inference boundary (observed evidence vs. heuristic
   inference such as risk score and HNDL exposure) is preserved and made
-  explicit everywhere a claim is made. Detailed acceptance criteria are
-  defined in the GitHub issue when it is written.
-- **GitHub issue:** TBD
+  explicit everywhere a claim is made. The audited claims, their
+  classifications, the corrections made, and the areas deliberately left
+  marked `Needs Validation` are recorded in
+  [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md). No scanner, risk, remediation,
+  dashboard, storage, or release capability was added to satisfy a claim:
+  unsupported claims were narrowed, marked planned, or declared out of scope.
+- **Delivered by:** [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md), validated by
+  `tests/test_product_claims.py`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/55
 
 ### HG-011
 
@@ -573,9 +587,10 @@ These existing decisions remain part of the roadmap context:
   evidence.
 - CycloneDX is the preferred CBOM target for interoperability.
 - Code crypto analysis now exists through `code_analysis/` and a vendored
-  Semgrep rule set; network, deeper binary, entropy, and runtime crypto
-  analysis remain future scan surfaces and should integrate mature third-party
-  scanners where appropriate.
+  Semgrep rule set whose rules currently declare `languages: [python]`;
+  additional source languages, network, deeper binary, entropy, and runtime
+  crypto analysis remain future scan surfaces and should integrate mature
+  third-party scanners where appropriate.
 - Broader crypto-container and keystore coverage (for example Java keystores,
   HSM/KMS integrations beyond current cloud provider metadata, and additional
   certificate/key container formats) is a future scan surface, not yet

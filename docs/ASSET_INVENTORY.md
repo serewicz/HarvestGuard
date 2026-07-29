@@ -60,7 +60,7 @@ without changing existing scanner behavior.
 | `s3` | `aws_s3` | Object `ServerSideEncryption` metadata reported by the S3 API. |
 | `gcs` | `gcs` | Per-blob CMEK vs. Google-managed encryption metadata. |
 | `azure_blob` | `azure_blob` | Per-blob customer-managed encryption scope vs. Microsoft-managed default. |
-| `semgrep_crypto_rules` | `code_analysis` | Weak/legacy crypto usage matched in source by a vendored Semgrep rule (`rule_id` records which check fired). |
+| `semgrep_crypto_rules` | `code_analysis` | Weak/legacy crypto usage matched in source **text** by a vendored Semgrep rule (`rule_id` records which check fired). The current rules declare `languages: [python]`, so other languages, binaries, bytecode, runtime behavior, and network/TLS use contribute no records. |
 | `sensitive_data_classifier` | `local_sensitive_data` | Sensitive-data category names and total match count only. Matched values are never stored (see below). |
 | `crypto_inventory` | `crypto_inventory` | Local certificate/key material (algorithm, key size, issuer, subject, expiration, fingerprint). See [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md). |
 
@@ -105,6 +105,14 @@ explicitly rather than dropping it:
   a failed or partial cloud scan is reported as a failure (nonzero CLI exit)
   rather than being silently presented as a clean, empty result. The specific
   objects or pages that could not be read are named in that error.
+- **Source-code analysis execution failures** — the one place this visibility
+  rule is not currently met. If the analyzer is unavailable, times out, exits
+  non-zero, or emits unparsable output, the code-analysis adapter contributes
+  no records and the diagnostic goes to stderr only: it does not become a
+  scan-level scanner error and does not change the CLI exit code the way a
+  cloud failure does. Documented rather than changed; see
+  [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md#identified-for-a-separate-issue) and
+  [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#source-code-crypto-analysis).
 - **Confidence** — records whose evidence is indirect or incomplete carry a
   lower `confidence` (and, for the filesystem reference adapter, a
   `confidence_rationale`) rather than being presented as certain.

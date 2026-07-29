@@ -57,14 +57,23 @@ name for `s3`/`gcs`, or `account-name/container-name` for `azure`.
 | `filesystem`     | local path                      | local filesystem encryption evidence        |
 | `crypto`         | local path                      | cryptographic asset inventory               |
 | `sensitive-data` | local path                      | sensitive-data category detection           |
-| `code`           | local path                      | local Semgrep crypto code analysis          |
+| `code`           | local path                      | local Semgrep crypto code analysis (Python source only) |
 | `s3`             | bucket name                     | AWS S3 object encryption status             |
 | `gcs`            | bucket name                     | GCS object encryption status                |
 | `azure`          | `account-name/container-name`   | Azure Blob encryption status                |
 
 `--max-depth` bounds directory recursion for `filesystem` and `sensitive-data`
-scans (and the `all` bundle). `--prefix` restricts cloud scans to a key or blob
-prefix. Each option is ignored by scan types it does not apply to.
+scans (and the `all` bundle), and **defaults to `3`** — a scan run without an
+explicit `--max-depth` is bounded configured scope from the start, not unlimited
+recursion, and the report's *Scope* section records the bound that applied.
+`--prefix` restricts cloud scans to a key or blob prefix. Each option is ignored
+by scan types it does not apply to.
+
+`--type code` matches source **text** only, and the vendored rule set
+(`code_analysis/rules/crypto.yaml`) currently declares `languages: [python]`,
+so equivalent weak-crypto usage in another language produces no finding. There
+is no binary, bytecode, runtime, or network/TLS discovery. See
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md).
 
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,
@@ -310,6 +319,12 @@ the steps yourself:
 | **Partial** — findings were collected, then a provider, credential, or traversal failure stopped the scan | `1` | `Not complete` | The collected findings are still listed in *Detailed Findings*, and a `- Scanner error:` line names the failure |
 | **Failed** — a scanner errored before producing anything | `1` | `Not complete` | A `- Scanner error:` line, plus a *Scanner Versions* row for that scanner with a finding count of `0`, so it is never silently dropped |
 
+A `--type code` execution failure is the one case this table does not cover: it
+exits `0`, reports `Coverage` as if nothing constrained the scan, and shows a
+code-analysis *Scanner Versions* row with `0` findings that is indistinguishable
+from a genuinely clean result. Its diagnostic appears on stderr only. See
+[Exit Codes](#exit-codes).
+
 A per-finding `errors` entry is a different thing from a scanner failure: it
 records an observation that partly failed (an unparsable PEM, a JKS entry the
 current scanner cannot read, an encrypted key whose metadata needs a
@@ -334,6 +349,18 @@ scanner errors are deliberately not part of the JSON array (see
 
 Exit code `2` always means invalid input, and `1` always means a scan
 execution failure, so automation can branch on the difference.
+
+**One documented exception to `1`:** a `--type code` *execution* failure —
+`semgrep` not installed, timed out, exiting non-zero, or emitting output that
+cannot be parsed — writes its diagnostic to stderr and returns an empty result
+instead of raising. It is therefore not recorded as a scanner error, and the run
+exits `0` with no findings, unlike an equivalent S3/GCS/Azure failure. Read
+stderr, not just the exit code, before treating an empty code-analysis result as
+"the source was analyzed and nothing matched". This asymmetry is characterized
+in [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#source-code-crypto-analysis)
+and tracked as a separate scanner-error-propagation concern in
+[CLAIMS_AUDIT.md](CLAIMS_AUDIT.md#identified-for-a-separate-issue); HG-010 did
+not change the behavior.
 
 A scope you asked for is not a failure: a cloud `--prefix`, an `--exclude`
 pattern, or a `--max-depth` boundary still exits `0`. Boundaries the filesystem

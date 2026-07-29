@@ -25,6 +25,31 @@ RESULTS_TABLE_HELP = (
     "Validation), not observed facts."
 )
 
+# Empty-result language. Per docs/DETECTION_CHARACTERIZATION.md (HG-009) an
+# empty result is not proof of absence: each scanner's detector set is narrow,
+# and for code analysis an empty DataFrame is additionally indistinguishable
+# from "semgrep could not run at all" (that failure path prints to stderr and
+# returns no rows). A bare success message would overstate both.
+NO_SENSITIVE_DATA_MESSAGE = (
+    "No sensitive-data patterns matched in the files that were inspected."
+)
+NO_SENSITIVE_DATA_CAVEAT = (
+    "Absence of a finding is not proof of absence. Detection is regex-based and "
+    "reports categories and counts only; oversize, binary, and undecodable "
+    "files are not inspected, and depth limits bound how far the scan reached. "
+    "See docs/DETECTION_CHARACTERIZATION.md."
+)
+NO_CODE_FINDINGS_MESSAGE = (
+    "No weak/legacy crypto library usage matched the vendored rule set."
+)
+NO_CODE_FINDINGS_CAVEAT = (
+    "Absence of a finding is not proof of absence. The vendored Semgrep rules "
+    "match Python source text only — not binaries, bytecode, runtime behavior, "
+    "or network/TLS use — and an empty result also occurs when semgrep could "
+    "not run at all (that diagnostic goes to stderr). Check the console before "
+    "reading this as a clean scan. See docs/DETECTION_CHARACTERIZATION.md."
+)
+
 
 def display_risk_dashboard(df: pd.DataFrame):
     if df.empty:
@@ -49,7 +74,8 @@ def display_risk_dashboard(df: pd.DataFrame):
 
 def display_sensitive_data_dashboard(df: pd.DataFrame):
     if df.empty:
-        st.success("No sensitive data patterns detected in scanned files.")
+        st.info(NO_SENSITIVE_DATA_MESSAGE)
+        st.caption(NO_SENSITIVE_DATA_CAVEAT)
         return
 
     st.subheader(f"Sensitive Data Findings — {len(df)} file(s) flagged")
@@ -63,7 +89,8 @@ def display_sensitive_data_dashboard(df: pd.DataFrame):
 
 def display_code_analysis_dashboard(df: pd.DataFrame):
     if df.empty:
-        st.success("No weak/legacy crypto library usage detected.")
+        st.info(NO_CODE_FINDINGS_MESSAGE)
+        st.caption(NO_CODE_FINDINGS_CAVEAT)
         return
 
     st.subheader(f"Crypto Code Analysis Findings — {len(df)} finding(s)")

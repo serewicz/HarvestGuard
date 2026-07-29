@@ -123,16 +123,17 @@ them, and must not be written into the immutable raw finding.
 This table is the path from today's language to a clean evidence/inference
 separation. It records which current labels are observed evidence, which are
 inference, and where current behavior still needs validation before it can be
-relied on for release claims. Future UI or report work (see roadmap HG-009,
-HG-012, HG-014) should carry these labels into the interface itself and, per
-the issue's testing requirements, verify the terminology with tests or review
-fixtures.
+relied on for release claims. Future UI work (see roadmap HG-012, HG-014)
+should carry these labels further into the interface itself and, per the
+issue's testing requirements, verify the terminology with tests or review
+fixtures. How each of these labels is classified as a product claim is
+recorded in [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md).
 
 | Where it appears | Current label | Layer | Notes |
 | --- | --- | --- | --- |
 | Dashboard results table (`dashboard/visualizations.py`) | `Encryption` | Observed evidence | Encryption status as reported by the scanner or provider metadata. |
-| Dashboard "Risk Scores" bar / results table | `Risk Score` | Inference (heuristic) | 0–100 heuristic from `analyzer/risk.py`. Not a measured fact. **Needs Validation.** The dashboard labels it as an inferred heuristic. |
-| Dashboard "Risk Distribution" pie | `HNDL Exposure` | Inference (heuristic) | High/Medium/Low bucket derived from the risk score. **Needs Validation.** The dashboard labels it as inferred. |
+| Dashboard "Risk Scores (inferred heuristic — Needs Validation)" bar / results table | `Risk Score` | Inference (heuristic) | 0–100 heuristic from `analyzer/risk.py`. Not a measured fact. **Needs Validation.** The dashboard labels it as an inferred heuristic. Dashboard only — never emitted by the CLI. |
+| Dashboard "HNDL Exposure (inferred — Needs Validation)" pie | `HNDL Exposure` | Inference (heuristic) | High/Medium/Low bucket derived from the risk score. **Needs Validation.** The dashboard labels it as inferred. Dashboard only — never emitted by the CLI. |
 | Markdown / JSON report (`reports.py`) | `Observed Evidence`, `Confidence` | Observed evidence | Reports are evidence-only by design and already state that they do not infer business risk. |
 | Markdown / JSON report | (risk score, priority, ownership inference) | Inference / assessment | Deliberately **excluded** from reports today; if ever added, must be a clearly labeled assessment section separate from evidence. |
 

@@ -13,6 +13,14 @@ This document describes HarvestGuard's executive-facing reporting vision. It
 does not claim that every deliverable described here is fully implemented
 today.
 
+**What exists today:** the console summary, the `--json` array of normalized
+findings, and the `--markdown` evidence report produced by `reports.py` (see
+[CLI.md](CLI.md)). Every deliverable named below — including the Technology Due
+Diligence Evidence Package itself — is a reporting target derived from that
+evidence, not shipped output. Statuses for the report-packaging work are tracked
+in [ROADMAP.md](ROADMAP.md) (HG-017 and Milestone 5), and each claim in this
+document is classified in [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md).
+
 ## Primary Deliverable
 
 ### Technology Due Diligence Evidence Package
