@@ -85,26 +85,35 @@ def scan_source_for_crypto_usage(path: str) -> pd.DataFrame:
             check=False,
         )
     except FileNotFoundError:
-        print("Error running code analysis: semgrep is not installed", flush=True)
+        print(
+            "Error running code analysis: semgrep is not installed",
+            file=sys.stderr,
+            flush=True,
+        )
         return pd.DataFrame(results)
     except subprocess.TimeoutExpired:
         print(
             f"Error running code analysis: semgrep timed out after {_TIMEOUT_SECONDS}s",
+            file=sys.stderr,
             flush=True,
         )
         return pd.DataFrame(results)
 
     # With --quiet, semgrep exits 0 whether or not it found anything -- a
     # non-zero exit (e.g. semgrep not installed: "No module named semgrep")
-    # means the scan itself failed, not that the code is clean. print(...,
-    # flush=True) throughout this function because otherwise these
-    # diagnostics can silently sit in Python's stdout buffer and never
-    # reach `docker logs` for a long-running process -- found by actually
-    # hitting a real failure and watching the error not show up anywhere.
+    # means the scan itself failed, not that the code is clean. These
+    # diagnostics go to stderr, not stdout: the CLI's `--json` contract
+    # (docs/CLI.md) is that stdout stays valid, parseable JSON even when a
+    # scanner fails, and a stdout print here would corrupt it. flush=True
+    # throughout because otherwise these lines can silently sit in Python's
+    # buffer and never reach `docker logs` for a long-running process --
+    # found by actually hitting a real failure and watching the error not
+    # show up anywhere.
     if completed.returncode != 0:
         print(
             f"Error running code analysis (exit {completed.returncode}): "
             f"{completed.stderr.strip()}",
+            file=sys.stderr,
             flush=True,
         )
         return pd.DataFrame(results)
@@ -114,6 +123,7 @@ def scan_source_for_crypto_usage(path: str) -> pd.DataFrame:
     except json.JSONDecodeError:
         print(
             f"Error running code analysis: could not parse semgrep output: {completed.stderr}",
+            file=sys.stderr,
             flush=True,
         )
         return pd.DataFrame(results)

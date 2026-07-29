@@ -86,3 +86,9 @@ Recursive scans do not follow symbolic links by default. Use
   supported crypto asset.
 - The scanner reports observed local evidence only. It does not calculate risk
   scores, quantum exposure, or executive priority.
+
+The full detection boundary — unsupported keystores and containers, the
+candidate-file gate, false-positive and false-negative conditions, what each
+confidence level means, and why an empty inventory is not proof that no
+cryptographic assets exist — is characterized in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md).

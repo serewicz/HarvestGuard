@@ -310,7 +310,9 @@ only; detailed implementation issues have not been written yet.
   operator reading a report can correctly interpret confidence and coverage
   rather than mistaking a heuristic for proof. Detailed acceptance criteria
   are defined in the GitHub issue when it is written.
-- **GitHub issue:** TBD
+- **Delivered by:** [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md),
+  validated by `tests/test_detection_characterization.py`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/54
 
 ### HG-010
 

@@ -29,7 +29,14 @@ _COLLECTION_METHOD = "stat + leading-byte signature scan with volume-level fallb
 # on an otherwise unencrypted volume (and vice versa).
 _FILE_SIGNATURES = [
     (b"Salted__", "File-level (OpenSSL)"),
-    (b"-----BEGIN PGP", "File-level (PGP/GPG)"),
+    # Only the MESSAGE armor, not a bare "-----BEGIN PGP" prefix: a PGP
+    # SIGNATURE, SIGNED MESSAGE, PUBLIC KEY BLOCK, or PRIVATE KEY BLOCK is
+    # not encrypted data, and reporting a fully readable signed cleartext
+    # file as "File-level (PGP/GPG)" with High confidence claimed protection
+    # that isn't there. See docs/DETECTION_CHARACTERIZATION.md -- MESSAGE
+    # armor is also used for signed-only/compressed-only messages, so a
+    # narrower residual false positive remains and is documented there.
+    (b"-----BEGIN PGP MESSAGE", "File-level (PGP/GPG)"),
     (b"\x85\x01", "File-level (PGP/GPG)"),
     (b"\x85\x02", "File-level (PGP/GPG)"),
     (b"age-encryption.org/v1", "File-level (age)"),

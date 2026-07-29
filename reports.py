@@ -250,6 +250,13 @@ def format_markdown_report(
         "- Encrypted key containers may not expose algorithm or key-size metadata without "
         "a passphrase.",
         "- JKS support is limited to header evidence in the current scanner.",
+        # Even a report showing "No limits recorded" describes a bounded
+        # detection surface, so the absence caveat is unconditional rather
+        # than tied to the coverage row.
+        "- Every scanner has a deliberately narrow detection surface, so absence of a "
+        "finding is not proof of absence. Each scanner's supported evidence, known "
+        "blind spots, and confidence semantics are documented in "
+        "`docs/DETECTION_CHARACTERIZATION.md`.",
         "",
         "## Appendix",
         "",

@@ -45,6 +45,12 @@ HarvestGuard does not:
 - replace security assessments, legal review, architecture review, diligence
   professionals, or executive judgment.
 
+Each scanner's detection surface is also deliberately narrow, and none of them
+is exhaustive. **Absence of a finding is not proof of absence.** What every
+scanner supports, what it can miss, its likely false positives and false
+negatives, and how to read its `confidence` value are documented per scanner in
+[docs/DETECTION_CHARACTERIZATION.md](docs/DETECTION_CHARACTERIZATION.md).
+
 See [docs/PRODUCT_PRINCIPLES.md](docs/PRODUCT_PRINCIPLES.md) for the canonical
 evidence, confidence, ownership-signal, and recommendation boundaries.
 
