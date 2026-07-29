@@ -282,7 +282,10 @@ only; detailed implementation issues have not been written yet.
   the public CLI over the demo fixture, a representative non-demo target
   built at runtime, and S3/GCS/Azure scans faked at the provider SDK
   boundary only, across successful, limited, partial, and failed scans in
-  summary, JSON, and Markdown output. Validation also fixed the documented
+  summary, JSON, and Markdown output. The fresh-install path is validated by
+  really installing the repository (both `pip install .` and `pip install -e .`)
+  into a throwaway virtual environment and running the installed `harvestguard`
+  console script from outside the checkout. Validation also fixed the documented
   `pip install -e .` path, which the flat repository layout broke, and
   documented how to read complete/limited/partial/failed coverage from an
   artifact (`docs/CLI.md`, "Reading coverage from an artifact"). Per-scanner

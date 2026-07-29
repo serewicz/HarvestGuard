@@ -269,8 +269,11 @@ for seeing real output.
 
 Everything below is exercised automatically by
 `tests/test_end_to_end_validation.py` (roadmap HG-008), which runs the same
-documented commands: the demo fixture, a representative non-demo target built
-at runtime, and S3/GCS/Azure scans faked at the provider SDK boundary only. Run
+documented commands: a real `pip install .` and `pip install -e .` of this
+repository into a throwaway virtual environment whose installed `harvestguard`
+console script is then invoked from outside the checkout, the demo fixture, a
+representative non-demo target built at runtime, and S3/GCS/Azure scans faked at
+the provider SDK boundary only. Run
 `pytest -v tests/test_end_to_end_validation.py` to check an environment, or walk
 the steps yourself:
 

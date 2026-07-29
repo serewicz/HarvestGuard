@@ -1,10 +1,11 @@
 """End-to-end validation of the documented HarvestGuard CLI paths (HG-008).
 
 These tests validate already-supported capabilities rather than adding scanner
-breadth. They exercise the public CLI entry point -- either as a subprocess
-(`python -m harvestguard ...`, exactly as docs/CLI.md documents it) or through
-`harvestguard.main([...])` -- so a passing run is evidence that a fresh user
-following the documentation gets the documented artifacts.
+breadth. They exercise the public CLI entry point -- as the `harvestguard`
+console script from a real install into a throwaway virtual environment, as a
+subprocess (`python -m harvestguard ...`, the documented no-install path), or
+through `harvestguard.main([...])` -- so a passing run is evidence that a fresh
+user following the documentation gets the documented artifacts.
 
 Two rules shape what is mocked here:
 
@@ -26,6 +27,7 @@ statement (partial or failed).
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -72,6 +74,70 @@ def _run_documented_cli(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "harvestguard", *args],
         cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=False,
+    )
+
+
+def _venv_bin(venv_dir: Path, name: str) -> Path:
+    """Path to an executable inside a virtual environment, per platform."""
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / f"{name}.exe"
+    return venv_dir / "bin" / name
+
+
+@pytest.fixture(scope="module", params=["standard", "editable"])
+def installed_cli(request, tmp_path_factory) -> Path:
+    """HarvestGuard really installed into a throwaway virtual environment.
+
+    Covers both install forms docs/CLI.md documents: `pip install .` and
+    `pip install -e .`. The environment is created fresh per parameter and the
+    install runs through pip's real PEP 517 path, so a flat-layout discovery
+    failure, a missing top-level module, a broken console-script entry point, or
+    Semgrep rules that fail to ship as package data all surface here.
+
+    Two deliberate narrowings. The venv is created with
+    `--system-site-packages` and the install passes `--no-deps`: what needs
+    validating is HarvestGuard's own packaging, not pip's ability to re-download
+    streamlit/semgrep/boto3 -- the documented `pip install -r requirements.txt`
+    step covers those, and installing them per test run would add minutes and a
+    hard network dependency. Build isolation is skipped when setuptools is
+    already importable, purely to avoid a network round trip.
+    """
+    venv_dir = tmp_path_factory.mktemp(f"install-{request.param}") / "venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
+    )
+
+    install = [str(_venv_bin(venv_dir, "python")), "-m", "pip", "install", "--no-deps"]
+    if importlib.util.find_spec("setuptools") is not None:
+        install.append("--no-build-isolation")
+    if request.param == "editable":
+        install.append("--editable")
+    completed = subprocess.run(
+        [*install, str(REPO_ROOT)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    assert completed.returncode == 0, (completed.stdout + completed.stderr)[-3000:]
+    return venv_dir
+
+
+def _run_installed_cli(
+    venv_dir: Path, cwd: Path, *args: str
+) -> subprocess.CompletedProcess[str]:
+    """Run the installed `harvestguard` console script from outside the repo."""
+    return subprocess.run(
+        [str(_venv_bin(venv_dir, "harvestguard")), *args],
+        cwd=cwd,
         capture_output=True,
         text=True,
         timeout=300,
@@ -194,22 +260,23 @@ def test_pyproject_declares_the_documented_installable_cli():
     assert callable(harvestguard.main)
 
 
-def test_editable_install_metadata_exposes_the_documented_console_script(tmp_path):
-    # Runs the real PEP 517 editable-metadata hook, which is exactly where flat
-    # layout discovery failures surface. Skipped where setuptools is not
-    # importable (a bare venv); `pip install -e .` provisions it via build
-    # isolation, so the documented path itself does not depend on this.
-    pytest.importorskip("setuptools", reason="setuptools not importable in this environment")
+def test_fresh_install_exposes_the_documented_console_script(installed_cli, tmp_path):
+    # The install itself is the fixture's assertion; this checks what a fresh
+    # user gets afterward: a `harvestguard` executable on the environment's PATH,
+    # and every module the CLI imports resolvable from *outside* the checkout
+    # (run from tmp_path, so nothing can be satisfied by the repository cwd).
+    assert _venv_bin(installed_cli, "harvestguard").exists()
 
     completed = subprocess.run(
         [
-            sys.executable,
+            str(_venv_bin(installed_cli, "python")),
             "-c",
-            "import sys, setuptools.build_meta as backend\n"
-            "print(backend.prepare_metadata_for_build_editable(sys.argv[1]))\n",
-            str(tmp_path),
+            "import harvestguard, findings, finding_adapters, reports\n"
+            "import scanner.filesystem, scanner.cloud, scanner.gcs, scanner.azure_blob\n"
+            "import analyzer.risk, classifier.scanner, code_analysis.scanner\n"
+            "print(harvestguard.main.__name__)\n",
         ],
-        cwd=REPO_ROOT,
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         timeout=300,
@@ -217,9 +284,64 @@ def test_editable_install_metadata_exposes_the_documented_console_script(tmp_pat
     )
 
     assert completed.returncode == 0, completed.stderr[-2000:]
-    dist_info = tmp_path / completed.stdout.strip().splitlines()[-1]
-    entry_points = (dist_info / "entry_points.txt").read_text(encoding="utf-8")
-    assert "harvestguard = harvestguard:main" in entry_points
+    assert completed.stdout.strip() == "main"
+
+
+def test_installed_console_script_produces_the_documented_demo_artifacts(
+    installed_cli, tmp_path
+):
+    # docs/CLI.md's install path, end to end: the console script (not `python -m`
+    # from a checkout), invoked from a directory outside the repository, must
+    # produce the documented summary, JSON, and Markdown artifacts.
+    summary = _run_installed_cli(
+        installed_cli, tmp_path, "scan", str(DEMO_TARGET), "--type", "all", "--summary"
+    )
+
+    assert summary.returncode == 0, summary.stderr[-2000:]
+    for documented_line in [
+        "HarvestGuard Scan Complete",
+        "Files scanned: 1",
+        "Private Keys: 1",
+        "Sensitive Files: 1",
+        "Semgrep Findings: 0",
+        "Malformed Assets: 1",
+        "Errors: 1",
+        "Total Findings: 3",
+    ]:
+        assert documented_line in summary.stdout
+
+    json_run = _run_installed_cli(
+        installed_cli, tmp_path, "scan", str(DEMO_TARGET), "--type", "all", "--json", "--quiet"
+    )
+    assert json_run.returncode == 0, json_run.stderr[-2000:]
+    payload = json.loads(json_run.stdout)
+    assert isinstance(payload, list) and len(payload) == 3
+    assert {record["source_type"] for record in payload} == {
+        "local_filesystem",
+        "crypto_inventory",
+        "local_sensitive_data",
+    }
+
+    markdown_run = _run_installed_cli(
+        installed_cli,
+        tmp_path,
+        "scan",
+        str(DEMO_TARGET),
+        "--type",
+        "all",
+        "--markdown",
+        "--quiet",
+    )
+    assert markdown_run.returncode == 0, markdown_run.stderr[-2000:]
+    for section in DOCUMENTED_MARKDOWN_SECTIONS:
+        assert section in markdown_run.stdout
+    # The vendored Semgrep rules shipped with the install, so the code-analysis
+    # scanner ran rather than erroring out on a missing rule file.
+    assert "| semgrep_crypto_rules | 0.1.0 |" in markdown_run.stdout
+    assert "- Scanner error:" not in markdown_run.stdout
+
+    for stream in (summary.stdout, summary.stderr, json_run.stdout, markdown_run.stdout):
+        assert "FAKE-DEMO-PASSWORD-VALUE-0000000000" not in stream
 
 
 # --- Demo target through the CLI -------------------------------------------
@@ -588,6 +710,48 @@ def test_azure_partial_failure_keeps_findings_in_json_and_markdown(capsys, monke
     assert "Error scanning Azure Blob" in json_captured.err
     assert "- Scanner error: azure blob: Error scanning Azure Blob" in report
     assert "| Coverage | Not complete |" in report
+
+
+def test_s3_partial_failure_keeps_findings_in_json_and_markdown(capsys, monkeypatch):
+    def client_factory(*args, **kwargs):
+        # A fresh client per CLI invocation, so the paging side effects below are
+        # replayed for the JSON run and the Markdown run alike: first page lists
+        # an object and reports more to come, then the credential expires.
+        client = MagicMock()
+        client.list_objects_v2.side_effect = [
+            {
+                "Contents": [{"Key": "page-one.txt", "Size": 10, "LastModified": "2026-01-01"}],
+                "IsTruncated": True,
+                "NextContinuationToken": "token-1",
+            },
+            ClientError({"Error": {"Code": "ExpiredToken"}}, "ListObjectsV2"),
+        ]
+        client.head_object.return_value = {"ServerSideEncryption": "AES256"}
+        return client
+
+    monkeypatch.setattr("scanner.cloud.boto3.client", client_factory)
+
+    json_exit = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--json"])
+    json_captured = capsys.readouterr()
+    payload = json.loads(json_captured.out)  # must parse: no error text in stdout
+
+    markdown_exit = harvestguard.main(["scan", "my-bucket", "--type", "s3", "--markdown"])
+    markdown_captured = capsys.readouterr()
+    report = markdown_captured.out
+
+    assert json_exit == 1 and markdown_exit == 1
+    # The object listed before the failure survives in both artifacts...
+    assert [record["location"] for record in payload] == ["s3://my-bucket/page-one.txt"]
+    assert payload[0]["technical_metadata"]["Encryption"] == "AES256"
+    assert "s3://my-bucket/page-one.txt" in report
+    # ...and the failure stays visible: stderr and exit code for JSON, the Errors
+    # and Warnings section plus the coverage statement for Markdown.
+    assert "Error scanning S3" in json_captured.err
+    assert "ExpiredToken" in json_captured.err
+    assert "- Scanner error: s3: Error scanning S3" in report
+    assert "Coverage was not complete" in report
+    assert "| Coverage | Not complete |" in report
+    assert "No scanner errors, finding-level errors, or limitations were reported." not in report
 
 
 def test_s3_partial_failure_summary_reports_the_warning_and_incomplete_coverage(
