@@ -171,7 +171,10 @@ and migration-difficulty models exist.
 - `classifier/` identifies sensitive-data categories and returns category
   counts, not matched values.
 - `code_analysis/` uses Semgrep with a vendored crypto rule set for local code
-  crypto analysis.
+  crypto analysis of source text; its rules currently target Python source
+  only, and an execution failure there returns an empty result on stderr rather
+  than propagating through the `scanner_errors` path the cloud adapters use
+  (see [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md)).
 - `scanner/crypto_inventory.py` parses local certificate and key assets into
   evidence-first inventory findings.
 - `findings.py` defines the versioned normalized finding model.
@@ -184,5 +187,7 @@ and migration-difficulty models exist.
 - `analyzer/risk.py` contains a simple heuristic risk score.
 - `main.py` wires current scan types into Streamlit.
 - `tests/` covers local scanning, classifier behavior, code analysis, risk
-  scoring, GCS, and Azure Blob behavior. S3 scanner coverage remains an open
-  improvement.
+  scoring, crypto inventory, the normalized model and adapters, the CLI,
+  reports, scanner-error handling, and all three cloud scanners (S3 included,
+  in `tests/test_cloud.py`), plus the HG-008 end-to-end install/run/report
+  validation and the HG-009 detection-characterization regression coverage.

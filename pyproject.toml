@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "harvestguard"
 version = "0.1.0"
-description = "Open-source cryptographic inventory and quantum risk scanner for enterprise resilience."
+description = "Open-source cryptographic asset inventory and evidence-collection tool for technology due diligence."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 authors = [{ name = "Timothy Serewicz" }]

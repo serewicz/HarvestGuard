@@ -287,6 +287,14 @@ to flag known weak/legacy cryptographic API usage (e.g. MD5 hashing, DES/ECB
 cipher construction, undersized RSA key generation) with a line-level
 location and the matched rule.
 
+**Every rule in the current set declares `languages: [python]`**, so only
+Python source is matched. Verified directly: a directory containing
+`hashlib.md5` in a `.py` file, `crypto.createHash("md5")` in a `.js` file, and
+`MessageDigest.getInstance("MD5")` in a `.java` file produces exactly one
+finding — the Python one. A polyglot or non-Python repository can therefore
+return an empty code-analysis result while containing the same weak-crypto
+usage the rules describe.
+
 ### Confidence semantics
 
 Every code-analysis finding carries a fixed `confidence` of `High`. A Semgrep
@@ -305,6 +313,11 @@ matched usage is necessarily exploitable in context.
 - **Rule-set coverage is intentionally narrow.** Only the specific
   library/API patterns in `crypto.yaml` are matched. A weak-crypto call using
   a library or idiom not covered by an existing rule produces no finding.
+- **Non-Python source is not matched at all.** See "What it supports" above:
+  the rules are Python-only, so a Go, Java, JavaScript, C, or C# codebase
+  yields no code-analysis findings regardless of what crypto it uses. Broader
+  language coverage is future scan-surface work (see
+  [ROADMAP.md](ROADMAP.md)), not a current capability.
 - **Modern/strong crypto usage produces no finding**, by design — this is a
   targeted weak-usage scanner, not a full inventory of all cryptographic
   calls in the source tree.

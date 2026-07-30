@@ -18,7 +18,10 @@ manually when the maintainer is ready.
 
 ## Recommended Fields
 
-- **Milestone:** `M1 MVP`, `M2 MVP+`, `M3 Operational`, `M4 Decision Support`
+- **Milestone:** use the milestone names in [ROADMAP.md](ROADMAP.md) —
+  `M1 MVP: Trustworthy Scanner`, `M2 v0.1: Controlled Diligence Pilot`,
+  `M3 MVP+: Visual and Operational Experience`, `M4 Operational Edition`,
+  `M5 Decision-Support Edition`
 - **Priority:** `P0`, `P1`, `P2`, `P3`
 - **Owner:** GitHub assignee or named maintainer/contributor
 - **Work Type:** `scanner`, `schema`, `cli`, `reporting`, `dashboard`,

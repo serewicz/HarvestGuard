@@ -22,7 +22,12 @@ CODE_ANALYSIS_SCAN = "Local Filesystem — Crypto Code Analysis (Semgrep)"
 
 st.set_page_config(page_title="HarvestGuard", layout="wide")
 st.title("🌾 HarvestGuard")
-st.markdown("**Open-source cryptographic inventory and quantum risk scanner**")
+st.markdown(
+    "**Open-source cryptographic asset inventory and evidence collection.** "
+    "Scan results are observed evidence; Risk Score and HNDL Exposure are "
+    "inferred heuristics marked Needs Validation, not measured facts or a "
+    "quantum-readiness conclusion."
+)
 
 st.sidebar.header("Scan Configuration")
 scan_type = st.sidebar.selectbox(
@@ -73,4 +78,9 @@ if st.sidebar.button("Run Scan", type="primary"):
         else:
             st.warning("No items found or permission issue.")
 
-st.info("Sprint 3 Complete - Risk analysis + visualizations added.")
+st.info(
+    "HarvestGuard is pre-1.0. Every scanner has a deliberately narrow detection "
+    "surface, so absence of a finding is not proof of absence — see "
+    "docs/DETECTION_CHARACTERIZATION.md for what each scanner supports and can "
+    "miss, and docs/CLAIMS_AUDIT.md for how each product claim is classified."
+)

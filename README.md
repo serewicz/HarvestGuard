@@ -52,12 +52,15 @@ negatives, and how to read its `confidence` value are documented per scanner in
 [docs/DETECTION_CHARACTERIZATION.md](docs/DETECTION_CHARACTERIZATION.md).
 
 See [docs/PRODUCT_PRINCIPLES.md](docs/PRODUCT_PRINCIPLES.md) for the canonical
-evidence, confidence, ownership-signal, and recommendation boundaries.
+evidence, confidence, ownership-signal, and recommendation boundaries, and
+[docs/CLAIMS_AUDIT.md](docs/CLAIMS_AUDIT.md) for how each claim below is
+classified — implemented and tested, implemented with known limitations,
+experimental / Needs Validation, planned, or out of scope.
 
 ## Target Users & Use Cases
 
 - **M&A, IP Lawyers, PE/VC Firms**  
-  Quickly scan target company storage/cloud for encryption status, unencrypted sensitive data (IP, customer PII), and HNDL exposure. Many targets have poor inventory—this tool surfaces evidence early.
+  Quickly scan target company storage/cloud for encryption status and sensitive-data categories (IP, customer PII), plus an inferred HNDL exposure bucket the dashboard marks as a heuristic needing validation. Many targets have poor inventory—this tool surfaces evidence early.
 
 - **Deal Speed & Planning Evidence**  
   Pre-LOI or during DD, collect cryptographic evidence that can inform integration planning, modernization discussions, and follow-up advisory review.
@@ -81,11 +84,16 @@ evidence and must remain traceable back to it.
 - **Local filesystem** — real encryption detection: file-signature checks for
   common encrypted formats (OpenSSL, PGP/GPG, age, LUKS containers, encrypted
   ZIP), falling back to volume-level status (FileVault / LUKS / BitLocker)
-  when a file isn't itself a recognized encrypted format.
+  when a file isn't itself a recognized encrypted format. Local scans are
+  bounded by `--max-depth`, which defaults to `3` — an ordinary scan is not
+  unlimited recursion.
 - **AWS S3, Google Cloud Storage, Azure Blob Storage** — per-object/blob
-  encryption status via each provider's API (S3 `ServerSideEncryption`, GCS
-  CMEK vs. Google-managed, Azure customer-managed encryption scope vs.
-  Microsoft-managed).
+  encryption status as *reported by* each provider's API (S3
+  `ServerSideEncryption`, GCS CMEK vs. Google-managed, Azure customer-managed
+  encryption scope vs. Microsoft-managed). This is provider metadata, not
+  independent proof of the underlying cryptographic implementation.
+  Credentials come from each provider SDK's own default resolution;
+  HarvestGuard never manages, prompts for, or stores them.
 - **Sensitive-data classifier** — flags files containing email addresses,
   SSNs, phone numbers, Luhn-validated payment card numbers, and
   credentials/secrets (AWS keys, private keys, GitHub/Slack tokens). Reports
@@ -94,12 +102,17 @@ evidence and must remain traceable back to it.
 - **Crypto code analysis** — flags weak/legacy crypto library usage in
   source (MD5/SHA1, DES/3DES/RC4, ECB mode, sub-2048-bit RSA keys) via a
   small vendored Semgrep rule set, not Semgrep's hosted registry — local
-  scans stay network-free.
+  scans stay network-free. **Source text only, and the current rules target
+  Python source only**: no binary, bytecode, runtime, or network/TLS
+  discovery, and equivalent weak-crypto usage in another language produces no
+  finding today.
 - **Cryptographic asset inventory** — discovers local certificate and key
   material (PEM/DER X.509 certificates, PEM and OpenSSH keys, PKCS#12
-  containers, and JKS header evidence) with algorithm, key size, issuer,
-  subject, expiration, fingerprint, confidence, and parsing errors. See
-  [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
+  containers, and JKS *header* evidence only) with algorithm, key size,
+  issuer, subject, expiration, fingerprint, confidence, and parsing errors.
+  Only files matching a candidate gate (recognized extension or crypto
+  header) are parsed, and broader keystore/crypto-container coverage is not
+  implemented. See [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Unified CLI** — runs local scanners through the normalized finding model
   with summary, JSON, and Markdown report output. `--json` emits an array of
   normalized findings; `--markdown` emits a local, evidence-only report
@@ -109,9 +122,17 @@ evidence and must remain traceable back to it.
   conclusion. Reports can contain sensitive identifiers (paths, object and
   bucket names, ownership signals), so handle the generated files
   accordingly. See [docs/CLI.md](docs/CLI.md).
-- **Quantum risk scoring** — heuristic HNDL (Harvest-Now-Decrypt-Later)
-  exposure scoring (High/Medium/Low) layered on top of encryption status.
-- **Streamlit dashboard** — pie/bar charts and a results table per scan.
+- **HNDL exposure scoring** *(experimental — Needs Validation)* — a heuristic
+  Harvest-Now-Decrypt-Later exposure bucket (High/Medium/Low) and 0–100 risk
+  score inferred from encryption status and path signals. An inference and an
+  ordering aid, not a measured fact, a probability, or a quantum-readiness
+  verdict. It appears in the Streamlit dashboard only — never in CLI JSON or
+  Markdown reports — and is labeled there as inferred and unvalidated. See
+  [docs/TERMINOLOGY.md](docs/TERMINOLOGY.md).
+- **Streamlit dashboard** — pie/bar charts and a results table per scan. Run
+  with `streamlit run main.py` from the repository root: the dashboard is a
+  separate operating path and is deliberately **not** part of the installed
+  `harvestguard` CLI package.
 
 Not yet built: CBOM/PDF export and network-level crypto scanning
 (TLS/cipher-suite detection). See

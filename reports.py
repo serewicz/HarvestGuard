@@ -257,6 +257,25 @@ def format_markdown_report(
         "finding is not proof of absence. Each scanner's supported evidence, known "
         "blind spots, and confidence semantics are documented in "
         "`docs/DETECTION_CHARACTERIZATION.md`.",
+    ])
+    if "code analysis" in context.scanners:
+        # Unlike the bullets above, this one names a specific scanner and its
+        # execution-failure behavior, so it only belongs on a report that
+        # actually ran that scanner -- a filesystem-only or cloud-only report
+        # must not carry a caveat about a scanner it never invoked (see
+        # test_markdown_scope_lists_only_the_scanners_that_ran and its CLI
+        # counterparts, which assert exactly that). A code-analysis
+        # environment failure returns no rows and is not recorded as a
+        # scanner error (unlike a cloud failure), so a report cannot show it
+        # any other way; this is the only place a reader of the artifact
+        # alone can learn that an empty code-analysis result is ambiguous.
+        lines.append(
+            "- Source-code analysis matches Python source text only, and an execution "
+            "failure (analyzer unavailable, timed out, or unreadable output) yields no "
+            "findings without appearing above; its diagnostic goes only to the scan's "
+            "standard error stream."
+        )
+    lines.extend([
         "",
         "## Appendix",
         "",
