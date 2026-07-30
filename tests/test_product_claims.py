@@ -30,6 +30,19 @@ TERMINOLOGY = (ROOT / "docs" / "TERMINOLOGY.md").read_text()
 DETECTION_CHARACTERIZATION = (ROOT / "docs" / "DETECTION_CHARACTERIZATION.md").read_text()
 EXECUTIVE_DELIVERABLES = (ROOT / "docs" / "EXECUTIVE_DELIVERABLES.md").read_text()
 ASSET_INVENTORY = (ROOT / "docs" / "ASSET_INVENTORY.md").read_text()
+CLAIMS_AUDIT = (ROOT / "docs" / "CLAIMS_AUDIT.md").read_text()
+
+# The exact five categories Issue #55 requires every material claim to be
+# classified under -- no other value (e.g. "Corrected", or a canonical value
+# with a trailing qualifier like "Planned (reporting target)") is allowed in
+# a CLAIMS_AUDIT.md inventory row.
+CANONICAL_CLAIM_CLASSIFICATIONS = {
+    "Implemented and tested",
+    "Implemented with known limitations",
+    "Experimental / Needs Validation",
+    "Planned",
+    "Explicitly out of scope",
+}
 
 
 # --- Product identity: no longer a bare "quantum risk scanner" claim ------
@@ -282,3 +295,48 @@ def test_roadmap_hg_010_is_not_prematurely_marked_complete():
     # HG-010 closes only after merge and an independent closure review --
     # finishing this recovery is not, by itself, grounds to mark it Complete.
     assert _roadmap_entry_status("HG-010") != "Complete"
+
+
+# --- Claims-inventory taxonomy discipline -----------------------------------
+
+
+def _claims_audit_inventory_rows() -> list[tuple[str, str]]:
+    """Every (claim, classification) pair from a CLAIMS_AUDIT.md table row.
+
+    Skips markdown table header/separator rows and any table whose header
+    isn't the "| Claim | Classification | ... |" inventory shape (e.g. the
+    document's own intro table of classification definitions).
+    """
+    rows: list[tuple[str, str]] = []
+    for line in CLAIMS_AUDIT.splitlines():
+        if not line.startswith("| ") or line.startswith("| ---") or line.startswith("| Claim"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if len(cells) < 3:
+            continue
+        rows.append((cells[0], cells[1]))
+    return rows
+
+
+def test_claims_audit_inventory_rows_exist():
+    # Guards against the extraction logic itself silently matching nothing
+    # (e.g. after a heading/table-shape change) and the row-classification
+    # test below passing vacuously.
+    assert len(_claims_audit_inventory_rows()) >= 30
+
+
+def test_claims_audit_every_row_uses_an_exact_canonical_classification():
+    # Issue #55 requires exactly one of five categories per material claim --
+    # not "Corrected", not a canonical value with a parenthetical qualifier
+    # or a trailing ", dashboard-only" appended after a comma. Any such
+    # nuance belongs in the claim, evidence, or resulting-boundary text, not
+    # the classification cell itself.
+    offenders = [
+        (claim, classification)
+        for claim, classification in _claims_audit_inventory_rows()
+        if classification not in CANONICAL_CLAIM_CLASSIFICATIONS
+    ]
+    assert offenders == [], (
+        "docs/CLAIMS_AUDIT.md has inventory rows with a noncanonical "
+        f"classification: {offenders}"
+    )

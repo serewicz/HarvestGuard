@@ -32,7 +32,7 @@ scope instead.
 | --- | --- | --- |
 | Cryptographic asset inventory tool | Implemented and tested | `scanner/crypto_inventory.py`, `scanner/filesystem.py`, cloud scanners; [ASSET_INVENTORY.md](ASSET_INVENTORY.md) |
 | Evidence-collection tool for technology diligence | Implemented and tested | `NormalizedFinding` schema, evidence-only CLI reports (`reports.py`) |
-| "Quantum risk scanner" (old README/dashboard/`pyproject.toml` framing) | Corrected | No quantum-readiness determination is implemented anywhere in the codebase — confirmed by grep across `harvestguard.py`, `reports.py`, `finding_adapters.py`, `findings.py`. Reworded to "cryptographic asset inventory and evidence-collection tool" in README, `main.py`'s dashboard tagline, and `pyproject.toml`'s package description. |
+| "Quantum risk scanner" (old README/dashboard/`pyproject.toml` framing) | Implemented and tested | No quantum-readiness determination is implemented anywhere in the codebase — confirmed by grep across `harvestguard.py`, `reports.py`, `finding_adapters.py`, `findings.py`. Corrected: reworded to "cryptographic asset inventory and evidence-collection tool" in README, `main.py`'s dashboard tagline, and `pyproject.toml`'s package description, matching the two rows above. |
 | Quantum-readiness determination | Explicitly out of scope | [PRODUCT_PRINCIPLES.md](PRODUCT_PRINCIPLES.md) already states HarvestGuard "should not... determine whether an organization is quantum-ready"; unchanged, already accurate |
 | HNDL (Harvest Now, Decrypt Later) exposure framing | Experimental / Needs Validation | Heuristic High/Medium/Low bucket from `analyzer/risk.py`, dashboard-only (see "Evidence and inference boundary" below); [TERMINOLOGY.md](TERMINOLOGY.md) already marks it `Needs Validation` |
 
@@ -58,8 +58,8 @@ scope instead.
 | Default local scan depth | Implemented and tested | `DEFAULT_MAX_DEPTH = 3` in `harvestguard.py`; a scan with no explicit `--max-depth` is bounded configured scope, not unlimited recursion. README and `docs/CLI.md` now state this explicitly. |
 | `Coverage: No limits recorded` | Implemented with known limitations | Means no traversal/scope limitation was recorded — it does not mean every asset was successfully inspected, and finding-level `errors` can still be present; carried forward from HG-008, already documented in `docs/CLI.md` |
 | "Scan succeeded" / "no findings" | Implemented with known limitations | Absence of a finding is never proof of absence; this is the load-bearing caveat threaded through [SCAN_COVERAGE.md](SCAN_COVERAGE.md), [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md), and now `reports.py`'s Known Limitations section |
-| Dashboard empty-result messages ("No sensitive data patterns detected...", "No weak/legacy crypto library usage detected.") | Corrected | Prior wording (`st.success`) read as a positive, definitive absence claim. Changed to `st.info` + a `st.caption` distinguishing "no match in the inspected scope" from "condition absent," matching the detection boundaries above, without turning the dashboard into documentation prose (one line of caveat, not a re-statement of the full characterization doc) |
-| "Comprehensive" / "complete" inventory or discovery | Explicitly out of scope (as a claim) | No such language exists in reviewed docs; confirmed by grep across README, CLI.md, ROADMAP.md, TERMINOLOGY.md, PRODUCT_PRINCIPLES.md, ARCHITECTURE.md, ASSET_INVENTORY.md, NORMALIZED_FINDINGS.md, SCAN_COVERAGE.md, DETECTION_CHARACTERIZATION.md, EXECUTIVE_DELIVERABLES.md — nothing to correct |
+| Dashboard empty-result messages ("No sensitive data patterns detected...", "No weak/legacy crypto library usage detected.") | Implemented with known limitations | Prior wording (`st.success`) read as a positive, definitive absence claim. Corrected to `st.info` + a `st.caption` distinguishing "no match in the inspected scope" from "condition absent," matching the detection boundaries above, without turning the dashboard into documentation prose (one line of caveat, not a re-statement of the full characterization doc) |
+| "Comprehensive" / "complete" inventory or discovery | Explicitly out of scope | No such language exists in reviewed docs; confirmed by grep across README, CLI.md, ROADMAP.md, TERMINOLOGY.md, PRODUCT_PRINCIPLES.md, ARCHITECTURE.md, ASSET_INVENTORY.md, NORMALIZED_FINDINGS.md, SCAN_COVERAGE.md, DETECTION_CHARACTERIZATION.md, EXECUTIVE_DELIVERABLES.md — nothing to correct |
 
 ## Quantum / PQC positioning
 
@@ -84,8 +84,8 @@ scope instead.
 
 | Claim | Classification | Evidence |
 | --- | --- | --- |
-| Risk Score | Experimental / Needs Validation, dashboard-only | Never appears in CLI JSON/Markdown output; [TERMINOLOGY.md](TERMINOLOGY.md) |
-| HNDL Exposure | Experimental / Needs Validation, dashboard-only | Same as above |
+| Risk Score | Experimental / Needs Validation | Dashboard-only; never appears in CLI JSON/Markdown output; [TERMINOLOGY.md](TERMINOLOGY.md) |
+| HNDL Exposure | Experimental / Needs Validation | Same as above |
 | Business impact conclusions | Explicitly out of scope | Not implemented anywhere; [PRODUCT_PRINCIPLES.md](PRODUCT_PRINCIPLES.md) |
 | Remediation recommendations | Explicitly out of scope | Not implemented; `reports.py`'s Known Limitations section states this directly |
 | Compliance conclusions | Explicitly out of scope | Not implemented |
@@ -96,16 +96,16 @@ scope instead.
 
 | Claim | Classification | Evidence |
 | --- | --- | --- |
-| Installed `harvestguard` CLI is a distinct operating path from the Streamlit dashboard | Corrected (made explicit) | README previously implied a single unified product surface. Now states the dashboard runs via `streamlit run main.py` from the repository root and is deliberately not part of the installed `harvestguard` CLI package. |
+| Installed `harvestguard` CLI is a distinct operating path from the Streamlit dashboard | Implemented and tested | README previously implied a single unified product surface. Corrected to state explicitly that the dashboard runs via `streamlit run main.py` from the repository root and is deliberately not part of the installed `harvestguard` CLI package. |
 | Detection logic is shared between the two paths | Implemented and tested | Both call the same `scanner.filesystem`, `classifier.scanner`, etc. functions |
 | Evidence provenance is *not* shared between the two paths | Implemented with known limitations | The dashboard's `scan_filesystem`/`scan_filesystem_for_sensitive_data` calls do not produce `NormalizedFinding` provenance fields (`confidence_rationale`, `unknowns`, `limitations`, `errors`) the way the CLI's evidence path does; documented in [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#coverage-and-errors-interacting-with-detection-limits) |
-| Dashboard local-scan depth | Implemented with known limitations (newly documented here) | `main.py` hardcodes `max_depth=2` for its local filesystem and sensitive-data scans, with no UI control to change it — distinct from the CLI's `--max-depth` default of `3`. No existing doc claimed a specific dashboard depth value, so this is recorded for completeness rather than as a correction to an overclaim. |
+| Dashboard local-scan depth | Implemented with known limitations | `main.py` hardcodes `max_depth=2` for its local filesystem and sensitive-data scans, with no UI control to change it — distinct from the CLI's `--max-depth` default of `3`. Newly documented here; no existing doc claimed a specific dashboard depth value, so this is recorded for completeness rather than as a correction to an overclaim. |
 
 ## Executive deliverables
 
 | Claim | Classification | Evidence |
 | --- | --- | --- |
-| Technology Due Diligence Evidence Package | Planned (reporting target, not shipped output) | `reports.py`'s actual Markdown sections are Executive Summary, Scan Information, Scanner Versions, Findings Summary, Finding Breakdown by Type, Errors and Warnings, Known Limitations, and Appendix — none branded as the "Evidence Package." [EXECUTIVE_DELIVERABLES.md](EXECUTIVE_DELIVERABLES.md) now states plainly what exists today (console summary, `--json`, `--markdown`) versus what every named deliverable, including the Evidence Package itself, still is: a reporting target derived from that evidence. |
+| Technology Due Diligence Evidence Package | Planned | A reporting target, not shipped output. `reports.py`'s actual Markdown sections are Executive Summary, Scan Information, Scanner Versions, Findings Summary, Finding Breakdown by Type, Errors and Warnings, Known Limitations, and Appendix — none branded as the "Evidence Package." [EXECUTIVE_DELIVERABLES.md](EXECUTIVE_DELIVERABLES.md) now states plainly what exists today (console summary, `--json`, `--markdown`) versus what every named deliverable, including the Evidence Package itself, still is: a reporting target derived from that evidence. |
 | Console summary / `--json` / `--markdown` evidence outputs | Implemented and tested | `reports.py`, `tests/test_reports.py` |
 | HTML executive report | Planned | Roadmap item HG-017 (Milestone 3); not implemented |
 
