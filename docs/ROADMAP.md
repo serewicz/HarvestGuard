@@ -353,19 +353,26 @@ only; detailed implementation issues have not been written yet.
 - **Title:** Versioned release and reproducibility
 - **Purpose:** Produce an identifiable, reproducible HarvestGuard release
   suitable for a controlled external pilot.
-- **Status:** Planned
+- **Status:** Needs Validation
 - **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
 - **Dependencies:** HG-008, HG-009, HG-010
-- **Acceptance criteria:** At roadmap level, this item anticipates: an
-  explicit HarvestGuard version identifier; a versioned release/tag; release
-  notes; a reproducible or clearly identified container artifact; SBOM,
-  signing, and provenance expectations where appropriate; documented
-  dependency and reproducibility expectations; an explicit pre-1.0
-  support/status statement; and a way for a generated evidence report to
-  identify exactly which HarvestGuard version produced it. This is a
-  roadmap-level placeholder — detailed implementation scope, acceptance
-  criteria, and tests are defined in the GitHub issue when it is written.
-- **GitHub issue:** TBD
+- **Acceptance criteria:** An explicit HarvestGuard version identifier; a
+  versioned release/tag; release notes; a reproducible or clearly identified
+  container artifact; SBOM, signing, and provenance expectations where
+  appropriate; documented dependency and reproducibility expectations; an
+  explicit pre-1.0 support/status statement; and a way for a generated
+  evidence report to identify exactly which HarvestGuard version produced it.
+  Satisfied as release-identity work only: `0.1.0` is declared in
+  `pyproject.toml` and `harvestguard_version.py`, `harvestguard --version`
+  reports it, and every Markdown report records it in *Scan Information*. JSON
+  output stays a bare finding array — no report envelope was added. SBOM,
+  container signing, dependency pinning, and provenance are documented at
+  their real status rather than claimed. Status stays `Needs Validation`
+  because the `v0.1.0` tag is deliberately not cut while HG-010 is open.
+- **Delivered by:** [RELEASE.md](RELEASE.md) and
+  [CHANGELOG.md](../CHANGELOG.md), validated by
+  `tests/test_release_identity.py`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/56
 
 ## Milestone 3: MVP+ - Visual and Operational Experience
 
