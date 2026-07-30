@@ -291,10 +291,11 @@ def test_roadmap_hg_009_is_complete():
     assert _roadmap_entry_status("HG-009") == "Complete"
 
 
-def test_roadmap_hg_010_is_not_prematurely_marked_complete():
-    # HG-010 closes only after merge and an independent closure review --
-    # finishing this recovery is not, by itself, grounds to mark it Complete.
-    assert _roadmap_entry_status("HG-010") != "Complete"
+def test_roadmap_hg_010_is_complete():
+    # HG-010 has since merged and passed its own independent closure review,
+    # so the roadmap correctly reads Complete now -- superseding the earlier
+    # guard here that required it stay Needs Validation until that happened.
+    assert _roadmap_entry_status("HG-010") == "Complete"
 
 
 # --- Claims-inventory taxonomy discipline -----------------------------------

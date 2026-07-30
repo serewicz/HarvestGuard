@@ -10,8 +10,10 @@ change between versions. The normalized finding schema is versioned separately
 
 ## 0.1.0 — Controlled Diligence Pilot (candidate, not yet tagged)
 
-v0.1.0 is prepared but **not tagged**: HG-010 (product claims and trust audit)
-is still `Needs Validation` pending its closure review. See
+v0.1.0 is prepared but **not tagged**: HG-008, HG-009, and HG-010 are
+`Complete`, and tagging is a human release decision made only after this
+release-identity work (HG-011) and its pull request receive independent
+closure review. See
 [release readiness](docs/RELEASE.md#release-readiness-gate).
 
 Release notes for controlled-pilot users.

@@ -165,14 +165,18 @@ share. The tag is not cut while a dependency is unresolved.
 | --- | --- | --- |
 | HG-008 End-to-end validation | Complete | [ROADMAP.md](ROADMAP.md), `tests/test_end_to_end_validation.py` |
 | HG-009 Confidence and detection characterization | Complete | [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md) |
-| HG-010 Product claims and trust audit | Needs Validation | [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md) — held pending independent closure review |
-| HG-011 Release identity and reproducibility | This document + [CHANGELOG.md](../CHANGELOG.md) | |
+| HG-010 Product claims and trust audit | Complete | [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md) |
+| HG-011 Release identity and reproducibility | Needs Validation | This document + [CHANGELOG.md](../CHANGELOG.md) — held pending independent closure review |
 
-**The `v0.1.0` tag has not been cut.** HG-010 remains `Needs Validation`
-pending its closure review, so v0.1 is a controlled-pilot *candidate*: the
-version identity, release notes, and reproducibility expectations are in place,
-and the release itself is published only once that review closes.
-`tests/test_release_identity.py` enforces this: while the roadmap shows HG-010
+**The `v0.1.0` tag has not been cut.** HG-008, HG-009, and HG-010 are all
+`Complete`. HG-011 (this release-identity work) remains `Needs Validation`
+because tagging is a human release decision made only after this
+implementation and its pull request receive independent closure review — not
+because any roadmap dependency is incomplete. v0.1 is therefore a
+controlled-pilot *candidate*: the version identity, release notes, and
+reproducibility expectations are in place, and the release itself is
+published only once that review closes.
+`tests/test_release_identity.py` enforces this: while the roadmap shows HG-011
 as anything other than `Complete`, the release documentation must continue to
 say the tag is not cut.
 

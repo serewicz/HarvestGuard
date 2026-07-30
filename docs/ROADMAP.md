@@ -330,7 +330,7 @@ only; detailed implementation issues have not been written yet.
   against behavior actually supported by implementation and tests. HG-008
   and HG-009 should complete first so this final claims and trust audit can
   draw on their validated end-to-end and detection-characterization results.
-- **Status:** Needs Validation
+- **Status:** Complete
 - **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
 - **Dependencies:** HG-001 through HG-009
 - **Acceptance criteria:** Every reviewed product claim is classified as one
@@ -368,7 +368,9 @@ only; detailed implementation issues have not been written yet.
   output stays a bare finding array — no report envelope was added. SBOM,
   container signing, dependency pinning, and provenance are documented at
   their real status rather than claimed. Status stays `Needs Validation`
-  because the `v0.1.0` tag is deliberately not cut while HG-010 is open.
+  because tagging `v0.1.0` is a human release decision made only after this
+  implementation and its pull request receive independent closure review —
+  not because any roadmap dependency remains incomplete.
 - **Delivered by:** [RELEASE.md](RELEASE.md) and
   [CHANGELOG.md](../CHANGELOG.md), validated by
   `tests/test_release_identity.py`.
