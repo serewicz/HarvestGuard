@@ -264,8 +264,8 @@ understand what was and was not inspected, interpret confidence and
 limitations correctly, generate a shareable evidence report, and identify
 exactly which HarvestGuard version produced it.
 
-HG-008 through HG-011 form this milestone. They are roadmap-level entries
-only; detailed implementation issues have not been written yet.
+HG-008 through HG-011 form this milestone, and all four are now `Complete` —
+Milestone 2 is fully delivered.
 
 ### HG-008
 
@@ -367,10 +367,12 @@ only; detailed implementation issues have not been written yet.
   reports it, and every Markdown report records it in *Scan Information*. JSON
   output stays a bare finding array — no report envelope was added. SBOM,
   container signing, dependency pinning, and provenance are documented at
-  their real status rather than claimed. Status stays `Needs Validation`
-  because tagging `v0.1.0` is a human release decision made only after this
-  implementation and its pull request receive independent closure review —
-  not because any roadmap dependency remains incomplete.
+  their real status rather than claimed. Status is `Complete`: this
+  implementation and its pull request have received independent closure
+  review and merged. The `v0.1.0` tag itself has not been created — creating
+  it is a separate, deliberate human release action performed after this
+  post-closure documentation reconciliation is reviewed and merged, not a
+  gate on any remaining roadmap or implementation work.
 - **Delivered by:** [RELEASE.md](RELEASE.md) and
   [CHANGELOG.md](../CHANGELOG.md), validated by
   `tests/test_release_identity.py`.

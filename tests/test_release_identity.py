@@ -188,39 +188,30 @@ def _roadmap_entry_status(hg_id: str) -> str:
     return match.group(1).strip()
 
 
-def test_hg_008_009_010_are_complete():
-    # These are closure-reviewed and merged; the roadmap must say so rather
-    # than continuing to gate release readiness on stale dependency status.
-    for hg_id in ("HG-008", "HG-009", "HG-010"):
+def test_hg_008_through_011_are_all_complete():
+    # HG-008/009/010 are closure-reviewed and merged, and HG-011 (this
+    # release-identity work) has since completed its own independent
+    # closure review and merged too. Milestone 2 is fully delivered.
+    for hg_id in ("HG-008", "HG-009", "HG-010", "HG-011"):
         assert _roadmap_entry_status(hg_id) == "Complete", (
             f"{hg_id} is closure-reviewed and merged; docs/ROADMAP.md should read Complete"
         )
 
 
-def test_hg_011_remains_needs_validation_during_this_pr():
-    # HG-011 (this release-identity work) closes only after its own PR
-    # receives independent closure review and merges -- not automatically
-    # once its dependencies (HG-008/009/010) read Complete.
-    assert _roadmap_entry_status("HG-011") == "Needs Validation"
-
-
-def test_release_is_not_claimed_while_hg_011_itself_is_open():
-    # The tag gate is HG-011's own status, not merely its dependencies: every
-    # one of HG-008/009/010 can be Complete while the tag is still correctly
-    # uncut, because tagging is a human decision made only once HG-011's own
-    # implementation and PR close. When HG-011 itself reads Complete, this
-    # test is the reminder that the release docs -- not just the roadmap --
-    # must be updated to record the cut release.
-    if _roadmap_entry_status("HG-011") != "Complete":
-        assert "has not been cut" in RELEASE, (
-            "docs/RELEASE.md claims a release while HG-011 remains open"
-        )
-        assert "not yet tagged" in CHANGELOG.lower()
-    else:
-        assert "has not been cut" not in RELEASE, (
-            "HG-011 is Complete; docs/RELEASE.md and CHANGELOG.md should "
-            "record the cut release rather than a candidate"
-        )
+def test_release_materials_do_not_claim_hg_011_is_still_pending():
+    # The blocker this test guards against: release docs continuing to say
+    # HG-011 is Needs Validation or awaiting closure review after it has, in
+    # fact, closed.
+    for doc, name in ((RELEASE, "docs/RELEASE.md"), (CHANGELOG, "CHANGELOG.md")):
+        lowered = doc.lower()
+        for stale in (
+            "hg-011 remains `needs validation`",
+            "hg-011 is still `needs validation`",
+            "hg-011 (this release-identity work) remains `needs validation`",
+            "awaiting closure review",
+            "held pending independent closure review",
+        ):
+            assert stale not in lowered, f"{name} still claims HG-011 is pending: {stale!r}"
 
 
 def test_release_materials_do_not_claim_the_tag_already_exists():
@@ -235,28 +226,36 @@ def test_release_materials_do_not_claim_the_tag_already_exists():
     ):
         assert forbidden not in lowered_release, f"docs/RELEASE.md falsely claims: {forbidden!r}"
         assert forbidden not in lowered_changelog, f"CHANGELOG.md falsely claims: {forbidden!r}"
-    assert "not yet tagged" in lowered_changelog
-    assert "has not been cut" in lowered_release
+    # A GitHub Release or PyPI/container artifact would only exist once the
+    # tag does; neither release document may claim one already exists.
+    assert "github release" not in lowered_changelog
+    assert "published to pypi" not in lowered_release or "not published to pypi" in lowered_release
 
 
-def test_release_candidate_language_blames_pending_human_review_not_hg_010():
-    # The blocker this test guards against: release docs previously cited a
-    # stale "HG-010 is still Needs Validation, pending its closure review"
-    # reason for the untagged release. HG-010 is Complete now and may still
-    # be *mentioned* as such, but the untagged-release reasoning itself must
-    # cite HG-011's own pending independent closure review, not HG-010.
-    lowered_changelog = CHANGELOG.lower()
-    for stale in (
-        "hg-010 (product claims and trust audit)\nis still",
-        "hg-010 remains `needs validation`",
-        "hg-010 is still `needs validation`",
-    ):
-        assert stale not in lowered_changelog, f"CHANGELOG.md still blames HG-010: {stale!r}"
-    assert "hg-010" not in RELEASE.lower().split("## release readiness gate")[0]
+def test_release_materials_identify_the_tag_as_a_pending_human_action():
+    # Positive counterpart to the "does not claim it exists" check above:
+    # both documents must explicitly say the tag has not been created yet,
+    # and RELEASE.md must say why in terms of a deliberate human action, not
+    # an open roadmap dependency.
+    assert "not yet been created" in CHANGELOG.lower()
+    assert "has not been created" in RELEASE.lower()
 
     gate_section = RELEASE[RELEASE.index("## Release readiness gate") :]
-    assert "hg-011" in gate_section.lower()
-    assert (
-        "human release decision" in gate_section.lower()
-        or "independent closure review" in gate_section.lower()
-    )
+    assert "human release action" in gate_section.lower()
+    assert "not a sign that any roadmap dependency remains incomplete" in gate_section.lower()
+
+
+def test_release_readiness_reasoning_does_not_blame_a_dependency():
+    # Neither HG-010 nor HG-011 (nor any other roadmap item) may be cited as
+    # the reason the tag is absent -- every dependency is Complete, so the
+    # only accurate reason left is that a human has not yet run the tag
+    # command.
+    gate_section = RELEASE[RELEASE.index("## Release readiness gate") :]
+    for stale in (
+        "hg-010 remains",
+        "hg-010 is still",
+        "hg-011 remains `needs validation`",
+        "because hg-010",
+        "because hg-011",
+    ):
+        assert stale not in gate_section.lower(), f"docs/RELEASE.md blames a dependency: {stale!r}"

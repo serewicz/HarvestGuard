@@ -159,26 +159,28 @@ step 3.
 ## Release readiness gate
 
 v0.1 is the capstone of Milestone 2, which HG-008, HG-009, HG-010, and HG-011
-share. The tag is not cut while a dependency is unresolved.
+share. Every item is now `Complete`; the milestone is fully delivered.
 
 | Item | Status | Source |
 | --- | --- | --- |
 | HG-008 End-to-end validation | Complete | [ROADMAP.md](ROADMAP.md), `tests/test_end_to_end_validation.py` |
 | HG-009 Confidence and detection characterization | Complete | [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md) |
 | HG-010 Product claims and trust audit | Complete | [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md) |
-| HG-011 Release identity and reproducibility | Needs Validation | This document + [CHANGELOG.md](../CHANGELOG.md) — held pending independent closure review |
+| HG-011 Release identity and reproducibility | Complete | This document + [CHANGELOG.md](../CHANGELOG.md) |
 
-**The `v0.1.0` tag has not been cut.** HG-008, HG-009, and HG-010 are all
-`Complete`. HG-011 (this release-identity work) remains `Needs Validation`
-because tagging is a human release decision made only after this
-implementation and its pull request receive independent closure review — not
-because any roadmap dependency is incomplete. v0.1 is therefore a
-controlled-pilot *candidate*: the version identity, release notes, and
-reproducibility expectations are in place, and the release itself is
-published only once that review closes.
-`tests/test_release_identity.py` enforces this: while the roadmap shows HG-011
-as anything other than `Complete`, the release documentation must continue to
-say the tag is not cut.
+**The `v0.1.0` tag has not been created.** HG-008 through HG-011 are all
+`Complete`, and the controlled-pilot implementation and closure reviews are
+finished. Creating and pushing the `v0.1.0` tag, and publishing the GitHub
+release for it, is a separate, deliberate human release action performed
+after this post-closure documentation reconciliation is reviewed and merged
+— not a sign that any roadmap dependency remains incomplete. The repository
+is ready for that action once this change lands. No release tag, GitHub
+Release, PyPI artifact, or version-tagged (`:v0.1.0`) container image exists
+yet.
+`tests/test_release_identity.py` enforces this deterministically from
+repository content: it checks that HG-008 through HG-011 all read `Complete`,
+and that release documentation neither claims the tag already exists nor
+blames an incomplete dependency for its absence.
 
 ## Deferred work
 
