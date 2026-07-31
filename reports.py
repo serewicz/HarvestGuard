@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from findings import NormalizedFinding, findings_to_dicts
+from harvestguard_version import __version__ as HARVESTGUARD_VERSION
 
+# Two distinct identities, deliberately not collapsed into one: the report
+# generator/format version describes the shape of this document, while
+# HARVESTGUARD_VERSION identifies the release of the tool that produced it.
+# They happen to match at v0.1.0 and are free to diverge later.
 REPORT_GENERATOR = "harvestguard-report"
 REPORT_VERSION = "0.1.0"
 
@@ -124,6 +129,11 @@ def format_markdown_report(
         "| Field | Value |",
         "| --- | --- |",
         f"| Scan Time | {_md(context.scan_time)} |",
+        # A shared artifact must name the release that produced it; the JSON
+        # output deliberately stays a bare finding array (docs/RELEASE.md,
+        # "Identifying the version that produced an artifact"), so this row is
+        # where a reviewer reads tool identity off the evidence itself.
+        f"| HarvestGuard Version | {_md(HARVESTGUARD_VERSION)} |",
         f"| Report Generator | {REPORT_GENERATOR} {REPORT_VERSION} |",
         f"| Target Path | {_md(context.target_path)} |",
         f"| Duration | {_duration(context.duration_seconds)} |",

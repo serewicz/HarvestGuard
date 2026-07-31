@@ -4,6 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "harvestguard"
+# Keep in step with `__version__` in harvestguard_version.py, which is what the
+# CLI's `--version` and the Markdown report both report at runtime. setuptools reads
+# this literal statically at build time, so the two are separate declarations;
+# tests/test_release_identity.py fails if they drift.
 version = "0.1.0"
 description = "Open-source cryptographic asset inventory and evidence-collection tool for technology due diligence."
 readme = "README.md"
@@ -26,7 +30,13 @@ harvestguard = "harvestguard:main"
 # `dashboard/`) is deliberately not packaged: it is run with
 # `streamlit run main.py` from the repository root, not through an install.
 [tool.setuptools]
-py-modules = ["harvestguard", "findings", "finding_adapters", "reports"]
+py-modules = [
+    "harvestguard",
+    "harvestguard_version",
+    "findings",
+    "finding_adapters",
+    "reports",
+]
 
 [tool.setuptools.packages.find]
 include = ["analyzer*", "classifier*", "code_analysis*", "scanner*"]

@@ -21,6 +21,7 @@ from finding_adapters import (
     ScannerIdentity,
 )
 from findings import NormalizedFinding
+from harvestguard_version import version_string
 from reports import (
     findings_json,
     format_console_summary,
@@ -89,6 +90,16 @@ def build_parser() -> argparse.ArgumentParser:
             "scanners as the dashboard and emits normalized findings as a "
             "summary, JSON, or a Markdown report."
         ),
+    )
+    # Version identity has to be readable from the CLI itself: a reviewer
+    # holding an evidence artifact must be able to establish which
+    # HarvestGuard produced it without reading source files (docs/RELEASE.md).
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=version_string(),
+        help="Print the HarvestGuard version and exit",
     )
     subparsers = parser.add_subparsers(dest="command")
 

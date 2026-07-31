@@ -39,6 +39,7 @@ output, see [Validating an install end to end](#validating-an-install-end-to-end
 ## Usage
 
 ```bash
+harvestguard [--version]
 harvestguard scan <target> [--type <type>] [--max-depth N] [--prefix <prefix>] \
     [--summary] [--json [PATH]] [--markdown [PATH]] [--quiet] \
     [--exclude <pattern>] [--fail-on-error | --no-fail-on-error]
@@ -46,6 +47,12 @@ harvestguard scan <target> [--type <type>] [--max-depth N] [--prefix <prefix>] \
 
 `<target>` is a local file or directory path for local scan types, a bucket
 name for `s3`/`gcs`, or `account-name/container-name` for `azure`.
+
+`--version` (or `-V`) prints the HarvestGuard version and exits — the same
+version a Markdown report records in its *Scan Information* table, so an
+artifact can be traced back to the release that produced it. `--json` output
+carries no version field: it stays a bare finding array. See
+[docs/RELEASE.md](RELEASE.md#identifying-the-version-that-produced-an-artifact).
 
 ### Scan types
 
@@ -424,8 +431,9 @@ suitable for attaching to an issue, email, or advisory note. Its major sections
 are stable:
 
 - Executive Summary — evidence counts and scan context only
-- Scan Information — scan time, report generator/version, target, duration,
-  files scanned, excluded paths, coverage status
+- Scan Information — scan time, the HarvestGuard version that produced the
+  report, report generator/version, target, duration, files scanned, excluded
+  paths, coverage status
 - Scanner Versions — scanner name, version, and finding count, listing every
   scanner the run invoked; a scanner that produced no findings, or that failed
   before producing any, still appears with its version and a count of `0`

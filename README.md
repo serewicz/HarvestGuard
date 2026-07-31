@@ -195,6 +195,15 @@ scans need outbound access only to that provider's API; see
 [deploy/iam/](deploy/iam/) for least-privilege, read-only IAM policy
 templates scoped to exactly what each scanner calls.
 
+## Version and Releases
+
+HarvestGuard is pre-1.0. `harvestguard --version` prints the installed version,
+and every Markdown report records it in its *Scan Information* table, so an
+evidence artifact identifies the release that produced it. Release notes are in
+[CHANGELOG.md](CHANGELOG.md); version identity, reproducibility expectations,
+SBOM/signing/provenance status, and the release procedure are in
+[docs/RELEASE.md](docs/RELEASE.md).
+
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,
