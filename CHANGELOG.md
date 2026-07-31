@@ -8,12 +8,14 @@ HarvestGuard is pre-1.0: CLI flags, report sections, and documentation may
 change between versions. The normalized finding schema is versioned separately
 (`schema_version`, currently `1.0.0`).
 
-## 0.1.0 — Controlled Diligence Pilot (candidate, not yet tagged)
+## 0.1.0 — Controlled Diligence Pilot (approved, tag pending)
 
-v0.1.0 is prepared but **not tagged**: HG-008, HG-009, and HG-010 are
-`Complete`, and tagging is a human release decision made only after this
-release-identity work (HG-011) and its pull request receive independent
-closure review. See
+v0.1.0's implementation and closure review are complete: HG-008, HG-009,
+HG-010, and HG-011 are all `Complete`, and Milestone 2 is fully delivered.
+The `v0.1.0` git tag has **not yet been created**. Creating and pushing it is
+a separate, deliberate human release action performed after this
+reconciliation is reviewed and merged — not a sign that any implementation
+work remains open. See
 [release readiness](docs/RELEASE.md#release-readiness-gate).
 
 Release notes for controlled-pilot users.
