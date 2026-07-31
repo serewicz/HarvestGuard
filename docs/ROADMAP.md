@@ -353,7 +353,7 @@ only; detailed implementation issues have not been written yet.
 - **Title:** Versioned release and reproducibility
 - **Purpose:** Produce an identifiable, reproducible HarvestGuard release
   suitable for a controlled external pilot.
-- **Status:** Needs Validation
+- **Status:** Complete
 - **Milestone:** 2 - HarvestGuard v0.1: Controlled Diligence Pilot
 - **Dependencies:** HG-008, HG-009, HG-010
 - **Acceptance criteria:** An explicit HarvestGuard version identifier; a
