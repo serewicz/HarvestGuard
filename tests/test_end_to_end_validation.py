@@ -228,7 +228,7 @@ def test_documented_module_invocation_produces_the_documented_demo_summary():
         "Semgrep Findings: 0",
         "Malformed Assets: 1",
         "Errors: 1",
-        "Total Findings: 3",
+        "Total normalized records: 3",
     ]:
         assert documented_line in completed.stdout
     # Progress goes to stderr, so stdout stays usable on its own.
@@ -308,7 +308,7 @@ def test_installed_console_script_produces_the_documented_demo_artifacts(
         "Semgrep Findings: 0",
         "Malformed Assets: 1",
         "Errors: 1",
-        "Total Findings: 3",
+        "Total normalized records: 3",
     ]:
         assert documented_line in summary.stdout
 
@@ -363,7 +363,7 @@ def test_demo_summary_matches_the_documented_walkthrough(capsys):
     assert "Sensitive Files: 1" in output
     assert "Malformed Assets: 1" in output
     assert "Errors: 1" in output
-    assert "Total Findings: 3" in output
+    assert "Total normalized records: 3" in output
 
 
 def test_demo_json_output_is_a_valid_normalized_finding_array(capsys):

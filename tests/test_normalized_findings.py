@@ -113,7 +113,12 @@ def test_filesystem_scanner_can_return_normalized_findings(tmp_path, monkeypatch
     payload = findings[0].to_dict()
     assert payload["scan_id"] == "scan-fs"
     assert payload["source_type"] == "local_filesystem"
-    assert payload["asset_type"] == "file"
+    # "plain.txt" is an ordinary file with no file-level evidence and no
+    # file-specific failure, so it is represented by its mount's aggregate
+    # context record rather than a per-file record of its own -- that
+    # aggregate record is where the volume-level "Unencrypted" status now
+    # lives (see tests/test_filesystem_aggregate_context.py).
+    assert payload["asset_type"] == "volume"
     assert payload["technical_metadata"]["Encryption"] == "Unencrypted"
     assert payload["confidence"] == "Medium"
 

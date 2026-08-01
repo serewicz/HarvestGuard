@@ -61,10 +61,14 @@ def test_filesystem_signature_match_is_high_confidence_volume_fallback_is_lower(
     (tmp_path / "cipher.bin").write_bytes(b"Salted__" + b"\x00" * 8 + b"ciphertext")
     (tmp_path / "plain.txt").write_text("ordinary file content")
 
-    findings = {f.location: f for f in scan_filesystem_findings(str(tmp_path))}
+    findings = scan_filesystem_findings(str(tmp_path))
 
-    signature_match = findings[str(tmp_path / "cipher.bin")]
-    volume_fallback = findings[str(tmp_path / "plain.txt")]
+    signature_match = next(f for f in findings if f.asset_type == "file")
+    # "plain.txt" is an ordinary file with no signature match and no
+    # file-specific failure, so its volume-status fallback now lives on the
+    # mount's aggregate context record rather than a per-file record of its
+    # own (see tests/test_filesystem_aggregate_context.py).
+    volume_fallback = next(f for f in findings if f.asset_type == "volume")
 
     assert signature_match.confidence == "High"
     assert volume_fallback.confidence == "Medium"
@@ -339,9 +343,12 @@ def test_finding_level_errors_can_coexist_with_no_limits_recorded(tmp_path):
 
     findings = scan_filesystem_evidence(str(tmp_path))
 
+    # "plain.txt" is an ordinary file, represented by its mount's aggregate
+    # context record rather than a per-file record; that record still has no
+    # errors and no coverage boundary, which is the property under test.
     assert len(findings) == 1
     row = findings.iloc[0]
-    assert row["Asset Type"] == "file"
+    assert row["Asset Type"] == "volume"
 
 
 def test_default_local_max_depth_is_three():

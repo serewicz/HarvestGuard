@@ -11,7 +11,13 @@ from functools import lru_cache
 
 import pandas as pd
 
-from finding_adapters import normalize_filesystem_df
+from finding_adapters import (
+    FILESYSTEM_CONTEXT_ASSET_TYPE,
+    FILESYSTEM_FILES_INSPECTED_KEY,
+    FILESYSTEM_FILES_REPRESENTED_KEY,
+    FILESYSTEM_FILES_WITH_FINDINGS_KEY,
+    normalize_filesystem_df,
+)
 from findings import NormalizedFinding
 
 try:
@@ -231,6 +237,17 @@ def _group_name(gid: int) -> str | None:
         return None
 
 
+def _acl_support_unavailable() -> bool:
+    """Whether ACL presence cannot be determined at all on this platform.
+
+    A platform-wide fact, deliberately separate from _detect_acl_presence()'s
+    per-file answer: it is recorded once on the aggregate mount context (see
+    _volume_context_record) instead of being repeated as a limitation on every
+    ordinary file, which is what made large scans unreadable.
+    """
+    return platform.system() != "Linux" or not hasattr(os, "listxattr")
+
+
 def _detect_acl_presence(full_path: str) -> bool | None:
     """Best-effort, portable ACL-presence check.
 
@@ -259,11 +276,29 @@ def _observe_regular_file(
     volume_status: str,
     collected_at: datetime,
     collection_source: str,
-) -> dict:
+) -> dict | None:
+    """Evidence record for one regular file, or None when the file has nothing
+    file-specific to report.
+
+    None means: the file was readable, no known encrypted-format signature
+    matched, and nothing about this specific file failed. Its only evidence
+    would be the volume/filesystem/platform context it shares with every other
+    such file on the same mount, which is recorded once per mount instead (see
+    _volume_context_record). Emitting one record per ordinary file made a
+    20,000-file scan report ~20,000 "findings" that were all the same
+    volume-level context statement.
+    """
+    signature, read_limitation = _detect_file_signature_safe(full_path)
+    if signature is None and read_limitation is None:
+        # Ordinary readable file, no file-level evidence, no file-specific
+        # failure: represented by its mount's aggregate context record. The
+        # owner/group/ACL lookups below are skipped entirely, not just
+        # discarded.
+        return None
+
     unknowns = ["Business ownership cannot be established from filesystem metadata."]
     limitations: list[str] = []
 
-    signature, read_limitation = _detect_file_signature_safe(full_path)
     if read_limitation is not None:
         limitations.append(read_limitation)
         encryption = volume_status
@@ -280,7 +315,8 @@ def _observe_regular_file(
         )
         unknowns.append("File-level encryption status cannot be established conclusively.")
         repeatable = False
-    elif signature is not None:
+    else:
+        # signature is not None: the only other way to reach this point.
         encryption = signature
         rule_id = f"file_signature:{_slug(signature)}"
         verification_rationale = (
@@ -292,32 +328,6 @@ def _observe_regular_file(
             "independent of filesystem or volume state."
         )
         repeatable = True
-    else:
-        encryption = volume_status
-        rule_id = f"volume_status:{_slug(volume_status)}"
-        unknowns.append("File-level encryption status cannot be established conclusively.")
-        if volume_status == "Unknown":
-            verification_rationale = (
-                "No known file-level signature matched, and volume-level "
-                "encryption status could not be determined on this platform."
-            )
-            confidence = "Low"
-            confidence_rationale = (
-                "Neither file-level nor volume-level encryption status could be established."
-            )
-            repeatable = False
-        else:
-            verification_rationale = (
-                "No known file-level signature matched; volume-level "
-                "encryption status was used because file-level status could "
-                "not be independently determined."
-            )
-            confidence = "Medium"
-            confidence_rationale = (
-                "Volume-level status describes the entire volume rather than "
-                "this specific file, so file-level status remains unverified."
-            )
-            repeatable = True
 
     owner_name = _owner_name(lst.st_uid)
     if owner_name is None:
@@ -363,6 +373,121 @@ def _observe_regular_file(
         "Collection Method": _COLLECTION_METHOD,
         "Collection Source": collection_source,
         "Collected At": collected_at,
+    }
+
+
+def _volume_context_record(
+    mount_point: str,
+    volume_status: str,
+    files_inspected: int,
+    files_represented: int,
+    files_with_findings: int,
+    collected_at: datetime,
+    collection_source: str,
+) -> dict:
+    """One aggregate record for the filesystem/volume/platform context shared
+    by every ordinary regular file inspected on a single mount.
+
+    This is what ordinary per-file records are replaced by, not a summary
+    layered on top of them: the context is observed once per mount, so it is
+    recorded once per mount. Identity comes from the mount point path alone --
+    never a timestamp, hostname, process id, scan duration, or any per-file
+    ownership/ACL value -- so the same mount yields the same identity across
+    runs and hosts, while two mounts scanned in one run stay distinct.
+
+    "Unknown" and "Unencrypted" volume status are deliberately kept apart
+    here: the first means the platform/tooling could not determine the status,
+    the second means it determined the volume is not encrypted. They carry
+    different rule_ids, different evidence text, and different confidence, and
+    are never presented under one label.
+    """
+    unknowns = [
+        "Business ownership cannot be established from filesystem metadata.",
+        "File-level encryption status cannot be established conclusively for the "
+        "regular files this aggregate context represents.",
+        "Per-file ownership, permission, and ACL signals are not established by "
+        "this aggregate context finding; it describes the mount, not any "
+        "individual file on it.",
+    ]
+    # Platform-wide gaps, recorded once here rather than once per ordinary
+    # file. Genuinely per-file failures still produce their own record.
+    limitations: list[str] = []
+    if pwd is None:
+        limitations.append("Owner name resolution is unavailable on this platform.")
+    if grp is None:
+        limitations.append("Group name resolution is unavailable on this platform.")
+    if _acl_support_unavailable():
+        limitations.append("ACL presence could not be portably determined on this platform.")
+
+    represented = (
+        f"{files_represented} regular file(s) with no file-level encrypted-format "
+        "signature and no file-specific failure are represented by this record "
+        "rather than by individual records"
+    )
+    if volume_status == "Unknown":
+        evidence = (
+            f"Volume-level encryption status could not be determined for mount "
+            f"{mount_point}; it is recorded as Unknown, which is not an observation "
+            f"that the volume is unencrypted. {represented}."
+        )
+        verification_rationale = (
+            "Volume-level encryption status could not be determined on this "
+            "platform (unsupported platform, or the required tool was "
+            "unavailable, failed, or timed out), so no volume-level status was "
+            "observed for this mount."
+        )
+        confidence = "Low"
+        confidence_rationale = (
+            "Neither file-level nor volume-level encryption status could be "
+            "established for the files this context represents."
+        )
+        repeatable = False
+    else:
+        observed = (
+            "the platform reported the volume is not encrypted"
+            if volume_status == "Unencrypted"
+            else "the platform reported volume-level encryption"
+        )
+        evidence = (
+            f"Volume-level encryption status observed for mount {mount_point}: "
+            f"{volume_status} ({observed}). {represented}."
+        )
+        verification_rationale = (
+            f"Volume-level encryption status was determined once for mount "
+            f"{mount_point} and applies to every regular file inspected on it; "
+            "no file-level signature matched for the files it represents."
+        )
+        confidence = "Medium"
+        confidence_rationale = (
+            "Volume-level status describes the mount as a whole rather than any "
+            "individual file on it, so file-level status remains unverified for "
+            "the files this context represents."
+        )
+        repeatable = True
+
+    return {
+        "Asset Type": FILESYSTEM_CONTEXT_ASSET_TYPE,
+        "Location": mount_point,
+        "Encryption": volume_status,
+        "Evidence": evidence,
+        "Rule ID": f"volume_status:{_slug(volume_status)}",
+        "Verification Rationale": verification_rationale,
+        "Confidence": confidence,
+        "Confidence Rationale": confidence_rationale,
+        "Repeatable": repeatable,
+        "Unknowns": unknowns,
+        "Limitations": limitations,
+        "Collection Method": _COLLECTION_METHOD,
+        "Collection Source": collection_source,
+        "Collected At": collected_at,
+        # Identity of the mount this context describes, deliberately derived
+        # from the mount point alone (see this function's docstring).
+        "Identity Key": f"mount:{mount_point}",
+        "Mount Point": mount_point,
+        "Platform": platform.system(),
+        FILESYSTEM_FILES_INSPECTED_KEY: files_inspected,
+        FILESYSTEM_FILES_REPRESENTED_KEY: files_represented,
+        FILESYSTEM_FILES_WITH_FINDINGS_KEY: files_with_findings,
     }
 
 
@@ -590,13 +715,42 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
     configured boundary (see _max_depth_limitation_record). Neither
     fabricates file-level observations for what might be underneath.
 
+    An ordinary readable regular file with no file-level signature match and
+    no file-specific failure produces no record of its own. The only evidence
+    such a file has is the volume/filesystem/platform context it shares with
+    every other ordinary file on the same mount, so that context is recorded
+    once per mount as an aggregate record instead (see
+    _volume_context_record). Mount points are resolved per directory, so two
+    mounts reached in one scan produce two distinct aggregate records rather
+    than one blurred together.
+
     Depth semantics: the scan root is depth 0, a direct child directory of
     the root is depth 1, and ``max_depth=N`` inspects files in directories up
     to and including depth N. Child directories below depth N are pruned
     before descent, so nothing beneath them is opened or stat'd.
     """
     records: list[dict] = []
-    volume_status = _detect_volume_encryption(_volume_root(path))
+    # Per-mount tally driving the aggregate context records emitted at the end
+    # of the scan: mount point -> volume status and inspected-file counts.
+    contexts: dict[str, dict] = {}
+    mounts: dict[str, str] = {}
+
+    def _context_for(directory: str) -> dict:
+        mount = mounts.get(directory)
+        if mount is None:
+            mount = _volume_root(directory)
+            mounts[directory] = mount
+        context = contexts.get(mount)
+        if context is None:
+            context = {
+                "volume_status": _detect_volume_encryption(mount),
+                "inspected": 0,
+                "represented": 0,
+                "with_findings": 0,
+            }
+            contexts[mount] = context
+        return context
+
     # Depth is measured against the *normalized* root so that a trailing
     # separator ("/data/" vs "/data") cannot shift every depth by one and
     # silently scan a level deeper or shallower than requested.
@@ -709,10 +863,35 @@ def scan_filesystem_evidence(path: str, max_depth: int = 3) -> pd.DataFrame:
                 )
                 continue
 
-            records.append(
-                _observe_regular_file(
-                    full_path, lst, volume_status, collected_at, collection_source
-                )
+            context = _context_for(root)
+            context["inspected"] += 1
+            record = _observe_regular_file(
+                full_path, lst, context["volume_status"], collected_at, collection_source
             )
+            if record is None:
+                # Ordinary file: its mount's aggregate context record stands
+                # for it, so no per-file record is emitted at all.
+                context["represented"] += 1
+            else:
+                context["with_findings"] += 1
+                records.append(record)
+
+    # One aggregate context record per mount that actually had ordinary files
+    # to represent. A mount whose every inspected file produced its own record
+    # has nothing left for an aggregate to stand in for, so none is emitted.
+    for mount_point, context in sorted(contexts.items()):
+        if not context["represented"]:
+            continue
+        records.append(
+            _volume_context_record(
+                mount_point,
+                context["volume_status"],
+                context["inspected"],
+                context["represented"],
+                context["with_findings"],
+                datetime.now(timezone.utc),
+                collection_source,
+            )
+        )
 
     return pd.DataFrame(records)

@@ -162,6 +162,17 @@ HarvestGuard Scan Complete
 
 Files scanned: 412
 
+Record Categories
+
+Aggregate filesystem context records: 3
+Per-file filesystem evidence records: 6
+Coverage limitation records: 0
+Skipped or inaccessible entry records: 2
+Cryptographic inventory records: 18
+Sensitive-data records: 7
+Code-analysis records: 4
+Cloud storage records: 0
+
 Findings
 
 Certificates: 18
@@ -175,8 +186,22 @@ Semgrep Findings: 4
 Malformed Assets: 1
 Errors: 0
 
-Total Findings: 39
+Material evidence records: 35
+Total normalized records: 40
+Findings with finding-level errors: 0
+Scanner execution errors: 0
 ```
+
+`Files scanned` counts inspected regular files, not records: an ordinary
+readable file with no file-level evidence and no file-specific failure
+produces no record of its own, and is represented by its mount's aggregate
+`filesystem_context` record instead (one per mount actually scanned) rather
+than one record per file. `Total normalized records` is named for exactly
+what it counts — it is not a count of distinct material findings, which is
+what `Material evidence records` states instead. See [What Each Scanner Can
+Miss](#what-each-scanner-can-miss) and
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md) for what each
+record category means.
 
 JSON normalized findings:
 
@@ -256,6 +281,17 @@ HarvestGuard Scan Complete
 
 Files scanned: 1
 
+Record Categories
+
+Aggregate filesystem context records: 1
+Per-file filesystem evidence records: 0
+Coverage limitation records: 0
+Skipped or inaccessible entry records: 0
+Cryptographic inventory records: 1
+Sensitive-data records: 1
+Code-analysis records: 0
+Cloud storage records: 0
+
 Findings
 
 Certificates: 0
@@ -269,17 +305,28 @@ Semgrep Findings: 0
 Malformed Assets: 1
 Errors: 1
 
-Total Findings: 3
+Material evidence records: 2
+Total normalized records: 3
+Findings with finding-level errors: 1
+Scanner execution errors: 0
 ```
 
-Three findings, one from each of three scanners:
+Three normalized records, one from each of three scanners:
 
-- **Filesystem encryption evidence** (`--type filesystem`) — one finding for
-  `leaked_config.env` with `Evidence: "Encryption status observed: <value>"`
-  and a populated `Confidence` (`High`, `Medium`, or `Low`) plus
-  `Confidence Rationale`. The exact `<value>` and confidence level depend on
-  how encryption status was determined on your host (see "What varies by
-  host" below) — this is expected, not a bug.
+- **Filesystem context** (`--type filesystem`) — `leaked_config.env` is an
+  ordinary file with no file-level encrypted-format signature and no
+  file-specific failure, so it produces no record of its own. It is
+  represented instead by one aggregate `filesystem_context` finding for the
+  demo fixture's mount, with `Evidence` starting `"Volume-level encryption
+  status observed for mount <path>: <value>"` (or, if the status could not be
+  determined on your host, `"...could not be determined for mount
+  <path>..."`), a populated `Confidence` (`Medium` or `Low`) plus
+  `Confidence Rationale`, and `technical_metadata["Files Represented By This
+  Context"] == 1`. The exact `<value>` and confidence level depend on how
+  encryption status was determined on your host (see "What varies by host"
+  below) — this is expected, not a bug. See [Design: Aggregate Filesystem
+  Context](DETECTION_CHARACTERIZATION.md#local-filesystem-encryption-evidence)
+  for why ordinary files are represented this way.
 - **Cryptographic inventory evidence** (`--type crypto`) — one finding, asset
   type `Malformed PEM Private Key`, confidence `Low`. The fixture's PEM
   header (`-----BEGIN RSA PRIVATE KEY-----`) is real enough to be detected as
@@ -318,11 +365,13 @@ rule ID.
 
 ### What varies by host
 
-Encryption status for a plain-text file with no matching file-level
-signature falls back to volume-level encryption status, which is detected
-differently per platform (FileVault on macOS, `lsblk`/similar on Linux) and
-is not deterministic across environments — CI and your local machine may
-report a different value or a different confidence level for that one field.
+Encryption status for an ordinary file with no matching file-level signature
+falls back to volume-level encryption status, recorded on the mount's
+aggregate `filesystem_context` finding rather than a per-file one. That
+status is detected differently per platform (FileVault on macOS,
+`lsblk`/similar on Linux) and is not deterministic across environments — CI
+and your local machine may report a different value or a different
+confidence level for that one field.
 This is expected: `docs/TERMINOLOGY.md` documents this as evidence quality
 that depends on what could be observed, not a claim that HarvestGuard can
 always determine full-disk or volume encryption status the same way on every

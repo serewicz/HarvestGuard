@@ -87,7 +87,15 @@ def test_scan_command_summary_output(tmp_path, capsys, monkeypatch):
     assert "Sensitive Files: 1" in output
     assert "Semgrep Findings: 1" in output
     assert "Malformed Assets: 0" in output
-    assert "Total Findings: 6" in output
+    # The primary summary categories, and a combined total named for exactly
+    # what it counts rather than implying six distinct material findings.
+    assert "Per-file filesystem evidence records: 2" in output
+    assert "Cryptographic inventory records: 2" in output
+    assert "Sensitive-data records: 1" in output
+    assert "Code-analysis records: 1" in output
+    assert "Coverage limitation records: 0" in output
+    assert "Total normalized records: 6" in output
+    assert "Total Findings" not in output
 
 
 def test_scan_command_json_output(tmp_path, capsys, monkeypatch):
@@ -698,8 +706,10 @@ def test_scan_type_s3_partial_failure_json_keeps_collected_findings(capsys, monk
 
 def test_scan_command_json_preserves_finding_fields_as_plain_json(tmp_path, capsys):
     # Real filesystem scan, no mocks: the normalized schema fields the CLI
-    # promises must survive serialization as plain JSON types.
-    (tmp_path / "notes.txt").write_text("hello world", encoding="utf-8")
+    # promises must survive serialization as plain JSON types. The file carries
+    # an encrypted-format signature so it produces a per-file record of its
+    # own -- an ordinary file's context is reported once per mount instead.
+    (tmp_path / "notes.enc").write_bytes(b"Salted__" + b"\x00" * 16)
 
     exit_code = harvestguard.main(
         ["scan", str(tmp_path), "--type", "filesystem", "--json", "--quiet"]
