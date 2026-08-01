@@ -586,6 +586,25 @@ Milestone 2 is fully delivered.
   explains assumptions and links to technical evidence.
 - **GitHub issue:** TBD
 
+## v0.1.1 Stabilization
+
+### HG-028
+
+- **Title:** Self-contained CLI installation and dependency packaging
+- **Purpose:** Ensure a fresh Python 3.10+ environment can install and run
+  the documented HarvestGuard CLI without hidden dependency steps.
+- **Status:** Complete
+- **Milestone:** v0.1.1 Stabilization
+- **Dependencies:** HG-008, HG-011
+- **Acceptance criteria:** `pip install .` and `pip install -e .` create a
+  usable installed CLI in isolated environments; runtime dependencies are
+  declared in `pyproject.toml`; JSON and Markdown contracts remain
+  unchanged; installation documentation covers Python requirements and
+  resolver behavior.
+- **Delivered by:** `pyproject.toml`, `requirements.txt`,
+  `tests/test_clean_install.py`, and `tests/test_packaging_dependencies.py`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/62
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
