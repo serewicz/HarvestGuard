@@ -320,7 +320,7 @@ Three normalized records, one from each of three scanners:
   demo fixture's mount, with `Evidence` starting `"Volume-level encryption
   status observed for mount <path>: <value>"` (or, if the status could not be
   determined on your host, `"...could not be determined for mount
-  <path>..."`), a populated `Confidence` (`High`, `Medium`, or `Low`) plus
+  <path>..."`), a populated `Confidence` (`Medium` or `Low`) plus
   `Confidence Rationale`, and `technical_metadata["Files Represented By This
   Context"] == 1`. The exact `<value>` and confidence level depend on how
   encryption status was determined on your host (see "What varies by host"
