@@ -6,28 +6,88 @@ risk scoring, or executive reporting.
 
 ## Installation
 
-From the repository root:
+### Requirements
+
+**Python 3.10 or newer.** Check before anything else:
 
 ```bash
-python3 -m venv venv
+python3 --version
+```
+
+On macOS the system interpreter (`/usr/bin/python3`) is **Python 3.9.6, which is
+too old** — HarvestGuard will not install or run on it, and upgrading the system
+Python is neither necessary nor recommended. Install a current Python (for
+example `brew install python@3.12`, or a python.org installer) and build the
+virtual environment from that interpreter instead:
+
+```bash
+python3.12 -m venv venv          # macOS: not /usr/bin/python3
 source venv/bin/activate
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+python -m pip install .
 ```
 
-For an editable install that exposes the `harvestguard` command:
+### Install the CLI
+
+From a clean virtual environment, in a checkout of this repository, one command
+is enough:
 
 ```bash
-pip install -e .
+git clone https://github.com/serewicz/HarvestGuard.git
+cd HarvestGuard
+
+python3 -m venv venv
+source venv/bin/activate         # venv\Scripts\activate on Windows
+
+python -m pip install .
 ```
 
-After that, `harvestguard scan <target>` works from any directory, not just the
-repository root. The install covers the CLI and the scanners only; the
-Streamlit dashboard is run from the repository root with
-`streamlit run main.py` and is not part of the installed package.
+That installs the `harvestguard` command **and everything it needs**.
+`pyproject.toml` declares the CLI's runtime dependencies, so there is no second
+`pip install -r requirements.txt` step: `requirements.txt` is repository-root
+convenience for running the Streamlit dashboard from a checkout, and
+`requirements-dev.txt` is for contributors running the tests and linter. A
+normal user needs neither.
 
-Without installing the console script, run the same CLI as a module from the
+Confirm the install:
+
+```bash
+harvestguard --version           # e.g. "harvestguard 0.1.0"
+```
+
+Contributors who want their edits to take effect without reinstalling use an
+editable install instead — same dependencies, same command:
+
+```bash
+python -m pip install -e .
+```
+
+### What to expect during installation
+
+`pip` may print long runs of repeated "Downloading …" / "INFO: pip is looking at
+multiple versions of …" messages while it resolves the Semgrep and
+OpenTelemetry dependency graph. That backtracking is **normal**, can take
+several minutes on a cold cache, and is not a hang. What is *not* normal is pip
+finishing with an error, a `ResolutionImpossible`, or a nonzero exit code —
+those are real failures, and the install did not succeed no matter how much
+output scrolled past first.
+
+### Running the CLI
+
+Once installed, `harvestguard` works from **any** directory, not just the
 repository root:
+
+```bash
+cd ~
+harvestguard scan /path/to/target --type filesystem --summary
+```
+
+The install covers the CLI and the scanners only. The Streamlit dashboard is
+run from the repository root with `streamlit run main.py` (after
+`pip install -r requirements.txt`) and is deliberately not part of the installed
+package.
+
+Without installing the console script at all, run the same CLI as a module from
+the repository root:
 
 ```bash
 python -m harvestguard scan ./target
@@ -315,6 +375,17 @@ the steps yourself:
 5. **Read the coverage status.** Use the table below to tell a complete scan
    from a limited, partial, or failed one. This is the only thing you need in
    order to interpret an artifact — no source-code reading required.
+
+Two further test modules cover the installation itself rather than the scan
+behavior. `tests/test_clean_install.py` performs both documented installs into a
+virtual environment created **without** `--system-site-packages` and installed
+**without** `--no-deps`, then runs `--version`, a filesystem summary scan, JSON,
+and Markdown from outside the checkout — so a dependency that is only present
+because the host happened to have it cannot make those checks pass. They
+download real packages; set `HARVESTGUARD_SKIP_CLEAN_INSTALL_TESTS=1` to skip
+them when working offline. `tests/test_packaging_dependencies.py` is the offline
+counterpart: it fails if a packaged module imports something `pyproject.toml`
+does not declare, or if `pyproject.toml` and `requirements.txt` drift apart.
 
 ### Reading coverage from an artifact
 

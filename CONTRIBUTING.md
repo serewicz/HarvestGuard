@@ -79,6 +79,10 @@ A change is done when:
 
 ## Getting Set Up
 
+Python 3.10+ is required. On macOS, `/usr/bin/python3` is 3.9.6 and will not
+work — create the virtual environment from a newer interpreter (for example
+`python3.12`).
+
 ```bash
 git clone https://github.com/serewicz/HarvestGuard.git
 cd HarvestGuard
@@ -86,9 +90,18 @@ cd HarvestGuard
 python3 -m venv venv
 source venv/bin/activate    # venv\Scripts\activate on Windows
 
-pip install -r requirements.txt
-pip install -r requirements-dev.txt
+python -m pip install -e .          # the CLI and its runtime dependencies
+pip install -r requirements.txt     # adds the Streamlit dashboard's dependencies
+pip install -r requirements-dev.txt # pytest, ruff, governance tooling
 ```
+
+`pyproject.toml` is authoritative for what an installed `harvestguard` needs;
+`requirements.txt` additionally covers the dashboard, which is not packaged.
+Anything added to either has to stay classified in both —
+`tests/test_packaging_dependencies.py` fails on drift, and
+`tests/test_clean_install.py` proves a fresh `pip install .` still produces a
+working command. The clean-install tests need network access; set
+`HARVESTGUARD_SKIP_CLEAN_INSTALL_TESTS=1` to skip them while working offline.
 
 Run the app locally:
 

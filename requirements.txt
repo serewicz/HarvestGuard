@@ -1,12 +1,30 @@
-streamlit>=1.38.0,<1.51.0  # >=1.51 changed the local dev-server model (frontend no longer served on the same port as the backend under `streamlit run`) -- confirmed against a fresh install, not yet compatible with how this app is run/containerized
+# Repository-root convenience: everything needed to run the Streamlit dashboard
+# *and* the CLI from a checkout, in one file.
+#
+# It is NOT what an installed CLI depends on. `pyproject.toml`'s
+# `[project].dependencies` is authoritative for `pip install .` and
+# `pip install -e .`; a user who only wants the `harvestguard` command needs
+# nothing from this file. The two are kept in step by
+# tests/test_packaging_dependencies.py, which fails if a shared requirement's
+# specifier drifts or if a new entry here is neither declared for the installed
+# CLI nor classified below as dashboard-only.
+
+# --- Installed CLI runtime dependencies (mirrored in pyproject.toml) --------
 boto3>=1.35.0
+botocore>=1.35.0  # scanner/cloud.py imports botocore.exceptions.ClientError directly
 google-cloud-storage>=2.18.0
+google-api-core>=2.19.0  # scanner/gcs.py imports google.api_core.exceptions directly
+google-auth>=2.30.0  # scanner/gcs.py imports google.auth.exceptions directly
 azure-storage-blob>=12.19.0
 azure-identity>=1.15.0
+azure-core>=1.30.0  # scanner/azure_blob.py imports azure.core.exceptions.AzureError directly
 semgrep>=1.90.0  # code_analysis/ -- adds ~160MB to the container image, see docs/ROADMAP.md Pillar 1
 cryptography>=41.0.0  # scanner/crypto_inventory.py imports x509/hazmat.primitives directly (pkcs12, dsa/ec/ed448/ed25519, hashes, serialization) -- was previously only a transitive dep of azure-identity/google-auth/msal, which is not something first-party code should rely on
 certifi>=2024.2.2  # code_analysis/scanner.py calls certifi.where() directly for semgrep's CA bundle -- was previously only a transitive dep of httpx/requests
 pandas>=2.2.0
+
+# --- Dashboard / repository-root convenience (not installed CLI dependencies)
+streamlit>=1.38.0,<1.51.0  # >=1.51 changed the local dev-server model (frontend no longer served on the same port as the backend under `streamlit run`) -- confirmed against a fresh install, not yet compatible with how this app is run/containerized
 plotly>=5.24.0
 pydantic>=2.9.0
 prometheus-client>=0.21.0
