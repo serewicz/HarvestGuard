@@ -89,7 +89,12 @@ def test_console_summary_includes_professional_totals() -> None:
     assert "Semgrep Findings: 1" in summary
     assert "Malformed Assets: 1" in summary
     assert "Errors: 1" in summary
-    assert "Total Findings: 8" in summary
+    # A combined total is named for what it counts, never as a bare
+    # "Total Findings" implying every record is a distinct material finding.
+    assert "Total normalized records: 8" in summary
+    assert "Total Findings" not in summary
+    assert "Findings with finding-level errors: 1" in summary
+    assert "Scanner execution errors: 0" in summary
 
 
 def test_markdown_report_has_required_sections_and_evidence_fields() -> None:
@@ -211,7 +216,8 @@ def test_markdown_report_handles_empty_scan() -> None:
 
     assert "No findings." in report
     assert "| None | None | 0 |" in report
-    assert "0 cryptographic assets" in report
+    assert "0 cryptographic asset(s)" in report
+    assert "0 total normalized records" in report
 
 
 def test_markdown_report_preserves_malformed_errors_and_warnings() -> None:
@@ -609,6 +615,17 @@ def test_summarize_findings_excludes_coverage_findings_from_files_scanned() -> N
 
 def test_summarize_findings_counts_empty_scan() -> None:
     assert summarize_findings([]) == {
+        "filesystem_context": 0,
+        "filesystem_file_evidence": 0,
+        "coverage_limitation": 0,
+        "skipped_or_inaccessible": 0,
+        "crypto_inventory": 0,
+        "sensitive_data": 0,
+        "code_analysis": 0,
+        "cloud_evidence": 0,
+        "other_records": 0,
+        "total_records": 0,
+        "material_evidence": 0,
         "files_scanned": 0,
         "certificates": 0,
         "private_keys": 0,

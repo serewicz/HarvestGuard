@@ -64,30 +64,76 @@ successfully parsed certificate versus a magic-header-only match).
 Each regular file's leading bytes are checked against a fixed table of known
 encrypted-format signatures (OpenSSL `Salted__`, PGP/GPG armor and binary
 packet headers, `age`, LUKS containers, and the encrypted-ZIP general-purpose
-bit flag). If no signature matches, the file inherits the encryption status
-of the volume it lives on (FileVault on macOS, LUKS on Linux via `lsblk`,
-BitLocker on Windows via `manage-bde`), computed once per scan root.
-Symlinks, FIFOs, sockets, and device files are never followed or opened (see
-[SCAN_COVERAGE.md](SCAN_COVERAGE.md)) and produce a `skipped_special_file`
-finding instead of file-content evidence.
+bit flag). A file whose signature matches produces its own `file` finding,
+at `High` confidence. Symlinks, FIFOs, sockets, and device files are never
+followed or opened (see [SCAN_COVERAGE.md](SCAN_COVERAGE.md)) and produce a
+`skipped_special_file` finding instead of file-content evidence.
+
+An **ordinary file** — readable, no signature match, no file-specific
+failure — produces **no finding of its own**. Its only evidence is the
+volume/filesystem/platform context it shares with every other such file on
+the same mount, so that context is recorded once per mount as an **aggregate
+`filesystem_context` finding** (`asset_type: "volume"`) instead of once per
+file. Emitting one record per ordinary file previously made a 20,000-file
+scan report roughly 20,000 near-identical "findings"; see "Aggregate
+filesystem context" below.
+
+A per-file record still exists for a **file-specific failure** — the file's
+header could not be read (permission denied, the file vanished mid-scan) —
+because that is evidence about that specific file, not shared context.
+
+### Aggregate filesystem context
+
+One `filesystem_context` finding is emitted per mount that has at least one
+ordinary file to represent, reusing existing `NormalizedFinding` fields
+rather than adding new ones:
+
+- `location` and `identity_key` are both derived from the mount point path
+  alone — never a timestamp, hostname, process ID, scan duration, or
+  per-file ownership/ACL value — so the same mount produces the same
+  identity across repeated scans and different hosts, and two distinct
+  mounts scanned in one run produce two distinct, stable identities.
+- `technical_metadata` carries the volume-level `Encryption` status, the
+  mount point, the platform, and three counts: how many regular files were
+  inspected on that mount, how many of those are represented by this
+  aggregate record (had no signature match and no file-specific failure),
+  and how many produced their own finding.
+- **`Unknown` volume-encryption status is never presented as observed
+  `Unencrypted` status.** `Unknown` means the platform or tooling could not
+  determine the status at all (unsupported platform, missing tool, a failed
+  or timed-out check); `Unencrypted` means the platform determined the
+  volume is genuinely not encrypted. They carry different `rule_id` values
+  (`volume_status:unknown` vs. `volume_status:unencrypted`), different
+  evidence text, and different confidence, and are never collapsed into one
+  label.
+- A platform-wide limitation such as "ACL presence could not be portably
+  determined on this platform" is recorded once on the aggregate record for
+  the mount, not once per ordinary file it represents.
+- A mount whose every inspected file produced its own per-file finding (for
+  example, every file had a recognized signature) has nothing left for an
+  aggregate record to represent, so none is emitted for that mount.
 
 ### Confidence semantics
 
-- `High` — a file-level signature matched. The observation is a direct read
-  of file content, independent of the volume.
-- `Medium` — no file-level signature matched and the volume-level status is a
-  known value (encrypted or not). The file itself was not independently
-  verified; it inherits the volume's status.
-- `Low` — either the file's header could not be read (permission denied, the
-  file vanished mid-scan) and volume status was used as a fallback with no
-  file-level verification at all, or neither file-level nor volume-level
-  status could be determined.
+- `High` — a file-level signature matched on a specific file. The
+  observation is a direct read of that file's content, independent of the
+  volume.
+- `Medium` — the aggregate context record's volume-level status is a known
+  value (encrypted or not). No individual file was independently verified;
+  the files it represents inherit the volume's status.
+- `Low` — either a specific file's header could not be read (permission
+  denied, the file vanished mid-scan) and volume status was used as a
+  fallback for that file with no file-level verification at all, or the
+  aggregate context record's volume-level status is `Unknown` (neither
+  file-level nor volume-level status could be established for the files it
+  represents).
 
-`confidence_rationale` on every filesystem finding states which of these
-applied. Host-dependent confidence is expected: the same file scanned on a
-FileVault-enabled Mac versus an unrelated Linux host can legitimately produce
-`Medium` in one case and `Low` in the other, because volume-level detection
-depends on the host's own platform and tooling, not on the file itself.
+`confidence_rationale` on every filesystem finding (per-file and aggregate
+alike) states which of these applied. Host-dependent confidence is expected:
+the same file scanned on a FileVault-enabled Mac versus an unrelated Linux
+host can legitimately produce `Medium` in one case and `Low` in the other on
+its mount's aggregate record, because volume-level detection depends on the
+host's own platform and tooling, not on the file itself.
 
 ### What this scanner can miss
 

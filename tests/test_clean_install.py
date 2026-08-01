@@ -245,7 +245,7 @@ def test_filesystem_summary_scan_works_from_outside_the_checkout(
     _assert_no_missing_module(completed)
     assert completed.returncode == 0, completed.stderr[-2000:]
     assert "HarvestGuard Scan Complete" in completed.stdout
-    assert "Total Findings:" in completed.stdout
+    assert "Total normalized records:" in completed.stdout
 
 
 def test_all_local_scanners_run_from_outside_the_checkout(

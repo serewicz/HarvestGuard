@@ -25,6 +25,29 @@ GCS_SCANNER = ScannerIdentity("gcs", "0.1.0")
 AZURE_BLOB_SCANNER = ScannerIdentity("azure_blob", "0.1.0")
 SENSITIVE_DATA_SCANNER = ScannerIdentity("sensitive_data_classifier", "0.1.0")
 CODE_ANALYSIS_SCANNER = ScannerIdentity("semgrep_crypto_rules", "0.1.0")
+# Aggregate filesystem context findings: one record per mount, standing in for
+# the volume/filesystem/platform context shared by every ordinary regular file
+# inspected on that mount, instead of repeating that context once per file.
+# Declared here (rather than in scanner/filesystem.py) because both the scanner
+# that emits these findings and the report layer that classifies and counts
+# them need the same identifiers, and both already depend on this module.
+FILESYSTEM_CONTEXT_ASSET_TYPE = "volume"
+FILESYSTEM_FILES_INSPECTED_KEY = "Regular Files Inspected"
+FILESYSTEM_FILES_REPRESENTED_KEY = "Files Represented By This Context"
+FILESYSTEM_FILES_WITH_FINDINGS_KEY = "Files With Individual Findings"
+# technical_metadata keys carried by an aggregate context finding. "Encryption"
+# is reused from the per-file records so a consumer reads volume status from
+# the same key; Size/Modified are deliberately absent, since a mount has
+# neither.
+FILESYSTEM_CONTEXT_METADATA_KEYS = [
+    "Encryption",
+    "Mount Point",
+    "Platform",
+    FILESYSTEM_FILES_INSPECTED_KEY,
+    FILESYSTEM_FILES_REPRESENTED_KEY,
+    FILESYSTEM_FILES_WITH_FINDINGS_KEY,
+]
+
 # scanner/crypto_inventory.py stamps its own SCANNER_NAME/SCANNER_VERSION onto
 # each row; these are the fallbacks used when a row omits them. They are
 # duplicated as literals because scanner.crypto_inventory imports this module.
@@ -45,8 +68,14 @@ def _filesystem_finding_from_row(
     # boundary, or a symlink/FIFO/socket/device entry skipped for safety) --
     # they never have file-level metadata to report, unlike "file" rows, and
     # must not carry encryption metadata that was never observed.
+    #
+    # A "volume" row is an aggregate mount/volume/platform context record: it
+    # has its own metadata (volume status, mount point, platform, how many
+    # regular files it represents) but no per-file ownership signals, since it
+    # describes a mount rather than any single file on it.
     asset_type = row.get("Asset Type", "file")
     is_file = asset_type == "file"
+    is_context = asset_type == FILESYSTEM_CONTEXT_ASSET_TYPE
     return NormalizedFinding(
         scan_id=scan_id,
         source_type="local_filesystem",
@@ -66,10 +95,31 @@ def _filesystem_finding_from_row(
         ownership_signals=_filesystem_ownership_signals(row) if is_file else {},
         unknowns=row.get("Unknowns") or [],
         limitations=row.get("Limitations") or [],
-        technical_metadata=(
-            _metadata(row, ["Size", "Modified", "Encryption"]) if is_file else {}
-        ),
+        # Stable technical identity of the mount an aggregate context record
+        # describes; unset for every other filesystem row, whose location
+        # already identifies it.
+        identity_key=_optional_str(row.get("Identity Key")),
+        technical_metadata=_filesystem_metadata(row, is_file=is_file, is_context=is_context),
     )
+
+
+def _filesystem_metadata(
+    row: dict[str, Any], is_file: bool, is_context: bool
+) -> dict[str, Any]:
+    if is_file:
+        return _metadata(row, ["Size", "Modified", "Encryption"])
+    if is_context:
+        return _metadata(row, FILESYSTEM_CONTEXT_METADATA_KEYS)
+    return {}
+
+
+def _optional_str(value: Any) -> str | None:
+    """Row values arrive via a DataFrame, so a column another row type supplies
+    reads back as NaN here rather than as None -- and NaN is truthy, so it would
+    otherwise be passed through as a real value."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    return str(value) or None
 
 
 def _filesystem_ownership_signals(row: dict[str, Any]) -> dict[str, Any]:

@@ -133,11 +133,16 @@ def test_demo_target_produces_filesystem_encryption_evidence_with_confidence():
 
     findings = scan_filesystem_findings(str(DEMO_TARGET))
 
+    # leaked_config.env is an ordinary file (no file-level encrypted-format
+    # signature, no file-specific failure), so it is represented by its
+    # mount's aggregate context record rather than a per-file record of its
+    # own -- see tests/test_filesystem_aggregate_context.py.
     assert len(findings) == 1
     finding = findings[0]
-    assert finding.location.endswith("leaked_config.env")
+    assert finding.asset_type == "volume"
     assert finding.source_type == "local_filesystem"
-    assert finding.evidence.startswith("Encryption status observed:")
+    assert finding.evidence.startswith("Volume-level encryption status")
+    assert finding.technical_metadata["Files Represented By This Context"] == 1
 
     # Confidence is a real evidence-quality field, not a platform-specific
     # value -- it must always be present and be one of the three defined
@@ -146,10 +151,9 @@ def test_demo_target_produces_filesystem_encryption_evidence_with_confidence():
     assert finding.confidence_rationale
     assert isinstance(finding.confidence_rationale, str)
 
-    # Rule ID always identifies which detection path produced the result
-    # (file-level signature vs. volume-level fallback), even though the
-    # fallback's *value* is platform-dependent.
-    assert finding.rule_id.startswith(("file_signature:", "volume_status:"))
+    # Rule ID always identifies which volume-status value was determined
+    # (or Unknown), even though the value itself is platform-dependent.
+    assert finding.rule_id.startswith("volume_status:")
     assert isinstance(finding.repeatable, bool)
 
 
@@ -192,7 +196,10 @@ def test_demo_findings_json_output_contains_expected_normalized_evidence():
 
     fs_record = next(r for r in payload if r["source_type"] == "local_filesystem")
     assert fs_record["confidence"] in {"High", "Medium", "Low"}
-    assert fs_record["evidence"].startswith("Encryption status observed:")
+    # leaked_config.env is an ordinary file, represented by the mount's
+    # aggregate context record rather than a per-file record.
+    assert fs_record["asset_type"] == "volume"
+    assert fs_record["evidence"].startswith("Volume-level encryption status")
 
     crypto_record = next(r for r in payload if r["source_type"] == "crypto_inventory")
     assert crypto_record["asset_type"] == "Malformed PEM Private Key"

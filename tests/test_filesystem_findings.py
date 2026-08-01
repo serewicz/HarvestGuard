@@ -32,9 +32,39 @@ def _stable_volume_status(monkeypatch):
     monkeypatch.setattr(fs_module, "_detect_volume_encryption", lambda mount: "Unencrypted")
 
 
-# 1. A normal file produces a normalized Finding.
-def test_normal_file_produces_finding(tmp_path):
+# An ordinary readable file with no file-level signature and no file-specific
+# failure produces no record of its own (see the aggregate-context design in
+# scanner/filesystem.py and tests/test_filesystem_aggregate_context.py), so
+# tests below that need a per-file record write a file carrying a real
+# encrypted-format signature instead.
+ENCRYPTED_BYTES = b"Salted__" + b"\x00" * 16
+
+
+def _file_findings(findings):
+    return [f for f in findings if f.asset_type == "file"]
+
+
+def _context_findings(findings):
+    return [f for f in findings if f.asset_type == "volume"]
+
+
+# 1. A normal file is represented by aggregate mount context, not its own record.
+def test_normal_file_produces_aggregate_context_not_a_per_file_finding(tmp_path):
     (tmp_path / "a.txt").write_text("hello")
+
+    findings = scan_filesystem_findings(str(tmp_path))
+
+    assert _file_findings(findings) == []
+    assert len(findings) == 1
+    payload = findings[0].to_dict()
+    assert payload["source_type"] == "local_filesystem"
+    assert payload["asset_type"] == "volume"
+    assert payload["technical_metadata"]["Files Represented By This Context"] == 1
+
+
+# 1b. A file with file-level evidence still produces its own record.
+def test_file_level_signature_still_produces_a_per_file_finding(tmp_path):
+    (tmp_path / "a.enc").write_bytes(ENCRYPTED_BYTES)
 
     findings = scan_filesystem_findings(str(tmp_path))
 
@@ -42,48 +72,55 @@ def test_normal_file_produces_finding(tmp_path):
     payload = findings[0].to_dict()
     assert payload["source_type"] == "local_filesystem"
     assert payload["asset_type"] == "file"
-    assert payload["location"].endswith("a.txt")
+    assert payload["location"].endswith("a.enc")
+    assert payload["rule_id"] == "file_signature:file_level_openssl"
 
 
-# 2. Provenance is populated correctly.
+# 2. Provenance is populated correctly, on per-file and aggregate records alike.
 def test_provenance_populated(tmp_path):
     (tmp_path / "a.txt").write_text("hello")
+    (tmp_path / "a.enc").write_bytes(ENCRYPTED_BYTES)
 
-    payload = scan_filesystem_findings(str(tmp_path))[0].to_dict()
+    findings = scan_filesystem_findings(str(tmp_path))
 
-    assert payload["scanner_name"] == "filesystem"
-    assert payload["scanner_version"]
-    assert payload["collection_method"]
-    assert payload["collection_source"]
-    assert payload["rule_id"] in {
-        "volume_status:unencrypted",
-    } or payload["rule_id"].startswith("file_signature:")
-    assert payload["repeatable"] in (True, False)
-    assert payload["verification_rationale"]
-    assert payload["observed_at"]  # collection timestamp, distinct from file mtime
+    assert len(findings) == 2
+    for payload in (f.to_dict() for f in findings):
+        assert payload["scanner_name"] == "filesystem"
+        assert payload["scanner_version"]
+        assert payload["collection_method"]
+        assert payload["collection_source"]
+        assert payload["rule_id"] in {
+            "volume_status:unencrypted",
+        } or payload["rule_id"].startswith("file_signature:")
+        assert payload["repeatable"] in (True, False)
+        assert payload["verification_rationale"]
+        assert payload["observed_at"]  # collection timestamp, distinct from file mtime
 
 
 # 3. Confidence has an evidence-quality rationale.
 def test_confidence_has_rationale(tmp_path):
     (tmp_path / "a.txt").write_text("hello")
+    (tmp_path / "a.enc").write_bytes(ENCRYPTED_BYTES)
 
-    payload = scan_filesystem_findings(str(tmp_path))[0].to_dict()
+    findings = scan_filesystem_findings(str(tmp_path))
 
-    assert payload["confidence"] in {"High", "Medium", "Low"}
-    assert payload["confidence_rationale"]
-    # Confidence must never smuggle in severity/priority/business language.
-    for banned in ("priority", "remediat", "business", "severity"):
-        assert banned not in payload["confidence_rationale"].lower()
+    assert len(findings) == 2
+    for payload in (f.to_dict() for f in findings):
+        assert payload["confidence"] in {"High", "Medium", "Low"}
+        assert payload["confidence_rationale"]
+        # Confidence must never smuggle in severity/priority/business language.
+        for banned in ("priority", "remediat", "business", "severity"):
+            assert banned not in payload["confidence_rationale"].lower()
 
 
 # 4. UID/GID/owner/group/mode are captured where supported.
 @POSIX_ONLY
 def test_ownership_signals_captured(tmp_path):
-    target = tmp_path / "a.txt"
-    target.write_text("hello")
+    target = tmp_path / "a.enc"
+    target.write_bytes(ENCRYPTED_BYTES)
     st = os.stat(target)
 
-    payload = scan_filesystem_findings(str(tmp_path))[0].to_dict()
+    payload = _file_findings(scan_filesystem_findings(str(tmp_path)))[0].to_dict()
     signals = payload["ownership_signals"]
 
     assert signals["uid"] == st.st_uid
@@ -111,14 +148,20 @@ def test_unknowns_and_limitations_distinct(tmp_path):
 
 # 6. Raw details preserve the original observation.
 def test_raw_details_preserve_original_observation(tmp_path):
-    target = tmp_path / "a.txt"
-    target.write_text("hello world")
+    target = tmp_path / "a.enc"
+    target.write_bytes(ENCRYPTED_BYTES)
     st = os.stat(target)
+    (tmp_path / "ordinary.txt").write_text("hello world")
 
-    payload = scan_filesystem_findings(str(tmp_path))[0].to_dict()
+    findings = scan_filesystem_findings(str(tmp_path))
 
-    assert payload["technical_metadata"]["Size"] == st.st_size
-    assert payload["technical_metadata"]["Encryption"] == "Unencrypted"
+    file_metadata = _file_findings(findings)[0].to_dict()["technical_metadata"]
+    assert file_metadata["Size"] == st.st_size
+    assert file_metadata["Encryption"] == "File-level (OpenSSL)"
+    # The volume status the ordinary file used to carry per file is preserved
+    # once, on the aggregate context record.
+    context_metadata = _context_findings(findings)[0].to_dict()["technical_metadata"]
+    assert context_metadata["Encryption"] == "Unencrypted"
 
 
 # 7. Stable Finding IDs remain stable across equivalent repeated scans.
@@ -183,12 +226,12 @@ def test_symlinks_are_not_followed(tmp_path):
 @POSIX_ONLY
 def test_broken_symlink_is_skipped_without_crashing(tmp_path):
     (tmp_path / "dangling.txt").symlink_to(tmp_path / "does_not_exist.txt")
-    (tmp_path / "real.txt").write_text("hello")
+    (tmp_path / "real.enc").write_bytes(ENCRYPTED_BYTES)
 
     findings = scan_filesystem_findings(str(tmp_path))
     by_location = {f.location: f.to_dict() for f in findings}
 
-    assert by_location[str(tmp_path / "real.txt")]["asset_type"] == "file"
+    assert by_location[str(tmp_path / "real.enc")]["asset_type"] == "file"
     dangling = by_location[str(tmp_path / "dangling.txt")]
     assert dangling["asset_type"] == "special_file"
     assert dangling["rule_id"] == "skipped_special_file"
@@ -255,14 +298,14 @@ def test_symlinked_directory_at_max_depth_boundary_stays_special_file(tmp_path):
 def test_fifo_is_not_opened_or_reported(tmp_path):
     fifo_path = tmp_path / "pipe"
     os.mkfifo(fifo_path)
-    (tmp_path / "real.txt").write_text("hello")
+    (tmp_path / "real.enc").write_bytes(ENCRYPTED_BYTES)
 
     # If the scanner ever opened the FIFO for reading, this call would hang
     # indefinitely (no writer is attached) instead of returning.
     findings = scan_filesystem_findings(str(tmp_path))
     by_location = {f.location: f.to_dict() for f in findings}
 
-    assert by_location[str(tmp_path / "real.txt")]["asset_type"] == "file"
+    assert by_location[str(tmp_path / "real.enc")]["asset_type"] == "file"
     fifo_finding = by_location[str(fifo_path)]
     assert fifo_finding["asset_type"] == "special_file"
     assert fifo_finding["rule_id"] == "skipped_special_file"
@@ -273,7 +316,12 @@ def test_fifo_is_not_opened_or_reported(tmp_path):
 
 # 11. A disappearing/changing file is handled without corrupting the scan.
 def test_file_disappearing_mid_scan_does_not_corrupt_other_results(tmp_path, monkeypatch):
-    (tmp_path / "stable.txt").write_text("hello")
+    # File-level evidence, not an ordinary file: it must survive as its own
+    # finding so this test can verify the vanished file's failure doesn't
+    # leak onto it specifically (an ordinary file would be absorbed into the
+    # mount's aggregate context record instead, which isn't what this test
+    # is about).
+    (tmp_path / "stable.enc").write_bytes(ENCRYPTED_BYTES)
     vanished = tmp_path / "vanishes.txt"
     vanished.write_text("bye")
 
@@ -289,13 +337,13 @@ def test_file_disappearing_mid_scan_does_not_corrupt_other_results(tmp_path, mon
     findings = scan_filesystem_findings(str(tmp_path))
     by_location = {f.location: f.to_dict() for f in findings}
 
-    assert str(tmp_path / "stable.txt") in by_location
+    assert str(tmp_path / "stable.enc") in by_location
     # Platform-dependent limitations (e.g. ACL presence, unavailable on
     # macOS) may legitimately appear; what matters is that the vanished
     # file's failure doesn't leak onto the unrelated stable file.
     assert not any(
         "inaccessible" in item.lower()
-        for item in by_location[str(tmp_path / "stable.txt")]["limitations"]
+        for item in by_location[str(tmp_path / "stable.enc")]["limitations"]
     )
 
     vanished_payload = by_location[str(vanished)]
@@ -349,14 +397,31 @@ def test_legacy_scan_filesystem_dataframe_shape_is_unchanged(tmp_path):
 
 
 def test_evidence_scan_and_legacy_scan_agree_on_which_files_are_visited(tmp_path):
-    (tmp_path / "a.txt").write_text("hello")
+    # One ordinary file (absorbed into the aggregate context record) and one
+    # file with real evidence (gets its own row), so both evidence-path
+    # mechanisms are exercised in the same scan.
+    ordinary = tmp_path / "a.txt"
+    ordinary.write_text("hello")
     (tmp_path / "sub").mkdir()
-    (tmp_path / "sub" / "b.txt").write_text("world")
+    evidenced = tmp_path / "sub" / "b.enc"
+    evidenced.write_bytes(ENCRYPTED_BYTES)
 
     legacy_locations = set(scan_filesystem(str(tmp_path))["Location"])
-    evidence_locations = set(scan_filesystem_evidence(str(tmp_path))["Location"])
+    evidence_df = scan_filesystem_evidence(str(tmp_path))
+    # The legacy path has no equivalent of an aggregate mount/volume context
+    # record -- it still emits one row per file, ordinary or not. On the
+    # evidence path, a file with real evidence still gets its own "file" row,
+    # but an ordinary file does not: it is represented by the mount's
+    # aggregate "volume" context record instead (see
+    # tests/test_filesystem_aggregate_context.py). Every location the legacy
+    # scanner visited must therefore be accounted for by one of the two.
+    file_locations = set(evidence_df.loc[evidence_df["Asset Type"] == "file", "Location"])
+    context_rows = evidence_df[evidence_df["Asset Type"] == "volume"]
 
-    assert legacy_locations == evidence_locations
+    assert file_locations == {str(evidenced)}
+    assert legacy_locations - file_locations == {str(ordinary)}
+    assert len(context_rows) == 1
+    assert context_rows.iloc[0]["Files Represented By This Context"] == 1
 
 
 # Zero-length files and unusual filenames must not crash the scan.
@@ -366,7 +431,12 @@ def test_zero_length_and_unusual_filenames(tmp_path):
 
     findings = scan_filesystem_findings(str(tmp_path))
 
-    assert len(findings) == 2
+    # Both are ordinary files (no signature, no failure), so they are
+    # represented by one aggregate context record rather than a finding
+    # each -- the crash-safety property under test still holds: the scan
+    # completes and the result serializes cleanly.
+    assert len(findings) == 1
+    assert findings[0].technical_metadata["Files Represented By This Context"] == 2
     for finding in findings:
         json.dumps(finding.to_dict())
 
@@ -377,7 +447,10 @@ def test_zero_length_and_unusual_filenames(tmp_path):
 @POSIX_ONLY
 @NOT_ROOT
 def test_unreadable_directory_produces_directory_limitation_finding(tmp_path):
-    (tmp_path / "visible.txt").write_text("hello")
+    # File-level evidence, not an ordinary file: it must produce its own
+    # finding so this test can verify the blocked directory doesn't swallow
+    # or otherwise affect an unrelated sibling file's finding.
+    (tmp_path / "visible.enc").write_bytes(ENCRYPTED_BYTES)
     blocked = tmp_path / "blocked"
     blocked.mkdir()
     (blocked / "hidden.txt").write_text("secret")
@@ -389,7 +462,7 @@ def test_unreadable_directory_produces_directory_limitation_finding(tmp_path):
 
     by_location = {f.location: f.to_dict() for f in findings}
 
-    assert str(tmp_path / "visible.txt") in by_location
+    assert str(tmp_path / "visible.enc") in by_location
     # No fabricated file-level finding for what might be inside the blocked dir.
     assert str(blocked / "hidden.txt") not in by_location
 
@@ -402,7 +475,10 @@ def test_unreadable_directory_produces_directory_limitation_finding(tmp_path):
 
 def test_max_depth_boundary_produces_directory_limitation_finding(tmp_path):
     (tmp_path / "l1").mkdir()
-    (tmp_path / "l1" / "shallow.txt").write_text("hello")
+    # File-level evidence, not an ordinary file: it must produce its own
+    # finding so this test can verify it, distinct from the max-depth
+    # boundary finding, at the same directory level.
+    (tmp_path / "l1" / "shallow.enc").write_bytes(ENCRYPTED_BYTES)
     deep = tmp_path / "l1" / "l2"
     deep.mkdir()
     (deep / "buried.txt").write_text("buried")
@@ -410,7 +486,7 @@ def test_max_depth_boundary_produces_directory_limitation_finding(tmp_path):
     findings = scan_filesystem_findings(str(tmp_path), max_depth=1)
     by_location = {f.location: f.to_dict() for f in findings}
 
-    assert str(tmp_path / "l1" / "shallow.txt") in by_location
+    assert str(tmp_path / "l1" / "shallow.enc") in by_location
     # Not fabricated: buried.txt sits beyond the boundary and was never visited.
     assert str(deep / "buried.txt") not in by_location
 
@@ -422,13 +498,16 @@ def test_max_depth_boundary_produces_directory_limitation_finding(tmp_path):
 
 def _depth_tree(root):
     """root/ (depth 0) -> l1/ (depth 1) -> l2/ (depth 2) -> l3/ (depth 3), each
-    holding one regular file."""
-    (root / "d0.txt").write_text("zero")
+    holding one regular file with real file-level evidence, so each still
+    produces its own per-file finding under the aggregate-context design
+    (an ordinary file with no signature is represented by its mount's
+    aggregate context record instead, which these depth tests are not about)."""
+    (root / "d0.txt").write_bytes(ENCRYPTED_BYTES)
     current = root
     for level in range(1, 4):
         current = current / f"l{level}"
         current.mkdir()
-        (current / f"d{level}.txt").write_text(str(level))
+        (current / f"d{level}.txt").write_bytes(ENCRYPTED_BYTES)
     return root
 
 
@@ -518,8 +597,11 @@ def test_directory_limitation_findings_use_the_existing_finding_model(tmp_path):
 
 
 def test_finding_id_stable_when_mtime_touched(tmp_path):
-    target = tmp_path / "a.txt"
-    target.write_text("hello")
+    # File-level evidence, not an ordinary file: an ordinary file's mtime
+    # isn't tracked at all on the aggregate context record that represents
+    # it, so this per-finding mtime-stability property needs its own record.
+    target = tmp_path / "a.enc"
+    target.write_bytes(ENCRYPTED_BYTES)
 
     first = scan_filesystem_findings(str(tmp_path))[0]
     st = target.stat()
@@ -531,11 +613,11 @@ def test_finding_id_stable_when_mtime_touched(tmp_path):
 
 
 def test_finding_id_stable_when_size_changes_but_observation_unchanged(tmp_path):
-    target = tmp_path / "a.txt"
-    target.write_text("hello")
+    target = tmp_path / "a.enc"
+    target.write_bytes(ENCRYPTED_BYTES)
     first = scan_filesystem_findings(str(tmp_path))[0]
 
-    target.write_text("hello, now with a lot more unremarkable plain-text content")
+    target.write_bytes(ENCRYPTED_BYTES + b"padding to change size without changing the signature")
     second = scan_filesystem_findings(str(tmp_path))[0]
 
     assert first.technical_metadata["Size"] != second.technical_metadata["Size"]
@@ -545,8 +627,8 @@ def test_finding_id_stable_when_size_changes_but_observation_unchanged(tmp_path)
 
 @POSIX_ONLY
 def test_finding_id_stable_when_mode_and_ownership_signals_change(tmp_path):
-    target = tmp_path / "a.txt"
-    target.write_text("hello")
+    target = tmp_path / "a.enc"
+    target.write_bytes(ENCRYPTED_BYTES)
     first = scan_filesystem_findings(str(tmp_path))[0]
 
     target.chmod(0o600)
@@ -557,18 +639,27 @@ def test_finding_id_stable_when_mode_and_ownership_signals_change(tmp_path):
 
 
 def test_finding_id_differs_for_different_observations(tmp_path):
-    (tmp_path / "plain.txt").write_text("hello")
-    (tmp_path / "secret.enc").write_bytes(b"Salted__" + b"\x00" * 16)
+    # Two genuinely different per-file observations: an ordinary file would
+    # produce no finding of its own at all (see
+    # tests/test_filesystem_aggregate_context.py), so this needs two
+    # distinct real signatures rather than "plain vs. encrypted".
+    (tmp_path / "openssl.enc").write_bytes(b"Salted__" + b"\x00" * 16)
+    (tmp_path / "age.enc").write_bytes(b"age-encryption.org/v1" + b"\x00" * 8)
 
     by_name = {f.asset_name: f for f in scan_filesystem_findings(str(tmp_path))}
 
-    assert by_name["plain.txt"].rule_id != by_name["secret.enc"].rule_id
-    assert by_name["plain.txt"].finding_id != by_name["secret.enc"].finding_id
+    assert by_name["openssl.enc"].rule_id != by_name["age.enc"].rule_id
+    assert by_name["openssl.enc"].finding_id != by_name["age.enc"].finding_id
 
 
 def test_finding_id_differs_for_different_paths(tmp_path):
-    (tmp_path / "a.txt").write_text("hello")
-    (tmp_path / "b.txt").write_text("hello")
+    # File-level evidence, not ordinary files: two ordinary files at
+    # different paths would both be represented by the same single
+    # aggregate context record (see
+    # tests/test_filesystem_aggregate_context.py), so this per-file-path
+    # property needs its own per-file records.
+    (tmp_path / "a.enc").write_bytes(ENCRYPTED_BYTES)
+    (tmp_path / "b.enc").write_bytes(ENCRYPTED_BYTES)
 
     ids = {f.finding_id for f in scan_filesystem_findings(str(tmp_path))}
 

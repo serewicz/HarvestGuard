@@ -6,6 +6,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from finding_adapters import (
+    FILESYSTEM_CONTEXT_ASSET_TYPE,
+    FILESYSTEM_FILES_REPRESENTED_KEY,
+)
 from findings import NormalizedFinding, findings_to_dicts
 from harvestguard_version import __version__ as HARVESTGUARD_VERSION
 
@@ -15,6 +19,106 @@ from harvestguard_version import __version__ as HARVESTGUARD_VERSION
 # They happen to match at v0.1.0 and are free to diverge later.
 REPORT_GENERATOR = "harvestguard-report"
 REPORT_VERSION = "0.1.0"
+
+# Primary summary categories. Every retained normalized record is classified
+# into exactly one of them, deterministically, from fields the record already
+# carries (source_type, asset_type, rule_id) -- so a reader can tell aggregate
+# filesystem context from per-file evidence, and both from scope that was not
+# inspected, instead of reading one undifferentiated total.
+#
+# Finding-level errors (a record's own `errors`) and scanner execution errors
+# (`scanner_errors`) are deliberately *not* categories: a record can be in any
+# category and also carry errors, so they are reported as separate overlays.
+CATEGORY_FILESYSTEM_CONTEXT = "filesystem_context"
+CATEGORY_FILESYSTEM_FILE_EVIDENCE = "filesystem_file_evidence"
+CATEGORY_COVERAGE_LIMITATION = "coverage_limitation"
+CATEGORY_SKIPPED_OR_INACCESSIBLE = "skipped_or_inaccessible"
+CATEGORY_CRYPTO_INVENTORY = "crypto_inventory"
+CATEGORY_SENSITIVE_DATA = "sensitive_data"
+CATEGORY_CODE_ANALYSIS = "code_analysis"
+CATEGORY_CLOUD_EVIDENCE = "cloud_evidence"
+# Residual bucket so classification is total: any future source_type that has
+# no category yet is still counted and shown rather than silently dropped.
+CATEGORY_OTHER = "other_records"
+
+SUMMARY_CATEGORIES = (
+    CATEGORY_FILESYSTEM_CONTEXT,
+    CATEGORY_FILESYSTEM_FILE_EVIDENCE,
+    CATEGORY_COVERAGE_LIMITATION,
+    CATEGORY_SKIPPED_OR_INACCESSIBLE,
+    CATEGORY_CRYPTO_INVENTORY,
+    CATEGORY_SENSITIVE_DATA,
+    CATEGORY_CODE_ANALYSIS,
+    CATEGORY_CLOUD_EVIDENCE,
+    CATEGORY_OTHER,
+)
+
+# Display labels are deliberately not the scanner labels the CLI reports under
+# Scope ("crypto inventory", "sensitive data", "code analysis"): a report must
+# never contain the name of a scanner the run did not invoke, and these rows are
+# always printed, including with a count of zero.
+CATEGORY_LABELS = {
+    CATEGORY_FILESYSTEM_CONTEXT: "Aggregate filesystem context records",
+    CATEGORY_FILESYSTEM_FILE_EVIDENCE: "Per-file filesystem evidence records",
+    CATEGORY_COVERAGE_LIMITATION: "Coverage limitation records",
+    CATEGORY_SKIPPED_OR_INACCESSIBLE: "Skipped or inaccessible entry records",
+    CATEGORY_CRYPTO_INVENTORY: "Cryptographic inventory records",
+    CATEGORY_SENSITIVE_DATA: "Sensitive-data records",
+    CATEGORY_CODE_ANALYSIS: "Code-analysis records",
+    CATEGORY_CLOUD_EVIDENCE: "Cloud storage records",
+    CATEGORY_OTHER: "Other records",
+}
+
+# Categories whose records are observed evidence about an asset. The remaining
+# categories describe scan context or scope that was not inspected, which is
+# exactly why a single combined total must never be labelled as if every
+# counted item were a distinct material finding.
+MATERIAL_EVIDENCE_CATEGORIES = (
+    CATEGORY_FILESYSTEM_FILE_EVIDENCE,
+    CATEGORY_CRYPTO_INVENTORY,
+    CATEGORY_SENSITIVE_DATA,
+    CATEGORY_CODE_ANALYSIS,
+    CATEGORY_CLOUD_EVIDENCE,
+)
+
+# Filesystem rule families that record scope which was *not* inspected.
+_COVERAGE_RULE_IDS = frozenset({"max_depth_boundary", "directory_traversal_error"})
+_SKIPPED_RULE_IDS = frozenset({"skipped_special_file", "metadata_unavailable"})
+_SOURCE_TYPE_CATEGORIES = {
+    "crypto_inventory": CATEGORY_CRYPTO_INVENTORY,
+    "local_sensitive_data": CATEGORY_SENSITIVE_DATA,
+    "code_analysis": CATEGORY_CODE_ANALYSIS,
+    "aws_s3": CATEGORY_CLOUD_EVIDENCE,
+    "gcs": CATEGORY_CLOUD_EVIDENCE,
+    "azure_blob": CATEGORY_CLOUD_EVIDENCE,
+}
+
+
+def classify_finding(finding: NormalizedFinding) -> str:
+    """The one primary summary category a normalized record belongs to."""
+    if finding.source_type != "local_filesystem":
+        return _SOURCE_TYPE_CATEGORIES.get(finding.source_type, CATEGORY_OTHER)
+
+    rule_id = finding.rule_id or ""
+    if finding.asset_type == FILESYSTEM_CONTEXT_ASSET_TYPE:
+        return CATEGORY_FILESYSTEM_CONTEXT
+    if rule_id in _COVERAGE_RULE_IDS or finding.asset_type == "directory":
+        return CATEGORY_COVERAGE_LIMITATION
+    if rule_id in _SKIPPED_RULE_IDS or finding.asset_type == "special_file":
+        return CATEGORY_SKIPPED_OR_INACCESSIBLE
+    if rule_id.startswith("volume_status:"):
+        # A per-file record on the volume-level fallback path only survives now
+        # when the file's own content could not be read; the ordinary case has
+        # no per-file record at all. That makes it an inaccessible entry, not
+        # file-level evidence.
+        return CATEGORY_SKIPPED_OR_INACCESSIBLE
+    return CATEGORY_FILESYSTEM_FILE_EVIDENCE
+
+
+def count_by_category(findings: list[NormalizedFinding]) -> dict[str, int]:
+    """Every primary category, including the ones with no records this scan."""
+    counted = Counter(classify_finding(finding) for finding in findings)
+    return {category: counted.get(category, 0) for category in SUMMARY_CATEGORIES}
 
 
 @dataclass(frozen=True)
@@ -78,7 +182,16 @@ def format_console_summary(
     lines = [
         "HarvestGuard Scan Complete",
         "",
+        # Inspected regular files, kept visually separate from every record
+        # count below it: the two answer different questions, and conflating
+        # them is what made a 20,091-file scan read as 20,632 "findings".
         f"Files scanned: {counts['files_scanned']}",
+        "",
+        "Record Categories",
+        "",
+    ]
+    lines.extend(_category_lines(counts))
+    lines.extend([
         "",
         "Findings",
         "",
@@ -93,8 +206,15 @@ def format_console_summary(
         f"Malformed Assets: {counts['malformed_assets']}",
         f"Errors: {counts['errors']}",
         "",
-        f"Total Findings: {len(findings)}",
-    ]
+        # Named for exactly what it counts. A combined total must never be
+        # presented as "Total Findings", which would imply every counted item
+        # is a distinct material finding -- aggregate context, coverage
+        # limitation, and skipped/inaccessible records are not.
+        f"Material evidence records: {counts['material_evidence']}",
+        f"Total normalized records: {counts['total_records']}",
+        f"Findings with finding-level errors: {counts['errors']}",
+        f"Scanner execution errors: {len(context.scanner_errors) if context else 0}",
+    ])
     if context and context.scanner_errors:
         lines.extend(["", "Scanner Warnings:"])
         lines.extend(f"- {error}" for error in context.scanner_errors)
@@ -151,6 +271,32 @@ def format_markdown_report(
     lines.extend(_scope_lines(context))
     lines.extend([
         "",
+        "## Record Categories",
+        "",
+        "Every normalized record below is counted in exactly one category. "
+        "`Files Scanned` above counts inspected regular files, not records: "
+        "an ordinary readable file with no file-level evidence and no "
+        "file-specific failure produces no record of its own, and is "
+        "represented by its mount's aggregate filesystem context record.",
+        "",
+        "| Category | Count |",
+        "| --- | ---: |",
+    ])
+    lines.extend(
+        f"| {CATEGORY_LABELS[category]} | {counts[category]} |"
+        for category in SUMMARY_CATEGORIES
+        if category != CATEGORY_OTHER or counts[category]
+    )
+    lines.extend([
+        f"| **Material evidence records** | {counts['material_evidence']} |",
+        f"| **Total normalized records** | {counts['total_records']} |",
+        "",
+        # Overlays, not categories: a record in any category above can also
+        # carry finding-level errors, and a scanner execution error is not a
+        # record at all.
+        f"- Findings with finding-level errors: {counts['errors']}",
+        f"- Scanner execution errors: {len(context.scanner_errors)}",
+        "",
         "## Findings Summary",
         "",
         "| Category | Count |",
@@ -165,7 +311,7 @@ def format_markdown_report(
         f"| Semgrep Findings | {counts['semgrep_findings']} |",
         f"| Malformed Assets | {counts['malformed_assets']} |",
         f"| Errors | {counts['errors']} |",
-        f"| Total Findings | {len(findings)} |",
+        f"| Total normalized records | {counts['total_records']} |",
         "",
         "## Finding Breakdown by Type",
         "",
@@ -302,17 +448,32 @@ def summarize_findings(findings: list[NormalizedFinding]) -> dict[str, int]:
     # Coverage-limitation findings (an unreadable directory, a directory beyond
     # max_depth, a symlink/special file skipped for safety) are deliberately
     # excluded: they record scope that was *not* inspected, so counting them as
-    # files scanned would overstate coverage.
+    # files scanned would overstate coverage. Aggregate filesystem context
+    # records are excluded here too -- one describes a mount, not a file -- but
+    # each reports how many inspected regular files it stands in for, and those
+    # files were inspected, so they are added back below. "Files scanned"
+    # therefore still means inspected regular files, never a record count.
     filesystem_locations = {
         finding.location
         for finding in findings
         if finding.source_type == "local_filesystem" and finding.asset_type == "file"
     }
+    files_represented_by_context = sum(
+        _represented_file_count(finding)
+        for finding in findings
+        if classify_finding(finding) == CATEGORY_FILESYSTEM_CONTEXT
+    )
+    categories = count_by_category(findings)
     certificates = [
         finding for finding in findings if "Certificate" in finding.asset_type
     ]
     return {
-        "files_scanned": len(filesystem_locations),
+        **categories,
+        "total_records": len(findings),
+        "material_evidence": sum(
+            categories[category] for category in MATERIAL_EVIDENCE_CATEGORIES
+        ),
+        "files_scanned": len(filesystem_locations) + files_represented_by_context,
         "certificates": len(certificates),
         "private_keys": sum("Private Key" in finding.asset_type for finding in findings),
         "encrypted_keys": sum("Encrypted" in finding.asset_type for finding in findings),
@@ -324,6 +485,32 @@ def summarize_findings(findings: list[NormalizedFinding]) -> dict[str, int]:
         "malformed_assets": sum("Malformed" in finding.asset_type for finding in findings),
         "errors": sum(1 for finding in findings if finding.errors),
     }
+
+
+def _category_lines(counts: dict[str, int]) -> list[str]:
+    """One line per primary category, in a fixed order.
+
+    Categories with no records this scan are still printed: a reader must be
+    able to see that there were zero coverage limitations, rather than having
+    to infer it from the absence of a line.
+    """
+    return [
+        f"{CATEGORY_LABELS[category]}: {counts[category]}"
+        for category in SUMMARY_CATEGORIES
+        # The residual bucket only means something when something landed in it.
+        if category != CATEGORY_OTHER or counts[category]
+    ]
+
+
+def _represented_file_count(finding: NormalizedFinding) -> int:
+    """How many inspected regular files an aggregate context record stands in
+    for. Absent, malformed, or negative values count as zero rather than
+    inventing coverage."""
+    try:
+        count = int(finding.technical_metadata.get(FILESYSTEM_FILES_REPRESENTED_KEY) or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(count, 0)
 
 
 def _limitation_findings(findings: list[NormalizedFinding]) -> list[NormalizedFinding]:
@@ -412,11 +599,22 @@ def _executive_summary(counts: dict[str, int], findings: list[NormalizedFinding]
         and "Malformed" not in finding.asset_type
         for finding in findings
     )
+    # Inspected files, material evidence, and un-inspected scope are stated as
+    # three separate quantities. A single "N total findings" sentence read as
+    # if every ordinary scanned file were a material finding.
     return (
-        f"HarvestGuard scanned {counts['files_scanned']} files and identified "
-        f"{crypto_assets} cryptographic assets, {counts['sensitive_files']} "
-        f"sensitive-data findings, and {counts['semgrep_findings']} "
-        f"code-analysis findings across {len(findings)} total findings."
+        f"HarvestGuard inspected {counts['files_scanned']} regular file(s) and "
+        f"recorded {counts['material_evidence']} material evidence record(s): "
+        f"{crypto_assets} cryptographic asset(s), {counts['sensitive_files']} "
+        f"sensitive-data finding(s), {counts['semgrep_findings']} code-analysis "
+        f"finding(s), {counts[CATEGORY_CLOUD_EVIDENCE]} cloud storage "
+        f"finding(s), and {counts[CATEGORY_FILESYSTEM_FILE_EVIDENCE]} "
+        "per-file filesystem evidence finding(s). It also recorded "
+        f"{counts[CATEGORY_FILESYSTEM_CONTEXT]} aggregate filesystem context "
+        f"record(s), {counts[CATEGORY_COVERAGE_LIMITATION]} coverage "
+        f"limitation(s), and {counts[CATEGORY_SKIPPED_OR_INACCESSIBLE]} skipped "
+        "or inaccessible entry record(s), for "
+        f"{counts['total_records']} total normalized records."
     )
 
 
