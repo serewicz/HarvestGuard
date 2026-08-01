@@ -99,11 +99,13 @@ def installed_cli(request, tmp_path_factory) -> Path:
     Semgrep rules that fail to ship as package data all surface here.
 
     Two deliberate narrowings. The venv is created with
-    `--system-site-packages` and the install passes `--no-deps`: what needs
-    validating is HarvestGuard's own packaging, not pip's ability to re-download
-    streamlit/semgrep/boto3 -- the documented `pip install -r requirements.txt`
-    step covers those, and installing them per test run would add minutes and a
-    hard network dependency. Build isolation is skipped when setuptools is
+    `--system-site-packages` and the install passes `--no-deps`, so these tests
+    stay fast and offline: what they validate is HarvestGuard's own packaging --
+    flat-layout discovery, the console-script entry point, package data -- not
+    dependency resolution. Whether the declared dependency metadata is complete
+    enough for a fresh user is a different question, and it is answered by
+    `tests/test_clean_install.py`, which installs into a genuinely isolated venv
+    with neither narrowing. Build isolation is skipped here when setuptools is
     already importable, purely to avoid a network round trip.
     """
     venv_dir = tmp_path_factory.mktemp(f"install-{request.param}") / "venv"

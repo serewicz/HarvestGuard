@@ -142,31 +142,48 @@ priority order.
 ## Quick Start (macOS / Linux / Windows)
 
 ### Prerequisites
-- Python 3.10+ (`python3 --version`)
+- **Python 3.10 or newer** (`python3 --version`). macOS ships Python 3.9.6 as
+  `/usr/bin/python3`, which is **too old** — install a current Python (for
+  example `brew install python@3.12`) and use that interpreter to create the
+  virtual environment. Do not replace the system Python.
 - Elevated rights (`sudo`) for deep local scans (or IAM for cloud)
 
-### Installation
+### Install the CLI
+
+One command from a clean virtual environment installs `harvestguard` and every
+dependency it needs — `pyproject.toml` is authoritative, so there is no second
+requirements step:
 
 ```bash
 # Clone the repo
 git clone https://github.com/serewicz/HarvestGuard.git
 cd HarvestGuard
 
-# Create and activate virtual environment (recommended)
-python3 -m venv venv
-source venv/bin/activate    # On macOS/Linux
-# venv\Scripts\activate    # On Windows
+# Create and activate a clean virtual environment
+python3 -m venv venv            # macOS: python3.12 -m venv venv
+source venv/bin/activate        # On macOS/Linux
+# venv\Scripts\activate         # On Windows
 
-# Install dependencies
-pip install -r requirements.txt     # or pip3 if needed
+# Install the CLI and its dependencies
+python -m pip install .
 
-# Optional: install the unified CLI command
-pip install -e .
+# Confirm it works -- from anywhere, not just this directory
+harvestguard --version
+cd ~ && harvestguard scan /path/to/target --type filesystem --summary
+```
 
-# Run the dashboard
-streamlit run main.py
+`pip` may print long runs of repeated download and "looking at multiple
+versions of…" messages while resolving the Semgrep/OpenTelemetry dependency
+graph. That backtracking is normal and can take several minutes on a cold
+cache; a nonzero exit or a resolution error is a genuine failure.
 
-# Or run a local CLI scan
+Contributors who want their edits picked up without reinstalling use
+`python -m pip install -e .` instead. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full dev setup.
+
+### More CLI examples
+
+```bash
 harvestguard scan ./tests/fixtures/crypto_inventory
 
 # Write a Markdown evidence report
@@ -178,6 +195,17 @@ harvestguard scan my-bucket --type s3 --json --quiet
 ```
 
 See [docs/CLI.md](docs/CLI.md) for all scan types, options, and exit codes.
+
+### Running the dashboard
+
+The Streamlit dashboard is a separate operating path: it runs from the
+repository root and is not part of the installed CLI package, so it uses
+`requirements.txt` rather than the packaging metadata.
+
+```bash
+pip install -r requirements.txt     # or pip3 if needed
+streamlit run main.py
+```
 
 ### Running in a container
 

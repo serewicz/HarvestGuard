@@ -15,12 +15,53 @@ license = { text = "Apache-2.0" }
 authors = [{ name = "Timothy Serewicz" }]
 requires-python = ">=3.10"
 
+# Authoritative dependency metadata for the installed CLI: `pip install .` (or
+# `pip install -e .`) must produce a `harvestguard` command that runs every
+# documented scan type without a second `pip install -r requirements.txt` step.
+# Everything listed here is imported directly by a packaged module, or invoked
+# by one as a subprocess (semgrep). Dependencies that only the Streamlit
+# dashboard needs (streamlit, plotly) are deliberately absent -- the dashboard
+# is run from the repository root and is not packaged. So are declared-but-
+# unused entries in requirements.txt (pydantic, prometheus-client,
+# python-dotenv, weasyprint), which no packaged module imports yet.
+#
+# `requirements.txt` keeps the same lines for repository-root convenience;
+# tests/test_packaging_dependencies.py fails if the two drift apart, or if a
+# packaged module grows a third-party import that is not declared here.
+dependencies = [
+    # Normalized findings, every scanner adapter, and analyzer/risk.py.
+    "pandas>=2.2.0",
+    # scanner/crypto_inventory.py: x509 and hazmat.primitives.
+    "cryptography>=41.0.0",
+    # code_analysis/scanner.py calls certifi.where() for semgrep's CA bundle.
+    "certifi>=2024.2.2",
+    # `--type code` runs the `semgrep` console script off PATH, so it has to be
+    # installed alongside the CLI, not merely importable.
+    "semgrep>=1.90.0",
+    # scanner/cloud.py (`--type s3`). botocore is listed because that module
+    # imports `botocore.exceptions.ClientError` itself, not because boto3 might
+    # stop depending on it: first-party code should not rely on transitivity.
+    "boto3>=1.35.0",
+    "botocore>=1.35.0",
+    # scanner/gcs.py (`--type gcs`). google-auth and google-api-core are, again,
+    # directly imported for their exception types.
+    "google-cloud-storage>=2.18.0",
+    "google-api-core>=2.19.0",
+    "google-auth>=2.30.0",
+    # scanner/azure_blob.py (`--type azure`); azure-core supplies AzureError.
+    "azure-storage-blob>=12.19.0",
+    "azure-identity>=1.15.0",
+    "azure-core>=1.30.0",
+]
+
 [project.scripts]
 harvestguard = "harvestguard:main"
 
-# NOTE: This project isn't packaged for PyPI distribution yet. This file
-# centralizes dev-tooling config and exposes a local editable-install CLI entry
-# point for development use.
+# NOTE: This project isn't published to PyPI yet, so an install always starts
+# from a repository checkout (`pip install .` or `pip install -e .`). This file
+# is nonetheless the authoritative packaging metadata for that install: it
+# centralizes dev-tooling config, declares the runtime dependencies above, and
+# exposes the CLI entry point.
 
 # The repository uses a flat layout with several top-level modules and
 # packages, so setuptools' automatic discovery refuses to guess (it errors with

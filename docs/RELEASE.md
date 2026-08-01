@@ -82,10 +82,15 @@ git rev-parse HEAD           # the exact commit an artifact was produced from
 
 `pip install .` (or `pip install -e .`) builds from that checkout with
 setuptools; HarvestGuard is **not published to PyPI**, so there is no released
-wheel or sdist to verify a hash against.
+wheel or sdist to verify a hash against. Either command installs the CLI's
+runtime dependencies too — `pyproject.toml`'s `[project].dependencies` is
+authoritative for an installed `harvestguard`, and `requirements.txt` is
+repository-root convenience for the unpackaged Streamlit dashboard. Python 3.10+
+is required (macOS's system Python 3.9 is not sufficient); see
+[docs/CLI.md](CLI.md#installation).
 
-Runtime dependencies in `requirements.txt` are declared as **minimum versions**
-(`>=`), not exact pins, and the repository has no lock file. Two installs on
+Runtime dependencies are declared as **minimum versions** (`>=`), not exact
+pins, and the repository has no lock file. Two installs on
 different days can therefore resolve different dependency versions: an install
 is *identified*, not bit-for-bit reproducible. To record exactly what a given
 environment resolved to, capture it at install time:
