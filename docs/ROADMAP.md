@@ -605,6 +605,31 @@ Milestone 2 is fully delivered.
   `tests/test_clean_install.py`, and `tests/test_packaging_dependencies.py`.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/62
 
+### HG-029
+
+- **Title:** Filesystem Finding Amplification and Summary Semantics
+- **Purpose:** Prevent ordinary files from generating repeated per-file
+  filesystem context findings. Represent shared filesystem context once per
+  mount or volume. Clarify console and Markdown summaries by separating
+  material evidence, aggregate filesystem context, coverage limitations,
+  skipped or inaccessible entries, finding-level errors, scanner errors, and
+  total normalized records.
+- **Status:** Complete
+- **Milestone:** v0.1.1 Stabilization
+- **Dependencies:** HG-008, HG-009
+- **Acceptance criteria:** Ordinary readable files without supported evidence
+  or file-specific failures do not become individual normalized findings;
+  shared filesystem context is aggregated per mount or volume; Unknown remains
+  distinct from observed Unencrypted; JSON remains a bare normalized-finding
+  array; console and Markdown summaries distinguish files inspected, material
+  evidence, filesystem context, coverage limitations, skipped or inaccessible
+  records, finding-level errors, scanner errors, and total normalized records.
+- **Delivered by:** `scanner/filesystem.py`, `finding_adapters.py`,
+  `reports.py`, `docs/CLI.md`, `docs/DETECTION_CHARACTERIZATION.md`, and
+  `tests/test_filesystem_aggregate_context.py`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/65
+- **Pull request:** https://github.com/serewicz/HarvestGuard/pull/67
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
