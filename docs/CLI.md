@@ -142,6 +142,48 @@ so equivalent weak-crypto usage in another language produces no finding. There
 is no binary, bytecode, runtime, or network/TLS discovery. See
 [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md).
 
+#### OpenSSL encrypted-file evidence (HG-030)
+
+A file whose leading bytes are `Salted__` — the header `openssl enc -salt`
+writes — is cryptographic evidence, and the crypto-inventory scanner owns it:
+a `--type crypto` (or `--type all`) scan reports it as asset type
+`Encrypted File`, `rule_id: encrypted_file:openssl`, confidence `High`, with
+evidence text limited to the observed signature (never a claim about
+decryptability, password/key/algorithm, or encryption strength). Detection is
+based on the file's actual content, evaluated before any extension-based
+parsing, so a `Salted__` file saved with a misleading extension (e.g.
+`secret.p12` or `secret.der`) is still reported as `Encrypted File`, not
+routed into PKCS#12/DER parsing and reported as malformed.
+
+The filesystem scanner also recognizes this same signature independently, as
+it always has (`--type filesystem`, `rule_id: file_signature:file_level_openssl`,
+asset type `file`, `Encryption: File-level (OpenSSL)`) — that behavior is
+unchanged. When both scanners run together (`--type all`), the same file is
+never reported twice: the crypto-inventory finding is the one that survives
+in the combined output, and the filesystem scanner's record for that same
+file is excluded. This dedup is deterministic and does not depend on which
+scanner happened to run first.
+
+`Files scanned` keeps its existing meaning (inspected regular files, from the
+filesystem scanner's own activity — see below) and correctly reads `0` for a
+pure `--type crypto` run, since the crypto-inventory scanner is not the
+filesystem scanner. That is expected, not a bug. A separate, additive
+`Crypto files inspected` line (console: `Crypto files inspected: N`;
+Markdown: a `Crypto Files Inspected` row in *Scan Information*) reports how
+many files the crypto-inventory scanner actually visited and opened —
+including files that matched no recognized shape and produced no finding —
+whenever that scanner ran. It is never arithmetically merged, reconciled, or
+deduplicated against `Files scanned`, even when both scanners inspect the
+same files under `--type all`.
+
+As with every crypto-inventory finding, the absence of an `Encrypted File`
+finding is not proof no encrypted files exist: the scanner's other
+candidate-gate limitations (see
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#local-cryptographic-asset-inventory))
+still apply to every signature this issue did not add — only the exact
+`Salted__` OpenSSL header is recognized here, not GPG/PGP, age, LUKS,
+encrypted ZIP, or any other encrypted-container format.
+
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,
 `DefaultAzureCredential` for Azure). The CLI does not read, prompt for, or

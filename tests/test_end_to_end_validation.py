@@ -789,7 +789,7 @@ def test_local_scanner_failure_keeps_stdout_valid_json(tmp_path, capsys, monkeyp
     monkeypatch.setattr(
         harvestguard,
         "scan_crypto_inventory_findings",
-        lambda path, exclude_patterns=None: (_ for _ in ()).throw(
+        lambda path, exclude_patterns=None, stats=None: (_ for _ in ()).throw(
             RuntimeError("crypto inventory exploded")
         ),
     )
@@ -812,7 +812,7 @@ def test_local_scanner_failure_markdown_does_not_imply_complete_coverage(
     monkeypatch.setattr(
         harvestguard,
         "scan_crypto_inventory_findings",
-        lambda path, exclude_patterns=None: (_ for _ in ()).throw(
+        lambda path, exclude_patterns=None, stats=None: (_ for _ in ()).throw(
             RuntimeError("crypto inventory exploded")
         ),
     )

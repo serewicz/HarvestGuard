@@ -44,6 +44,8 @@ Example output shape:
 - OpenSSH public keys
 - PKCS#12 containers (`.p12`, `.pfx`) when no password is required
 - Java Keystore magic-header detection
+- OpenSSL `Salted__` encrypted files (leading-byte signature only, not
+  decrypted; checked before any extension-based branch above)
 
 ## Extracted Evidence
 

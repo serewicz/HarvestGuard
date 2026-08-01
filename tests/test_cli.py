@@ -38,7 +38,7 @@ def _patch_local_scanners(monkeypatch, findings_by_scanner):
     monkeypatch.setattr(
         harvestguard,
         "scan_crypto_inventory_findings",
-        lambda path, exclude_patterns=None: findings_by_scanner.get("crypto", []),
+        lambda path, exclude_patterns=None, stats=None: findings_by_scanner.get("crypto", []),
     )
     monkeypatch.setattr(
         harvestguard,
@@ -368,7 +368,9 @@ def test_scan_command_scanner_failure_continues(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
         harvestguard,
         "scan_crypto_inventory_findings",
-        lambda path, exclude_patterns=None: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda path, exclude_patterns=None, stats=None: (_ for _ in ()).throw(
+            RuntimeError("boom")
+        ),
     )
     monkeypatch.setattr(
         harvestguard,
@@ -838,7 +840,7 @@ def test_scan_no_fail_on_error_exits_zero(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(
         harvestguard,
         "scan_crypto_inventory_findings",
-        lambda path, exclude_patterns=None: [],
+        lambda path, exclude_patterns=None, stats=None: [],
     )
     monkeypatch.setattr(
         harvestguard, "scan_filesystem_for_sensitive_data_findings", lambda *a, **k: []

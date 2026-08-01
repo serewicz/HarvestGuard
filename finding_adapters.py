@@ -281,10 +281,14 @@ def normalize_crypto_inventory_df(
             observed_at=row.get("Observed At"),
             evidence=row.get("Evidence", ""),
             confidence=row.get("Confidence", "Low"),
+            # Unset for most crypto-inventory asset types (parsed certs/keys
+            # have no named detection rule); the OpenSSL Salted__ finding
+            # (HG-030) is the one asset type that sets it, via "Rule ID".
+            rule_id=row.get("Rule ID"),
             errors=_errors(row.get("Errors")),
             # location alone doesn't distinguish two certificates/keys parsed
             # from the same PKCS#12 or PEM file -- both share source_type,
-            # asset_type, location, scanner_name, and rule_id (unset).
+            # asset_type, location, and scanner_name.
             # Fingerprint is already computed by the scanner for every
             # successfully-parsed certificate/key and is a stable, content-
             # derived value, so it's a natural identity_key. Left unset (None)

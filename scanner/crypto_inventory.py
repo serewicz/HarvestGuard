@@ -49,6 +49,11 @@ class CryptoInventoryFinding:
     fingerprint: str | None = None
     evidence: str = ""
     confidence: str = "Low"
+    # Unset for every asset type except the OpenSSL Salted__ finding (HG-030):
+    # a rule_id is only meaningful for a finding backed by a specific,
+    # nameable detection rule rather than a parsed certificate/key, so every
+    # other asset type leaves this None rather than inventing one.
+    rule_id: str | None = None
     errors: list[str] = field(default_factory=list)
     scanner: str = SCANNER_NAME
     scanner_version: str = SCANNER_VERSION
@@ -69,6 +74,7 @@ class CryptoInventoryFinding:
             "Fingerprint": self.fingerprint,
             "Evidence": self.evidence,
             "Confidence": self.confidence,
+            "Rule ID": self.rule_id,
             "Errors": "; ".join(self.errors),
             "Scanner": self.scanner,
             "Scanner Version": self.scanner_version,
@@ -80,14 +86,28 @@ def scan_crypto_inventory(
     path: str,
     exclude_patterns: list[str] | None = None,
     follow_symlinks: bool = False,
+    stats: dict[str, int] | None = None,
 ) -> pd.DataFrame:
-    """Recursively scan a local path for cryptographic asset evidence."""
+    """Recursively scan a local path for cryptographic asset evidence.
+
+    ``stats``, when given, is populated with ``files_inspected``: the count
+    of every file this scan actually visited and opened, regardless of
+    whether it matched a recognized candidate shape or produced a finding
+    (HG-030 crypto scan accounting). It is an optional out-of-band channel
+    rather than a return-value change, so existing callers of this function
+    are unaffected.
+    """
     findings = []
     root_path = Path(path)
     patterns = exclude_patterns or []
+    files_inspected = 0
 
     for file_path in _iter_candidate_files(root_path, patterns, follow_symlinks):
+        files_inspected += 1
         findings.extend(_scan_file(file_path))
+
+    if stats is not None:
+        stats["files_inspected"] = files_inspected
 
     return pd.DataFrame([finding.to_record() for finding in findings])
 
@@ -97,12 +117,14 @@ def scan_crypto_inventory_findings(
     exclude_patterns: list[str] | None = None,
     follow_symlinks: bool = False,
     scan_id: str | None = None,
+    stats: dict[str, int] | None = None,
 ) -> list[NormalizedFinding]:
     return normalize_crypto_inventory_df(
         scan_crypto_inventory(
             path,
             exclude_patterns=exclude_patterns,
             follow_symlinks=follow_symlinks,
+            stats=stats,
         ),
         scan_id=scan_id,
     )
@@ -136,11 +158,41 @@ def _iter_candidate_files(
             yield file_path
 
 
+_OPENSSL_SALTED_SIGNATURE = b"Salted__"
+
+
+def _looks_like_openssl_salted(data: bytes) -> bool:
+    """Exact-position, binary-safe check for OpenSSL's `openssl enc -salt`
+    header. `bytes.startswith` never raises regardless of length (an empty
+    or truncated file safely returns False), and only matches the literal
+    signature at offset 0 -- a file with the same bytes later in its content
+    is not a match, matching the real format (the signature is always the
+    first 8 bytes of `enc -salt` output, never embedded elsewhere)."""
+    return data.startswith(_OPENSSL_SALTED_SIGNATURE)
+
+
+def _openssl_salted_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Encrypted File",
+        location=str(file_path),
+        evidence="Observed OpenSSL Salted__ encrypted file.",
+        confidence="High",
+        rule_id="encrypted_file:openssl",
+    )
+
+
 def _scan_file(file_path: Path) -> list[CryptoInventoryFinding]:
     try:
         data = file_path.read_bytes()
     except (OSError, PermissionError):
         return []
+
+    # Checked before any extension-based branch (JKS magic, .p12/.pfx, DER
+    # candidate) so a Salted__ file saved with a misleading extension (e.g.
+    # secret.p12) is reported as Encrypted File evidence, not routed into
+    # PKCS#12/DER parsing and reported as malformed (HG-030).
+    if _looks_like_openssl_salted(data):
+        return [_openssl_salted_finding(file_path)]
 
     if not _could_contain_crypto_asset(file_path, data):
         return []
@@ -460,6 +512,8 @@ def _decode_text(data: bytes) -> str | None:
 
 def _could_contain_crypto_asset(file_path: Path, data: bytes) -> bool:
     suffix = file_path.suffix.lower()
+    if _looks_like_openssl_salted(data):
+        return True
     if suffix in _BINARY_PARSE_EXTENSIONS:
         return True
     if _looks_like_jks(data):

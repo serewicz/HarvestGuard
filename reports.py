@@ -139,6 +139,14 @@ class ScanReportContext:
     # of a scanner that produced no findings, or that failed before producing
     # any, instead of omitting it as if it had never run.
     scanner_versions: dict[str, str] = field(default_factory=dict)
+    # Count of files the crypto-inventory scanner actually visited/opened,
+    # regardless of whether they matched a candidate shape or produced a
+    # finding (HG-029's `Files scanned` counts only local_filesystem findings,
+    # so it is 0 for a pure --type crypto run -- that is correct, not a bug,
+    # and is not redefined by this field). None when the crypto-inventory
+    # scanner did not run this scan; additive and never merged with
+    # `Files scanned` -- see summarize_findings()/format_console_summary().
+    crypto_files_inspected: int | None = None
 
 
 def make_report_context(
@@ -151,6 +159,7 @@ def make_report_context(
     scanners: list[str] | None = None,
     scope_constraints: list[str] | None = None,
     scanner_versions: dict[str, str] | None = None,
+    crypto_files_inspected: int | None = None,
 ) -> ScanReportContext:
     started = started_at or datetime.now(timezone.utc)
     if started.tzinfo is None:
@@ -165,6 +174,7 @@ def make_report_context(
         scanners=list(scanners or []),
         scope_constraints=list(scope_constraints or []),
         scanner_versions=dict(scanner_versions or {}),
+        crypto_files_inspected=crypto_files_inspected,
     )
 
 
@@ -186,10 +196,20 @@ def format_console_summary(
         # count below it: the two answer different questions, and conflating
         # them is what made a 20,091-file scan read as 20,632 "findings".
         f"Files scanned: {counts['files_scanned']}",
+    ]
+    if context is not None and context.crypto_files_inspected is not None:
+        # Additive, independent of `Files scanned` (HG-030): a pure
+        # --type crypto run correctly reports `Files scanned: 0` (no
+        # local_filesystem findings), which would otherwise read as if
+        # nothing was inspected. Never arithmetically merged or reconciled
+        # with `Files scanned`, even when both scanners inspect the same
+        # files under --type all.
+        lines.append(f"Crypto files inspected: {context.crypto_files_inspected}")
+    lines.extend([
         "",
         "Record Categories",
         "",
-    ]
+    ])
     lines.extend(_category_lines(counts))
     lines.extend([
         "",
@@ -258,6 +278,13 @@ def format_markdown_report(
         f"| Target Path | {_md(context.target_path)} |",
         f"| Duration | {_duration(context.duration_seconds)} |",
         f"| Files Scanned | {counts['files_scanned']} |",
+    ])
+    if context.crypto_files_inspected is not None:
+        # Additive accounting line (HG-030), independent of `Files Scanned`
+        # above -- see format_console_summary for why the two are never
+        # merged or reconciled.
+        lines.append(f"| Crypto Files Inspected | {context.crypto_files_inspected} |")
+    lines.extend([
         f"| Excluded Paths | {_md(', '.join(context.excluded_paths) or 'None')} |",
         f"| Coverage | {_md(_coverage_status(coverage_statement, context))} |",
         "",
