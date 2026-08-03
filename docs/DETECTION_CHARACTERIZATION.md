@@ -213,6 +213,19 @@ reported without decrypting them. See
 [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md) for the full supported-asset-type
 list and usage.
 
+**OpenSSL `Salted__` encrypted files (HG-030).** A file whose content begins
+with the exact 8-byte header `openssl enc -salt` writes is reported as asset
+type `Encrypted File` (`rule_id: encrypted_file:openssl`), based solely on
+that leading-byte signature — not decryption, not parameter parsing. This
+check runs before every extension-based branch below, so a `Salted__` file
+saved with a `.p12`, `.pfx`, `.cer`, `.crt`, or `.der` extension is still
+reported as `Encrypted File`, not as a malformed PKCS#12/DER asset. The
+filesystem scanner ([local filesystem encryption
+evidence](#local-filesystem-encryption-evidence)) recognizes the same
+signature independently; when both scanners run in the same scan
+(`--type all`), only the crypto-inventory finding for that file is kept in
+the combined output — see [docs/CLI.md](CLI.md#openssl-encrypted-file-evidence-hg-030).
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:
@@ -220,7 +233,10 @@ list and usage.
 - `High` — a certificate or key was fully parsed and its cryptographic
   properties extracted, or an encrypted PEM/OpenSSH private key block was
   positively identified by its header (algorithm/key-size may still be
-  unavailable without a passphrase).
+  unavailable without a passphrase), or an OpenSSL `Salted__` header was
+  directly observed in the file's content (a signature match, not a parse —
+  `High` here describes the certainty of the byte-level observation, not
+  anything about the encryption's strength or recoverability).
 - `Medium` — a JKS magic header matched, or an OpenSSH private key's block
   was found but could not be loaded (an inconsistency with the PEM path,
   where an encrypted PEM key is `High`; both are documented, unvalidated
@@ -233,15 +249,21 @@ list and usage.
 ### What this scanner can miss
 
 - **The candidate-file gate is a silent pre-filter.** Before any parsing is
-  attempted, `_could_contain_crypto_asset` requires a file to either have a
-  recognized extension (`.cer`, `.crt`, `.der`, `.jks`, `.p12`, `.pfx`), start
-  with an SSH public-key prefix, match the JKS magic header, or contain the
-  literal bytes `-----BEGIN ` somewhere in its first 5 MB. **A file that
-  matches none of these produces no finding and no limitation record at
-  all** — unlike the filesystem scanner, there is no explicit
-  "not inspected" marker for gate-excluded files. An empty crypto-inventory
-  result does not distinguish "no crypto assets present" from "assets present
-  in a format or extension this gate does not recognize."
+  attempted, `_could_contain_crypto_asset` requires a file to either begin
+  with the OpenSSL `Salted__` signature (HG-030), have a recognized extension
+  (`.cer`, `.crt`, `.der`, `.jks`, `.p12`, `.pfx`), start with an SSH
+  public-key prefix, match the JKS magic header, or contain the literal bytes
+  `-----BEGIN ` somewhere in its first 5 MB. **A file that matches none of
+  these produces no finding and no limitation record at all** — unlike the
+  filesystem scanner, there is no explicit "not inspected" marker for
+  gate-excluded files. An empty crypto-inventory result does not distinguish
+  "no crypto assets present" from "assets present in a format or extension
+  this gate does not recognize." `Salted__` is now a recognized shape and no
+  longer an example of this gap, but every other encrypted-container format
+  (GPG/PGP, age, LUKS, encrypted ZIP/PDF/Office, and any signature not listed
+  above) remains outside this gate for the crypto-inventory scanner
+  specifically — HG-030 added exactly one signature, not general
+  encrypted-file detection.
 - **Password-protected PKCS#12 containers** are reported as
   `Malformed PKCS#12` (confidence `Low`) because the scanner does not attempt
   passphrases. This is a known, already-documented limitation (see

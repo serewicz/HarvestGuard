@@ -110,9 +110,11 @@ evidence and must remain traceable back to it.
   material (PEM/DER X.509 certificates, PEM and OpenSSH keys, PKCS#12
   containers, and JKS *header* evidence only) with algorithm, key size,
   issuer, subject, expiration, fingerprint, confidence, and parsing errors.
-  Only files matching a candidate gate (recognized extension or crypto
-  header) are parsed, and broader keystore/crypto-container coverage is not
-  implemented. See [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
+  Also recognizes OpenSSL `Salted__` encrypted files by their leading-byte
+  signature (evidence only, not decryption). Only files matching a candidate
+  gate (recognized extension, crypto header, or the `Salted__` signature) are
+  parsed, and broader keystore/crypto-container coverage is not implemented.
+  See [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Unified CLI** — runs local scanners through the normalized finding model
   with summary, JSON, and Markdown report output. `--json` emits an array of
   normalized findings; `--markdown` emits a local, evidence-only report

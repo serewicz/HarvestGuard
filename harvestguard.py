@@ -189,6 +189,11 @@ def run_scan_command(args: argparse.Namespace) -> int:
         return EXIT_USAGE
 
     scanner_errors: list[str] = []
+    # Populated by the crypto-inventory scanner thunk as a side channel (see
+    # _local_scanner_specs): "files_inspected" -> count of files it visited,
+    # for the HG-030 "Crypto files inspected" accounting line. Stays empty
+    # when the crypto scanner did not run.
+    crypto_stats: dict[str, int] = {}
 
     if args.type in LOCAL_SCAN_TYPES:
         target = Path(args.target)
@@ -196,7 +201,9 @@ def run_scan_command(args: argparse.Namespace) -> int:
             print(f"Error: path does not exist: {args.target}", file=sys.stderr)
             return EXIT_USAGE
         target_repr = str(target)
-        specs = _local_scanner_specs(args.type, target_repr, args.exclude, args.max_depth)
+        specs = _local_scanner_specs(
+            args.type, target_repr, args.exclude, args.max_depth, crypto_stats
+        )
     else:
         specs, usage_error = _cloud_scanner_specs(args.type, args.target, args.prefix)
         if usage_error is not None:
@@ -207,6 +214,7 @@ def run_scan_command(args: argparse.Namespace) -> int:
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     findings = _run_scanners(specs, quiet=args.quiet, scanner_errors=scanner_errors)
+    findings = _deduplicate_openssl_encrypted_file_findings(findings)
     findings = [
         finding for finding in findings if not _is_excluded(finding.location, args.exclude)
     ]
@@ -221,6 +229,7 @@ def run_scan_command(args: argparse.Namespace) -> int:
         scanners=[label for label, _ in specs],
         scope_constraints=_scope_constraints(args, specs),
         scanner_versions=_scanner_versions(specs),
+        crypto_files_inspected=crypto_stats.get("files_inspected"),
     )
 
     if args.json is not None:
@@ -242,7 +251,11 @@ def run_scan_command(args: argparse.Namespace) -> int:
 
 
 def _local_scanner_specs(
-    scan_type: str, target: str, exclude_patterns: list[str], max_depth: int
+    scan_type: str,
+    target: str,
+    exclude_patterns: list[str],
+    max_depth: int,
+    crypto_stats: dict[str, int] | None = None,
 ) -> list[tuple[str, ScannerThunk]]:
     patterns = exclude_patterns or []
     specs: dict[str, tuple[str, ScannerThunk]] = {
@@ -252,7 +265,9 @@ def _local_scanner_specs(
         ),
         "crypto": (
             "crypto inventory",
-            lambda: scan_crypto_inventory_findings(target, exclude_patterns=patterns),
+            lambda: scan_crypto_inventory_findings(
+                target, exclude_patterns=patterns, stats=crypto_stats
+            ),
         ),
         "sensitive-data": (
             "sensitive data",
@@ -355,6 +370,47 @@ def _run_scanners(
     return findings
 
 
+def _deduplicate_openssl_encrypted_file_findings(
+    findings: list[NormalizedFinding],
+) -> list[NormalizedFinding]:
+    """When both the filesystem and crypto-inventory scanners run in the same
+    scan (``--type all``), they can each independently recognize the same
+    OpenSSL `Salted__` file. Crypto inventory owns this evidence (HG-030
+    Product Decision), so the filesystem scanner's OpenSSL signature record
+    (``rule_id`` ``file_signature:file_level_openssl`` -- the actual slug of
+    the "File-level (OpenSSL)" label; Issue #66 refers to this as
+    "file_signature:openssl", but that string does not appear anywhere in
+    scanner/filesystem.py's `_FILE_SIGNATURES`/`_slug` output, confirmed by
+    running the real scanner) is dropped for any location where a
+    crypto-inventory `encrypted_file:openssl` record also exists -- exactly
+    one record for that file survives in the combined output.
+
+    Deterministic and scanner-order independent: the outcome depends only on
+    which (source_type, rule_id, location) combinations are present in the
+    final findings list, never on the order scanners ran in. A no-op when
+    only one of the two scanners ran (--type filesystem or --type crypto
+    alone), since no crypto-inventory `encrypted_file:openssl` location will
+    be present to dedupe against.
+    """
+    crypto_openssl_locations = {
+        finding.location
+        for finding in findings
+        if finding.source_type == "crypto_inventory"
+        and finding.rule_id == "encrypted_file:openssl"
+    }
+    if not crypto_openssl_locations:
+        return findings
+    return [
+        finding
+        for finding in findings
+        if not (
+            finding.source_type == "local_filesystem"
+            and finding.rule_id == "file_signature:file_level_openssl"
+            and finding.location in crypto_openssl_locations
+        )
+    ]
+
+
 def run_local_scanners(
     path: str,
     exclude_patterns: list[str] | None = None,
@@ -371,6 +427,7 @@ def run_local_scanners(
     errors = scanner_errors if scanner_errors is not None else []
     specs = _local_scanner_specs("all", path, patterns, DEFAULT_MAX_DEPTH)
     findings = _run_scanners(specs, quiet=quiet, scanner_errors=errors)
+    findings = _deduplicate_openssl_encrypted_file_findings(findings)
     return [finding for finding in findings if not _is_excluded(finding.location, patterns)]
 
 
