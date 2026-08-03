@@ -181,8 +181,53 @@ finding is not proof no encrypted files exist: the scanner's other
 candidate-gate limitations (see
 [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#local-cryptographic-asset-inventory))
 still apply to every signature this issue did not add — only the exact
-`Salted__` OpenSSL header is recognized here, not GPG/PGP, age, LUKS,
-encrypted ZIP, or any other encrypted-container format.
+`Salted__` OpenSSL header is recognized by *this* rule (OpenPGP/GPG is covered
+separately, below), not age, LUKS, encrypted ZIP, or any other
+encrypted-container format.
+
+#### OpenPGP/GPG encrypted-file evidence (HG-031)
+
+A file whose leading OpenPGP packet is a supported encrypted-session-key
+packet — what `gpg --symmetric` and `gpg --encrypt` write, in binary form or
+inside `-----BEGIN PGP MESSAGE-----` ASCII armor — is cryptographic evidence,
+and the crypto-inventory scanner owns it: a `--type crypto` (or `--type all`)
+scan reports it as asset type `Encrypted File`,
+`rule_id: encrypted_file:openpgp`, confidence `High`. Confidence is `High`
+only because the packet structure was read directly out of the file; an
+`Encrypted File` finding is never emitted on weaker grounds. Evidence text
+names just the observed structure (packet tag, version, and the algorithm
+identifier the packet itself declares) and never claims decryptability,
+encryption strength, or complete OpenPGP support. As with the `Salted__`
+check, content is evaluated before any extension-based parsing.
+
+The scanner does **not** decrypt, prompt for or accept a passphrase, name the
+recipient of a public-key encrypted file, verify signatures, or shell out to
+`gpg`.
+
+Supported and unsupported OpenPGP shapes are enumerated in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#openpgpgpg-encrypted-files-hg-031).
+Two boundaries matter when reading output: **coverage is partial** (v6/AEAD
+packets and several other real OpenPGP forms produce no finding), and
+**signed-only material is not encrypted-file evidence** — clearsigned
+messages, `gpg --armor --sign` output, detached signatures, and public/private
+key blocks are deliberately not reported as encrypted files.
+
+The filesystem scanner independently recognizes a narrower set of the same
+shapes, as it always has (`--type filesystem`,
+`rule_id: file_signature:file_level_pgp_gpg`, asset type `file`,
+`Encryption: File-level (PGP/GPG)`) — that behavior is unchanged, including
+for a `MESSAGE`-armored file the crypto scanner does not claim. When both
+scanners run together (`--type all`), the same file is never reported twice:
+the crypto-inventory finding is the one that survives, and the filesystem
+record for that same file is excluded. As with HG-030, the dedup is
+deterministic and independent of which scanner ran first.
+
+`Files scanned` and `Crypto files inspected` keep exactly the meanings
+described above; this rule changes neither, and the two are still never
+merged or reconciled against each other.
+
+Absence of an `encrypted_file:openpgp` finding is not proof that no encrypted
+OpenPGP files exist in the target.
 
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,

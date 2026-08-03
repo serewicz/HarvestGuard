@@ -111,8 +111,12 @@ evidence and must remain traceable back to it.
   containers, and JKS *header* evidence only) with algorithm, key size,
   issuer, subject, expiration, fingerprint, confidence, and parsing errors.
   Also recognizes OpenSSL `Salted__` encrypted files by their leading-byte
-  signature (evidence only, not decryption). Only files matching a candidate
-  gate (recognized extension, crypto header, or the `Salted__` signature) are
+  signature, and OpenPGP/GPG encrypted files by the leading session-key packet
+  `gpg --symmetric` / `gpg --encrypt` writes, in binary or ASCII armor
+  (evidence only, not decryption — signed messages, detached signatures, and
+  key blocks are not treated as encrypted files, and OpenPGP coverage is
+  partial, not complete). Only files matching a candidate gate (recognized
+  extension, crypto header, or one of those encrypted-file signatures) are
   parsed, and broader keystore/crypto-container coverage is not implemented.
   See [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Unified CLI** — runs local scanners through the normalized finding model

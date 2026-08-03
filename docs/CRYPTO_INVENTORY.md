@@ -46,6 +46,10 @@ Example output shape:
 - Java Keystore magic-header detection
 - OpenSSL `Salted__` encrypted files (leading-byte signature only, not
   decrypted; checked before any extension-based branch above)
+- OpenPGP/GPG encrypted files, binary or ASCII-armored, identified by the
+  leading encrypted-session-key packet (structure only, not decrypted;
+  checked before any extension-based branch above). Support is partial — see
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#openpgpgpg-encrypted-files-hg-031)
 
 ## Extracted Evidence
 
@@ -86,6 +90,10 @@ Recursive scans do not follow symbolic links by default. Use
   implemented.
 - Random binary files are skipped unless their extension or header indicates a
   supported crypto asset.
+- OpenPGP/GPG detection covers specific encrypted-file structures, not the
+  whole OpenPGP specification: an encrypted file whose leading packet is not
+  one of the supported shapes produces no finding, and the scanner never
+  decrypts, prompts for a passphrase, verifies a signature, or invokes `gpg`.
 - The scanner reports observed local evidence only. It does not calculate risk
   scores, quantum exposure, or executive priority.
 
