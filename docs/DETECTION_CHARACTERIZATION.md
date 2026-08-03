@@ -258,6 +258,14 @@ Both the packet header and the fixed metadata fields the specification defines
 for that packet are validated (version, symmetric algorithm, string-to-key
 specifier and its hash algorithm, or public-key algorithm), so a file that
 merely happens to start with a plausible header octet does not match. The
+packet's declared body length is validated with them: every field read must lie
+inside the body the packet declares, and the declared body must be long enough
+to hold the fields the specification requires there (the salt and coded
+iteration count of a salted or iterated string-to-key specifier, the non-empty
+encrypted session key of a public-key packet). A packet whose declared length
+stops short of its own required fields is malformed, and the bytes that follow
+it are a different packet's — reading them as this packet's metadata is what
+would turn a near match into a `High`-confidence claim. The
 observed algorithm identifier is reported in `Algorithm` and named in the
 evidence text because it is read directly out of the packet; nothing is
 inferred from it.
@@ -268,6 +276,12 @@ inferred from it.
   encrypted-message forms.
 - Packets whose length is partial (new-format) or indeterminate (old-format),
   and multipart armor (`-----BEGIN PGP MESSAGE, PART …-----`).
+- Packets whose declared body length is inconsistent with their contents: too
+  short to hold the fields the specification requires, or — for a binary file,
+  where the whole packet stream is available — declared to run past the end of
+  the file. A genuine encrypted file that has been truncated on disk therefore
+  produces no finding. In the armored case only a leading prefix of the packet
+  stream is decoded, so only the first (too-short) check applies there.
 - A file that begins with a bare encrypted-data packet with no session-key
   packet in front of it, or with any other packet type.
 - Any OpenPGP structure not at the start of the file, including an encrypted

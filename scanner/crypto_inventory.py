@@ -211,8 +211,9 @@ def _openssl_salted_finding(file_path: Path) -> CryptoInventoryFinding:
 # correction applied to scanner/filesystem.py, which this must not revert.
 _OPENPGP_ARMOR_HEADER = b"-----BEGIN PGP MESSAGE-----"
 _ARMOR_INSPECT_BYTES = 4096
-# Enough radix-64 characters to cover the longest packet prefix validated
-# below (a 5-octet-length new-format header plus 10 body octets).
+# Enough radix-64 characters (32 encode 24 octets) to cover the longest packet
+# prefix validated below: a 6-octet new-format header plus the 13 body octets a
+# version 4 symmetric-key packet with an iterated and salted specifier requires.
 _ARMOR_DECODE_CHARS = 32
 
 _OPENPGP_TAG_PKESK = 1
@@ -236,9 +237,20 @@ _OPENPGP_SYMMETRIC_ALGORITHMS = {
 # RFC 4880 section 3.7.1: the only string-to-key specifier types a version 4
 # Symmetric-Key Encrypted Session Key packet may use.
 _OPENPGP_S2K_SPECIFIERS = {0: "simple", 1: "salted", 3: "iterated and salted"}
+# RFC 4880 section 3.7.1 also fixes each specifier's total length, and with it
+# which fields the packet body is required to carry: two octets (type and hash
+# algorithm) for every type, plus an 8-octet salt when salted, plus a 1-octet
+# coded iteration count when iterated. A body too short to hold them is
+# malformed, not encrypted-file evidence.
+_OPENPGP_S2K_SPECIFIER_LENGTHS = {0: 2, 1: 2 + 8, 3: 2 + 8 + 1}
 # RFC 4880 section 9.4. Validated but not reported: the hash identifier is
 # checked to reject near matches, not surfaced as a claim about the file.
 _OPENPGP_HASH_ALGORITHM_IDS = frozenset({1, 2, 3, 8, 9, 10, 11, 12, 13, 14})
+# RFC 4880 section 5.1: version, key ID, and public-key algorithm occupy ten
+# octets, and the algorithm-specific encrypted session key that must follow them
+# is never empty, so a version 3 packet declaring ten octets or fewer is
+# malformed for every algorithm below.
+_OPENPGP_PKESK_MIN_BODY_LENGTH = 11
 # RFC 4880 section 9.1 and RFC 9580 section 9.1, restricted to the algorithms
 # valid for an encrypted session key; sign-only algorithms are excluded.
 _OPENPGP_PUBLIC_KEY_ALGORITHMS = {
@@ -299,17 +311,20 @@ def _openpgp_armor_body(data: bytes) -> bytes | None:
         return None
 
 
-def _openpgp_packet_header(data: bytes) -> tuple[int, int] | None:
-    """``(packet tag, body offset)`` for the OpenPGP packet at offset 0 of
-    ``data``, or None when ``data`` does not begin with a packet header whose
-    body offset is determinate.
+def _openpgp_packet_header(data: bytes) -> tuple[int, int, int] | None:
+    """``(packet tag, body offset, declared body length)`` for the OpenPGP
+    packet at offset 0 of ``data``, or None when ``data`` does not begin with a
+    packet header whose body offset and declared length are both determinate.
 
     RFC 4880 section 4.2: the first octet of a packet has bit 7 set, bit 6
-    selects the new or old header format, and the length octets that follow
-    are what fix where the packet body starts. Partial (new-format 224..254)
-    and indeterminate (old-format length type 3) lengths are rejected rather
-    than guessed at -- neither is legal for the session-key packets this
-    detection covers.
+    selects the new or old header format, and the length octets that follow are
+    what fix both where the packet body starts and how long the packet declares
+    it to be. Partial (new-format 224..254) and indeterminate (old-format length
+    type 3) lengths are rejected rather than guessed at -- neither is legal for
+    the session-key packets this detection covers, and neither declares a length
+    the callers below can hold their field reads inside of. Every length octet
+    is bounds-checked before it is read, so a file that ends mid-header returns
+    None instead of raising.
     """
     if len(data) < 2:
         return None
@@ -321,11 +336,17 @@ def _openpgp_packet_header(data: bytes) -> tuple[int, int] | None:
         tag = first & 0x3F
         length_octet = data[1]
         if length_octet < 192:
-            body_offset = 2
+            body_offset, body_length = 2, length_octet
         elif length_octet < 224:
+            if len(data) < 3:
+                return None
             body_offset = 3
+            body_length = ((length_octet - 192) << 8) + data[2] + 192
         elif length_octet == 255:
+            if len(data) < 6:
+                return None
             body_offset = 6
+            body_length = int.from_bytes(data[2:6], "big")
         else:
             return None
     else:
@@ -333,22 +354,41 @@ def _openpgp_packet_header(data: bytes) -> tuple[int, int] | None:
         length_type = first & 0x03
         if length_type == 3:
             return None
-        body_offset = 1 + (1 << length_type)
+        length_octets = 1 << length_type
+        body_offset = 1 + length_octets
+        if len(data) < body_offset:
+            return None
+        body_length = int.from_bytes(data[1:body_offset], "big")
 
-    return tag, body_offset
+    return tag, body_offset, body_length
 
 
-def _describe_skesk(data: bytes, body_offset: int) -> tuple[str, str] | None:
+def _openpgp_body_holds(data: bytes, body_offset: int, body_length: int, needed: int) -> bool:
+    """Whether the first ``needed`` octets of the packet body are both declared
+    by the packet and actually present in ``data``.
+
+    The declared length is what separates this packet's body from whatever
+    follows it in the stream: a field read past the declared end is not a field
+    of this packet at all, so a packet that declares a body too short to hold
+    the metadata the specification requires is malformed rather than evidence.
+    """
+    return body_length >= needed and len(data) >= body_offset + needed
+
+
+def _describe_skesk(
+    data: bytes, body_offset: int, body_length: int
+) -> tuple[str, str] | None:
     """Structure description and observed symmetric algorithm for a version 4
     Symmetric-Key Encrypted Session Key packet, or None.
 
     RFC 4880 section 5.3 fixes the body as version, symmetric algorithm, then
     a string-to-key specifier whose own first two octets are its type and hash
     algorithm. Every one of those four octets must hold a value the
-    specification defines, so a file that merely happens to start with a
-    plausible header octet does not match.
+    specification defines, and the declared body length must be long enough to
+    hold them and the rest of the specifier the type requires, so a file that
+    merely happens to start with a plausible header octet does not match.
     """
-    if len(data) < body_offset + 4:
+    if not _openpgp_body_holds(data, body_offset, body_length, 4):
         return None
     version, symmetric_id, s2k_id, hash_id = data[body_offset : body_offset + 4]
     if version != 4:
@@ -357,6 +397,15 @@ def _describe_skesk(data: bytes, body_offset: int) -> tuple[str, str] | None:
     s2k = _OPENPGP_S2K_SPECIFIERS.get(s2k_id)
     if symmetric is None or s2k is None or hash_id not in _OPENPGP_HASH_ALGORITHM_IDS:
         return None
+    # The salt (salted, iterated) and coded iteration count (iterated) are
+    # required fields of the specifier. Their contents are arbitrary octets and
+    # are never read or reported -- only their presence inside the declared body
+    # is required, which is what rejects a packet whose declared length stops
+    # short of the specifier it names.
+    if not _openpgp_body_holds(
+        data, body_offset, body_length, 2 + _OPENPGP_S2K_SPECIFIER_LENGTHS[s2k_id]
+    ):
+        return None
     return (
         f"symmetric-key encrypted session key packet (packet tag 3, version 4, "
         f"symmetric algorithm {symmetric}, {s2k} string-to-key specifier)",
@@ -364,15 +413,21 @@ def _describe_skesk(data: bytes, body_offset: int) -> tuple[str, str] | None:
     )
 
 
-def _describe_pkesk(data: bytes, body_offset: int) -> tuple[str, str] | None:
+def _describe_pkesk(
+    data: bytes, body_offset: int, body_length: int
+) -> tuple[str, str] | None:
     """Structure description and observed public-key algorithm for a version 3
     Public-Key Encrypted Session Key packet, or None.
 
-    RFC 4880 section 5.1 fixes the body as version, an eight-octet key ID,
-    then the public-key algorithm. The key ID is read past, never reported:
-    naming the recipient of an encrypted file is out of scope for HG-031.
+    RFC 4880 section 5.1 fixes the body as version, an eight-octet key ID, then
+    the public-key algorithm, then the algorithm-specific encrypted session key
+    -- which is never empty, so the declared body must be longer than the ten
+    octets read here. The key ID is read past, never reported: naming the
+    recipient of an encrypted file is out of scope for HG-031.
     """
-    if len(data) < body_offset + 10:
+    if not _openpgp_body_holds(data, body_offset, body_length, 10):
+        return None
+    if body_length < _OPENPGP_PKESK_MIN_BODY_LENGTH:
         return None
     if data[body_offset] != 3:
         return None
@@ -401,11 +456,19 @@ def _openpgp_encrypted_evidence(data: bytes) -> tuple[str, str] | None:
     header = _openpgp_packet_header(packet)
     if header is None:
         return None
-    tag, body_offset = header
+    tag, body_offset, body_length = header
+    # In the binary case `packet` is the whole file, so a body that is declared
+    # to run past its end is an inconsistent (truncated or fabricated) packet
+    # rather than encrypted-file evidence. In the armored case only a leading
+    # prefix of the packet stream is decoded, so the same comparison would
+    # reject legitimate files and is deliberately not made -- the per-field
+    # containment checks below cover both cases either way.
+    if armored is None and body_offset + body_length > len(packet):
+        return None
     if tag == _OPENPGP_TAG_SKESK:
-        described = _describe_skesk(packet, body_offset)
+        described = _describe_skesk(packet, body_offset, body_length)
     elif tag == _OPENPGP_TAG_PKESK:
-        described = _describe_pkesk(packet, body_offset)
+        described = _describe_pkesk(packet, body_offset, body_length)
     else:
         # Any other leading packet -- compressed data (what `gpg --armor
         # --sign` writes), a signature, a public or secret key packet -- is

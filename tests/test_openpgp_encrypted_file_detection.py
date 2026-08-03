@@ -50,18 +50,33 @@ SKESK_HEADER = bytes([0x8C, 0x0D, 0x04, 0x09, 0x03, 0x08])
 _SALT = bytes(range(0x10, 0x18))
 _ITERATION_COUNT = bytes([0x60])
 # A public-key encrypted session key packet (tag 1, version 3) as
-# `gpg --encrypt` writes it: header, 1-octet length, version 3, 8-octet key ID,
-# then public-key algorithm 18 (ECDH).
-PKESK_HEADER = bytes([0x84, 0x5E, 0x03]) + bytes(range(0x20, 0x28)) + bytes([0x12])
+# `gpg --encrypt` writes it: header, 1-octet length declaring a 94-octet body,
+# version 3, 8-octet key ID, then public-key algorithm 18 (ECDH).
+_PKESK_DECLARED_BODY_LENGTH = 0x5E
+PKESK_HEADER = bytes([0x84, _PKESK_DECLARED_BODY_LENGTH, 0x03]) + bytes(range(0x20, 0x28)) + bytes(
+    [0x12]
+)
+# The ten metadata octets the scanner reads out of that body; everything after
+# them is the opaque encrypted session key.
+_PKESK_METADATA_OCTETS = 10
 
 
 def _symmetric_encrypted_bytes(payload: bytes = b"\x00" * 32) -> bytes:
-    """The field-observed `gpg --symmetric` file shape, plus opaque payload."""
+    """The field-observed `gpg --symmetric` file shape, plus opaque payload.
+
+    The packet declares a 13-octet body and carries exactly that (version,
+    symmetric algorithm, specifier type, hash algorithm, salt, iteration count);
+    ``payload`` stands in for the encrypted-data packet that follows it.
+    """
     return SKESK_HEADER + _SALT + _ITERATION_COUNT + payload
 
 
-def _public_key_encrypted_bytes(payload: bytes = b"\x00" * 32) -> bytes:
-    return PKESK_HEADER + payload
+def _public_key_encrypted_bytes() -> bytes:
+    """A `gpg --encrypt` file shape whose body is as long as its packet header
+    declares -- as a real one is; a declared length that runs past the end of
+    the file is a malformed packet, not evidence."""
+    session_key = b"\x00" * (_PKESK_DECLARED_BODY_LENGTH - _PKESK_METADATA_OCTETS)
+    return PKESK_HEADER + session_key
 
 
 def _armored(body: bytes, label: str = "PGP MESSAGE") -> bytes:
@@ -159,8 +174,10 @@ def test_public_key_encrypted_finding_does_not_name_the_recipient_key_id(tmp_pat
 def test_two_octet_length_public_key_packet_is_detected(tmp_path):
     # 0x85 selects a 2-octet length, the header prefix scanner/filesystem.py
     # already recognizes; the body offset shifts by one and must still parse.
+    # The declared body is 0x010C = 268 octets, the size of an RSA-2048
+    # encrypted session key packet, and the fixture carries all of them.
     packet = bytes([0x85, 0x01, 0x0C, 0x03]) + bytes(range(0x30, 0x38)) + bytes([0x01])
-    (tmp_path / "rsa.gpg").write_bytes(packet + b"\x00" * 32)
+    (tmp_path / "rsa.gpg").write_bytes(packet + b"\x00" * (268 - _PKESK_METADATA_OCTETS))
 
     findings = scan_crypto_inventory_findings(str(tmp_path))
 
@@ -311,6 +328,98 @@ def test_near_matches_are_not_detected(tmp_path, name, packet):
     (tmp_path / name).write_bytes(packet + b"\x00" * 32)
 
     assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+@pytest.mark.parametrize(
+    ("name", "packet"),
+    [
+        # A packet's declared body length is what separates its own fields from
+        # whatever follows it in the stream. Each of these declares a body too
+        # short to hold the metadata the specification requires, and is followed
+        # by bytes that would look like that metadata if the declared length
+        # were ignored -- a malformed near match, not encrypted-file evidence.
+        #
+        # Tag 3 declaring a zero-length body, then `04 09 03 08`.
+        (
+            "zero-length-skesk.gpg",
+            bytes([0x8C, 0x00, 0x04, 0x09, 0x03, 0x08]) + _SALT + _ITERATION_COUNT,
+        ),
+        # Tag 3 naming an iterated and salted specifier (13 body octets) while
+        # declaring only the four metadata octets: the salt and coded iteration
+        # count the specifier requires fall outside the declared body.
+        (
+            "short-declared-skesk.gpg",
+            bytes([0x8C, 0x04, 0x04, 0x09, 0x03, 0x08]) + _SALT + _ITERATION_COUNT,
+        ),
+        # Tag 3 naming a salted specifier (12 body octets) while declaring 11:
+        # one octet of the required salt falls outside the declared body.
+        ("short-declared-salted-skesk.gpg", bytes([0x8C, 0x0B, 0x04, 0x09, 0x01, 0x08]) + _SALT),
+        # Tag 1 declaring a one-octet body, then PKESK-like metadata.
+        (
+            "one-byte-pkesk.gpg",
+            bytes([0x84, 0x01, 0x03]) + bytes(range(0x20, 0x28)) + bytes([0x12]),
+        ),
+        # Tag 1 declaring exactly the ten metadata octets: the encrypted session
+        # key that must follow the algorithm octet is absent.
+        (
+            "no-session-key-pkesk.gpg",
+            bytes([0x84, 0x0A, 0x03]) + bytes(range(0x20, 0x28)) + bytes([0x12]),
+        ),
+    ],
+)
+def test_inconsistent_declared_body_lengths_are_not_detected(tmp_path, name, packet):
+    (tmp_path / name).write_bytes(packet + b"\x00" * 32)
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_truncated_declared_body_lengths_are_not_detected(tmp_path):
+    # A body declared longer than the file that holds it is inconsistent,
+    # whether the missing octets are metadata the scanner reads ...
+    (tmp_path / "truncated-salt.gpg").write_bytes(SKESK_HEADER + _SALT[:4])
+    # ... or payload it never reads: 0xc3 0xff selects a new-format 5-octet
+    # length declaring 4096 body octets, of which 13 are present.
+    (tmp_path / "over-declared-new-format.gpg").write_bytes(
+        bytes([0xC3, 0xFF, 0x00, 0x00, 0x10, 0x00, 0x04, 0x09, 0x03, 0x08])
+        + _SALT
+        + _ITERATION_COUNT
+    )
+    # 0x8e selects an old-format 4-octet length, declaring 4096 the same way.
+    (tmp_path / "over-declared-old-format.gpg").write_bytes(
+        bytes([0x8E, 0x00, 0x00, 0x10, 0x00, 0x04, 0x09, 0x03, 0x08])
+        + _SALT
+        + _ITERATION_COUNT
+    )
+    # A file that ends inside its own multi-octet length header.
+    (tmp_path / "truncated-length-header.gpg").write_bytes(bytes([0xC3, 0xFF, 0x00, 0x00]))
+    (tmp_path / "truncated-old-length-header.gpg").write_bytes(bytes([0x8E, 0x00, 0x00]))
+    (tmp_path / "truncated-two-octet-length.gpg").write_bytes(bytes([0xC3, 0xC1]))
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_packet_whose_declared_body_exactly_ends_the_file_is_detected(tmp_path):
+    # The complementary boundary: a declared body that ends exactly at the end
+    # of the file is complete, so the length check must not reject it.
+    (tmp_path / "exact.gpg").write_bytes(_symmetric_encrypted_bytes(b""))
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "encrypted_file:openpgp"
+
+
+def test_armored_message_is_not_rejected_for_a_body_longer_than_the_decoded_prefix(tmp_path):
+    # Only a leading prefix of an armored packet stream is decoded, so a
+    # declared body longer than that prefix (here 94 octets against a 24-octet
+    # prefix) cannot be checked against the file's length and must not be
+    # treated as truncated. Deliberate asymmetry with the binary path.
+    (tmp_path / "recipient.asc").write_bytes(_armored(_public_key_encrypted_bytes()))
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "encrypted_file:openpgp"
 
 
 def test_offset_match_is_not_detected(tmp_path):
