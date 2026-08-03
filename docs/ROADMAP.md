@@ -630,6 +630,32 @@ Milestone 2 is fully delivered.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/65
 - **Pull request:** https://github.com/serewicz/HarvestGuard/pull/67
 
+### HG-030
+
+- **Title:** OpenSSL Encrypted-File Detection and Crypto Scan Accounting
+- **Purpose:** Add first-class OpenSSL `Salted__` encrypted-file detection to
+  the crypto inventory scanner. Provide deterministic crypto-inventory
+  ownership for OpenSSL encrypted-file findings, preserve filesystem-only
+  behavior, deduplicate deterministically under `--type all`, add Crypto files
+  inspected accounting, preserve HG-029 Files scanned semantics, retain
+  bare-array JSON output, and cover OpenSSL detection with regression tests.
+- **Status:** Complete
+- **Milestone:** v0.1.1 Stabilization
+- **Dependencies:** HG-028, HG-029
+- **Acceptance criteria:** OpenSSL `Salted__` files are detected as crypto
+  inventory evidence with deterministic `encrypted_file:openssl` rule
+  ownership; filesystem-only scans continue to report filesystem signature
+  evidence; combined scans emit exactly one OpenSSL finding per file with
+  crypto inventory winning; Crypto files inspected is reported separately from
+  HG-029 Files scanned; JSON remains a bare normalized-finding array; OpenSSL
+  detection, deduplication, accounting, JSON, and Markdown behavior are covered
+  by regression tests.
+- **Delivered by:** `scanner/crypto_inventory.py`, `finding_adapters.py`,
+  `harvestguard.py`, `reports.py`, and
+  `tests/test_openssl_encrypted_file_detection.py`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/66
+- **Pull request:** https://github.com/serewicz/HarvestGuard/pull/69
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
