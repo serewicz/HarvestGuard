@@ -152,7 +152,10 @@ host's own platform and tooling, not on the file itself.
   --sign` output that is compressed and/or signed but *not* encrypted. This
   scanner cannot distinguish that case from a genuinely encrypted PGP message
   without parsing the packet body, so a small residual false-positive rate
-  remains for `MESSAGE`-armored files specifically. Other PGP armor types —
+  remains for `MESSAGE`-armored files specifically. This scanner's behavior is
+  unchanged; the crypto-inventory scanner does read the leading packet tag and
+  therefore does not repeat this false positive (see [OpenPGP/GPG encrypted
+  files](#openpgpgpg-encrypted-files-hg-031)). Other PGP armor types —
   `SIGNED MESSAGE` (clearsign, plaintext body), `SIGNATURE` (detached
   signature only), `PUBLIC KEY BLOCK`, and `PRIVATE KEY BLOCK` — are *not*
   matched as encrypted data (see "Behavioral correction" below); a
@@ -226,6 +229,71 @@ signature independently; when both scanners run in the same scan
 (`--type all`), only the crypto-inventory finding for that file is kept in
 the combined output — see [docs/CLI.md](CLI.md#openssl-encrypted-file-evidence-hg-030).
 
+#### OpenPGP/GPG encrypted files (HG-031)
+
+A file whose leading OpenPGP packet is one of the supported encrypted-session-key
+shapes below is reported as asset type `Encrypted File`
+(`rule_id: encrypted_file:openpgp`, confidence `High`), based solely on that
+directly observed packet structure. Like the `Salted__` check, it runs before
+every extension-based branch, so an OpenPGP file saved with a `.p12`, `.der`,
+or any other extension is still reported as `Encrypted File` rather than as a
+malformed asset.
+
+**What is supported**, verified against real `gpg --symmetric` and
+`gpg --encrypt` output:
+
+- **Symmetric-Key Encrypted Session Key packet, tag 3, version 4** — the shape
+  `gpg --symmetric` writes and the field-observed case in HG-031 (a file
+  beginning `8c 0d 04 …`, which `file(1)` reports as "PGP symmetric key
+  encrypted data").
+- **Public-Key Encrypted Session Key packet, tag 1, version 3** — the shape
+  `gpg --encrypt` writes (a file beginning e.g. `84 5e 03 …` or `85 01 0c …`).
+- **Both of the above inside `-----BEGIN PGP MESSAGE-----` ASCII armor.** RFC
+  4880 §6.2 fixes the armor layout (header line, optional armor headers, blank
+  line, radix-64 body), so the first decoded byte of the body is the first byte
+  of the first packet — the armored counterpart of offset 0, not a search for a
+  signature at an arbitrary position.
+
+Both the packet header and the fixed metadata fields the specification defines
+for that packet are validated (version, symmetric algorithm, string-to-key
+specifier and its hash algorithm, or public-key algorithm), so a file that
+merely happens to start with a plausible header octet does not match. The
+observed algorithm identifier is reported in `Algorithm` and named in the
+evidence text because it is read directly out of the packet; nothing is
+inferred from it.
+
+**What is not supported** — each of these produces no finding at all:
+
+- RFC 9580 version 6 (and draft version 5) session-key packets, and AEAD-only
+  encrypted-message forms.
+- Packets whose length is partial (new-format) or indeterminate (old-format),
+  and multipart armor (`-----BEGIN PGP MESSAGE, PART …-----`).
+- A file that begins with a bare encrypted-data packet with no session-key
+  packet in front of it, or with any other packet type.
+- Any OpenPGP structure not at the start of the file, including an encrypted
+  message embedded in a larger container.
+
+**What is deliberately not classified as an encrypted file:** ASCII-armored
+signed messages (`-----BEGIN PGP SIGNED MESSAGE-----`, and the `MESSAGE`-armored
+compressed-data packet `gpg --armor --sign` writes), detached signatures,
+`PUBLIC KEY BLOCK`, and `PRIVATE KEY BLOCK` armor. This scanner distinguishes
+them by reading the leading packet tag, which is what lets it avoid the
+residual `MESSAGE`-armor false positive the filesystem scanner documents above;
+the HG-009 narrowing of that scanner's `-----BEGIN PGP` prefix is unchanged.
+
+**Scanner ownership.** The filesystem scanner independently recognizes a
+narrower set of the same shapes (`MESSAGE` armor and the binary `85 01`/`85 02`
+prefixes) as `File-level (PGP/GPG)`, and `--type filesystem` still reports
+exactly that, unchanged. Under `--type all`, crypto inventory owns this
+evidence: exactly one record per file survives, deterministically, regardless
+of scanner order — see [docs/CLI.md](CLI.md#openpgpgpg-encrypted-file-evidence-hg-031).
+
+**No decryption.** The scanner never decrypts, never requests or accepts a
+passphrase, never enumerates recipients (the key ID in a public-key packet is
+read past, never reported), never verifies a signature, and never invokes
+`gpg` or any other external tool. Absence of an `encrypted_file:openpgp`
+finding is not proof that no encrypted OpenPGP files exist in the target.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:
@@ -233,10 +301,13 @@ the combined output — see [docs/CLI.md](CLI.md#openssl-encrypted-file-evidence
 - `High` — a certificate or key was fully parsed and its cryptographic
   properties extracted, or an encrypted PEM/OpenSSH private key block was
   positively identified by its header (algorithm/key-size may still be
-  unavailable without a passphrase), or an OpenSSL `Salted__` header was
-  directly observed in the file's content (a signature match, not a parse —
-  `High` here describes the certainty of the byte-level observation, not
-  anything about the encryption's strength or recoverability).
+  unavailable without a passphrase), or an OpenSSL `Salted__` header or a
+  supported OpenPGP encrypted-session-key packet structure was directly
+  observed in the file's content (a signature or packet-structure match, not a
+  parse of the protected content — `High` here describes the certainty of the
+  byte-level observation, not anything about the encryption's strength or
+  recoverability). An `Encrypted File` finding is never emitted at any other
+  confidence level: if the observation is not direct, there is no finding.
 - `Medium` — a JKS magic header matched, or an OpenSSH private key's block
   was found but could not be loaded (an inconsistency with the PEM path,
   where an encrypted PEM key is `High`; both are documented, unvalidated
@@ -248,21 +319,23 @@ the combined output — see [docs/CLI.md](CLI.md#openssl-encrypted-file-evidence
 
 ### What this scanner can miss
 
-- **The candidate-file gate is a silent pre-filter.** Before any parsing is
-  attempted, `_could_contain_crypto_asset` requires a file to either begin
-  with the OpenSSL `Salted__` signature (HG-030), have a recognized extension
-  (`.cer`, `.crt`, `.der`, `.jks`, `.p12`, `.pfx`), start with an SSH
+- **The candidate-file gate is a silent pre-filter.** A file is inspected if
+  it begins with the OpenSSL `Salted__` signature (HG-030) or a supported
+  OpenPGP encrypted-file structure (HG-031), both checked ahead of the gate;
+  otherwise `_could_contain_crypto_asset` requires it to have a recognized
+  extension (`.cer`, `.crt`, `.der`, `.jks`, `.p12`, `.pfx`), start with an SSH
   public-key prefix, match the JKS magic header, or contain the literal bytes
   `-----BEGIN ` somewhere in its first 5 MB. **A file that matches none of
   these produces no finding and no limitation record at all** — unlike the
   filesystem scanner, there is no explicit "not inspected" marker for
   gate-excluded files. An empty crypto-inventory result does not distinguish
   "no crypto assets present" from "assets present in a format or extension
-  this gate does not recognize." `Salted__` is now a recognized shape and no
-  longer an example of this gap, but every other encrypted-container format
-  (GPG/PGP, age, LUKS, encrypted ZIP/PDF/Office, and any signature not listed
-  above) remains outside this gate for the crypto-inventory scanner
-  specifically — HG-030 added exactly one signature, not general
+  this gate does not recognize." `Salted__` and the supported OpenPGP shapes
+  are now recognized and no longer examples of this gap, but every other
+  encrypted-container format (age, LUKS, encrypted ZIP/PDF/Office, the OpenPGP
+  structures listed as unsupported above, and any signature not listed above)
+  remains outside this gate for the crypto-inventory scanner specifically —
+  HG-030 and HG-031 added exactly two named detection rules, not general
   encrypted-file detection.
 - **Password-protected PKCS#12 containers** are reported as
   `Malformed PKCS#12` (confidence `Low`) because the scanner does not attempt

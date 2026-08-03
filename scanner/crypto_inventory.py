@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import fnmatch
 import json
 import math
@@ -49,10 +50,11 @@ class CryptoInventoryFinding:
     fingerprint: str | None = None
     evidence: str = ""
     confidence: str = "Low"
-    # Unset for every asset type except the OpenSSL Salted__ finding (HG-030):
-    # a rule_id is only meaningful for a finding backed by a specific,
-    # nameable detection rule rather than a parsed certificate/key, so every
-    # other asset type leaves this None rather than inventing one.
+    # Unset for every asset type except the two Encrypted File findings -- the
+    # OpenSSL Salted__ signature (HG-030) and the OpenPGP encrypted-file
+    # structure (HG-031): a rule_id is only meaningful for a finding backed by
+    # a specific, nameable detection rule rather than a parsed certificate/key,
+    # so every other asset type leaves this None rather than inventing one.
     rule_id: str | None = None
     errors: list[str] = field(default_factory=list)
     scanner: str = SCANNER_NAME
@@ -181,6 +183,263 @@ def _openssl_salted_finding(file_path: Path) -> CryptoInventoryFinding:
     )
 
 
+# --- OpenPGP encrypted-file detection (HG-031) -----------------------------
+#
+# Structural, never decryption: only the leading OpenPGP packet header and the
+# fixed metadata fields RFC 4880 defines for it are read, and each of those
+# fields is validated against the values the specification allows. The
+# encrypted payload itself is never interpreted, no passphrase is requested or
+# accepted, and no external tool (gpg included) is invoked.
+#
+# Deliberately narrow -- the two encrypted-session-key packet shapes GnuPG
+# actually writes at the start of an encrypted file, verified against real
+# `gpg --symmetric` and `gpg --encrypt` output:
+#
+#   Tag 3, version 4  Symmetric-Key Encrypted Session Key (`gpg -c`); the
+#                     field-observed shape in HG-031, which begins `8c 0d 04`.
+#   Tag 1, version 3  Public-Key Encrypted Session Key (`gpg -e`), which
+#                     begins e.g. `84 5e 03` or `85 01 0c`.
+#
+# Everything else is out of scope and documented as a false negative in
+# docs/DETECTION_CHARACTERIZATION.md, including RFC 9580 v6 packets, AEAD-only
+# forms, partial/indeterminate packet lengths, and a file that begins with a
+# bare encrypted-data packet with no session-key packet in front of it.
+
+# Only the MESSAGE armor label carries message content. SIGNED MESSAGE,
+# SIGNATURE, PUBLIC KEY BLOCK, and PRIVATE KEY BLOCK are not encrypted-file
+# evidence and are deliberately absent here -- the same narrowing the HG-009
+# correction applied to scanner/filesystem.py, which this must not revert.
+_OPENPGP_ARMOR_HEADER = b"-----BEGIN PGP MESSAGE-----"
+_ARMOR_INSPECT_BYTES = 4096
+# Enough radix-64 characters to cover the longest packet prefix validated
+# below (a 5-octet-length new-format header plus 10 body octets).
+_ARMOR_DECODE_CHARS = 32
+
+_OPENPGP_TAG_PKESK = 1
+_OPENPGP_TAG_SKESK = 3
+
+# RFC 4880 section 9.2. Algorithm 0 ("plaintext or unencrypted data") is
+# deliberately absent: a packet declaring it is not evidence of encryption.
+_OPENPGP_SYMMETRIC_ALGORITHMS = {
+    1: "IDEA",
+    2: "TripleDES",
+    3: "CAST5",
+    4: "Blowfish",
+    7: "AES-128",
+    8: "AES-192",
+    9: "AES-256",
+    10: "Twofish",
+    11: "Camellia-128",
+    12: "Camellia-192",
+    13: "Camellia-256",
+}
+# RFC 4880 section 3.7.1: the only string-to-key specifier types a version 4
+# Symmetric-Key Encrypted Session Key packet may use.
+_OPENPGP_S2K_SPECIFIERS = {0: "simple", 1: "salted", 3: "iterated and salted"}
+# RFC 4880 section 9.4. Validated but not reported: the hash identifier is
+# checked to reject near matches, not surfaced as a claim about the file.
+_OPENPGP_HASH_ALGORITHM_IDS = frozenset({1, 2, 3, 8, 9, 10, 11, 12, 13, 14})
+# RFC 4880 section 9.1 and RFC 9580 section 9.1, restricted to the algorithms
+# valid for an encrypted session key; sign-only algorithms are excluded.
+_OPENPGP_PUBLIC_KEY_ALGORITHMS = {
+    1: "RSA",
+    2: "RSA (encrypt-only)",
+    16: "Elgamal",
+    18: "ECDH",
+    25: "X25519",
+    26: "X448",
+}
+
+
+def _openpgp_armor_body(data: bytes) -> bytes | None:
+    """Leading decoded bytes of an ASCII-armored OpenPGP MESSAGE's radix-64
+    body, or None when ``data`` is not MESSAGE-armored or its body cannot be
+    decoded.
+
+    RFC 4880 section 6.2 fixes this layout: the armor header line, optional
+    ``Key: Value`` armor headers, a blank line, then the radix-64 encoded
+    packet stream. The first decoded byte is therefore the first byte of the
+    first OpenPGP packet, which is the offset the format specification
+    requires this check to read -- the armored counterpart of offset 0 in a
+    binary file, not a scan for a signature at an arbitrary offset. The armor
+    header line itself must start the file.
+    """
+    if not data.startswith(_OPENPGP_ARMOR_HEADER):
+        return None
+
+    # Armor is ASCII by definition; anything that is not is skipped rather
+    # than allowed to raise on a file that only looks armored.
+    text = data[:_ARMOR_INSPECT_BYTES].decode("ascii", errors="ignore")
+    encoded = ""
+    for line in text.splitlines()[1:]:
+        stripped = line.strip()
+        # A blank line separates armor headers from the body; ":" cannot occur
+        # in the radix-64 alphabet, so a line containing one is an armor
+        # header rather than encoded data.
+        if not stripped or ":" in stripped:
+            continue
+        # "=" starts the radix-64 checksum line and "-----" the armor tail:
+        # either way the encoded body has ended.
+        if stripped.startswith(("=", "-----")):
+            break
+        encoded += stripped
+        if len(encoded) >= _ARMOR_DECODE_CHARS:
+            break
+
+    # Only whole radix-64 quantums can be decoded; a partial trailing group is
+    # dropped rather than padded, so a truncated armor body decodes to
+    # whatever prefix is intact (possibly nothing) instead of raising.
+    usable = encoded[: len(encoded) - len(encoded) % 4]
+    if not usable:
+        return None
+    try:
+        return base64.b64decode(usable, validate=True)
+    except ValueError:
+        # binascii.Error (a ValueError) for a body that is not valid radix-64.
+        return None
+
+
+def _openpgp_packet_header(data: bytes) -> tuple[int, int] | None:
+    """``(packet tag, body offset)`` for the OpenPGP packet at offset 0 of
+    ``data``, or None when ``data`` does not begin with a packet header whose
+    body offset is determinate.
+
+    RFC 4880 section 4.2: the first octet of a packet has bit 7 set, bit 6
+    selects the new or old header format, and the length octets that follow
+    are what fix where the packet body starts. Partial (new-format 224..254)
+    and indeterminate (old-format length type 3) lengths are rejected rather
+    than guessed at -- neither is legal for the session-key packets this
+    detection covers.
+    """
+    if len(data) < 2:
+        return None
+    first = data[0]
+    if not first & 0x80:
+        return None
+
+    if first & 0x40:
+        tag = first & 0x3F
+        length_octet = data[1]
+        if length_octet < 192:
+            body_offset = 2
+        elif length_octet < 224:
+            body_offset = 3
+        elif length_octet == 255:
+            body_offset = 6
+        else:
+            return None
+    else:
+        tag = (first >> 2) & 0x0F
+        length_type = first & 0x03
+        if length_type == 3:
+            return None
+        body_offset = 1 + (1 << length_type)
+
+    return tag, body_offset
+
+
+def _describe_skesk(data: bytes, body_offset: int) -> tuple[str, str] | None:
+    """Structure description and observed symmetric algorithm for a version 4
+    Symmetric-Key Encrypted Session Key packet, or None.
+
+    RFC 4880 section 5.3 fixes the body as version, symmetric algorithm, then
+    a string-to-key specifier whose own first two octets are its type and hash
+    algorithm. Every one of those four octets must hold a value the
+    specification defines, so a file that merely happens to start with a
+    plausible header octet does not match.
+    """
+    if len(data) < body_offset + 4:
+        return None
+    version, symmetric_id, s2k_id, hash_id = data[body_offset : body_offset + 4]
+    if version != 4:
+        return None
+    symmetric = _OPENPGP_SYMMETRIC_ALGORITHMS.get(symmetric_id)
+    s2k = _OPENPGP_S2K_SPECIFIERS.get(s2k_id)
+    if symmetric is None or s2k is None or hash_id not in _OPENPGP_HASH_ALGORITHM_IDS:
+        return None
+    return (
+        f"symmetric-key encrypted session key packet (packet tag 3, version 4, "
+        f"symmetric algorithm {symmetric}, {s2k} string-to-key specifier)",
+        symmetric,
+    )
+
+
+def _describe_pkesk(data: bytes, body_offset: int) -> tuple[str, str] | None:
+    """Structure description and observed public-key algorithm for a version 3
+    Public-Key Encrypted Session Key packet, or None.
+
+    RFC 4880 section 5.1 fixes the body as version, an eight-octet key ID,
+    then the public-key algorithm. The key ID is read past, never reported:
+    naming the recipient of an encrypted file is out of scope for HG-031.
+    """
+    if len(data) < body_offset + 10:
+        return None
+    if data[body_offset] != 3:
+        return None
+    algorithm = _OPENPGP_PUBLIC_KEY_ALGORITHMS.get(data[body_offset + 9])
+    if algorithm is None:
+        return None
+    return (
+        f"public-key encrypted session key packet (packet tag 1, version 3, "
+        f"public-key algorithm {algorithm})",
+        algorithm,
+    )
+
+
+def _openpgp_encrypted_evidence(data: bytes) -> tuple[str, str] | None:
+    """``(evidence text, observed algorithm)`` for a supported OpenPGP
+    encrypted-file structure at the start of ``data``, or None.
+
+    Binary-safe and length-safe: every read is bounds-checked, so an empty,
+    truncated, or arbitrary binary file returns None instead of raising. The
+    evidence text states only what was directly read out of the packet
+    header -- no strength, recoverability, or coverage claim.
+    """
+    armored = _openpgp_armor_body(data)
+    packet = data if armored is None else armored
+
+    header = _openpgp_packet_header(packet)
+    if header is None:
+        return None
+    tag, body_offset = header
+    if tag == _OPENPGP_TAG_SKESK:
+        described = _describe_skesk(packet, body_offset)
+    elif tag == _OPENPGP_TAG_PKESK:
+        described = _describe_pkesk(packet, body_offset)
+    else:
+        # Any other leading packet -- compressed data (what `gpg --armor
+        # --sign` writes), a signature, a public or secret key packet -- is
+        # not encrypted-file evidence.
+        return None
+    if described is None:
+        return None
+
+    structure, algorithm = described
+    if armored is None:
+        return f"Observed OpenPGP {structure} in the file's leading bytes.", algorithm
+    return (
+        f"Observed ASCII-armored OpenPGP MESSAGE whose first decoded packet is a "
+        f"{structure}.",
+        algorithm,
+    )
+
+
+def _openpgp_encrypted_finding(
+    file_path: Path, evidence: str, algorithm: str
+) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Encrypted File",
+        location=str(file_path),
+        # Read directly out of the packet header, not inferred. Key size is
+        # deliberately left unset: the packet states which algorithm protects
+        # the session key, and HG-031 makes no claim beyond that.
+        algorithm=algorithm,
+        evidence=evidence,
+        confidence="High",
+        rule_id="encrypted_file:openpgp",
+    )
+
+
 def _scan_file(file_path: Path) -> list[CryptoInventoryFinding]:
     try:
         data = file_path.read_bytes()
@@ -193,6 +452,14 @@ def _scan_file(file_path: Path) -> list[CryptoInventoryFinding]:
     # PKCS#12/DER parsing and reported as malformed (HG-030).
     if _looks_like_openssl_salted(data):
         return [_openssl_salted_finding(file_path)]
+
+    # Also checked before every extension-based branch, and before the
+    # candidate gate below: a binary OpenPGP encrypted file has no recognized
+    # extension and no `-----BEGIN ` text, so the gate would otherwise drop it
+    # (HG-031).
+    openpgp = _openpgp_encrypted_evidence(data)
+    if openpgp is not None:
+        return [_openpgp_encrypted_finding(file_path, *openpgp)]
 
     if not _could_contain_crypto_asset(file_path, data):
         return []

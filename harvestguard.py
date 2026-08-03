@@ -214,7 +214,7 @@ def run_scan_command(args: argparse.Namespace) -> int:
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     findings = _run_scanners(specs, quiet=args.quiet, scanner_errors=scanner_errors)
-    findings = _deduplicate_openssl_encrypted_file_findings(findings)
+    findings = _deduplicate_encrypted_file_findings(findings)
     findings = [
         finding for finding in findings if not _is_excluded(finding.location, args.exclude)
     ]
@@ -370,45 +370,67 @@ def _run_scanners(
     return findings
 
 
-def _deduplicate_openssl_encrypted_file_findings(
+# Encrypted-file evidence the crypto-inventory scanner owns, mapped to the
+# filesystem scanner's rule_id for the same signature. The filesystem rule_ids
+# are the actual slugs scanner/filesystem.py's `_FILE_SIGNATURES`/`_slug`
+# output produces for the "File-level (OpenSSL)" and "File-level (PGP/GPG)"
+# labels, confirmed by running the real scanner -- Issue #66 refers to the
+# first as "file_signature:openssl", which appears nowhere in that output.
+CRYPTO_OWNED_ENCRYPTED_FILE_RULE_IDS = {
+    # HG-030: OpenSSL `Salted__`.
+    "encrypted_file:openssl": "file_signature:file_level_openssl",
+    # HG-031: OpenPGP encrypted-file structure. The filesystem scanner reports
+    # a narrower set of shapes under one label (MESSAGE armor and two binary
+    # PKESK prefixes), so this pairing only removes a duplicate where the
+    # filesystem scanner actually recognized the same file.
+    "encrypted_file:openpgp": "file_signature:file_level_pgp_gpg",
+}
+
+
+def _deduplicate_encrypted_file_findings(
     findings: list[NormalizedFinding],
 ) -> list[NormalizedFinding]:
     """When both the filesystem and crypto-inventory scanners run in the same
     scan (``--type all``), they can each independently recognize the same
-    OpenSSL `Salted__` file. Crypto inventory owns this evidence (HG-030
-    Product Decision), so the filesystem scanner's OpenSSL signature record
-    (``rule_id`` ``file_signature:file_level_openssl`` -- the actual slug of
-    the "File-level (OpenSSL)" label; Issue #66 refers to this as
-    "file_signature:openssl", but that string does not appear anywhere in
-    scanner/filesystem.py's `_FILE_SIGNATURES`/`_slug` output, confirmed by
-    running the real scanner) is dropped for any location where a
-    crypto-inventory `encrypted_file:openssl` record also exists -- exactly
-    one record for that file survives in the combined output.
+    encrypted file. Crypto inventory owns that evidence (HG-030 and HG-031
+    Product Decisions), so the filesystem scanner's signature record is
+    dropped for any location where the paired crypto-inventory record also
+    exists -- exactly one record for that file survives in the combined
+    output.
 
     Deterministic and scanner-order independent: the outcome depends only on
     which (source_type, rule_id, location) combinations are present in the
-    final findings list, never on the order scanners ran in. A no-op when
-    only one of the two scanners ran (--type filesystem or --type crypto
-    alone), since no crypto-inventory `encrypted_file:openssl` location will
-    be present to dedupe against.
+    final findings list, never on the order scanners ran in. A no-op when only
+    one of the two scanners ran (--type filesystem or --type crypto alone),
+    since no crypto-inventory encrypted-file location will be present to
+    dedupe against.
     """
-    crypto_openssl_locations = {
-        finding.location
-        for finding in findings
-        if finding.source_type == "crypto_inventory"
-        and finding.rule_id == "encrypted_file:openssl"
-    }
-    if not crypto_openssl_locations:
+    superseded: dict[str, set[str]] = {}
+    for crypto_rule_id, filesystem_rule_id in CRYPTO_OWNED_ENCRYPTED_FILE_RULE_IDS.items():
+        locations = {
+            finding.location
+            for finding in findings
+            if finding.source_type == "crypto_inventory"
+            and finding.rule_id == crypto_rule_id
+        }
+        if locations:
+            superseded.setdefault(filesystem_rule_id, set()).update(locations)
+    if not superseded:
         return findings
     return [
         finding
         for finding in findings
         if not (
             finding.source_type == "local_filesystem"
-            and finding.rule_id == "file_signature:file_level_openssl"
-            and finding.location in crypto_openssl_locations
+            and finding.location in superseded.get(finding.rule_id or "", ())
         )
     ]
+
+
+# The HG-030 name for the same pass, kept so existing callers and regression
+# tests continue to work now that it covers every crypto-inventory-owned
+# encrypted-file rule rather than only the OpenSSL one.
+_deduplicate_openssl_encrypted_file_findings = _deduplicate_encrypted_file_findings
 
 
 def run_local_scanners(
@@ -427,7 +449,7 @@ def run_local_scanners(
     errors = scanner_errors if scanner_errors is not None else []
     specs = _local_scanner_specs("all", path, patterns, DEFAULT_MAX_DEPTH)
     findings = _run_scanners(specs, quiet=quiet, scanner_errors=errors)
-    findings = _deduplicate_openssl_encrypted_file_findings(findings)
+    findings = _deduplicate_encrypted_file_findings(findings)
     return [finding for finding in findings if not _is_excluded(finding.location, patterns)]
 
 
