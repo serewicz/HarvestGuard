@@ -571,6 +571,13 @@ def _openpgp_encrypted_data_packet_follows(packet: bytes, offset: int) -> bool:
     if offset + body_offset + body_length > len(packet):
         return False
     if tag == _OPENPGP_TAG_SEIPD:
+        # The body is version octet + encrypted data; a body of exactly one
+        # octet is only the version, with no encrypted-data payload at all,
+        # so it is not a complete encrypted-data packet (Codex correction:
+        # `SKESK + D2 01 01` was accepted with no payload beyond the version
+        # byte).
+        if body_length < 2:
+            return False
         return packet[offset + body_offset] == _OPENPGP_SEIPD_VERSION
     if tag == _OPENPGP_TAG_SED:
         return True

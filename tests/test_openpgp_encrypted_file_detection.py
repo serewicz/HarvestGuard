@@ -547,6 +547,62 @@ def test_supported_pkesk_followed_by_supported_encrypted_data_packet_is_detected
     assert all(f.rule_id == "encrypted_file:openpgp" for f in findings)
 
 
+# A tag 18 (SEIPD) packet whose declared body is exactly one octet: only the
+# version octet, with no encrypted-data payload after it. `SKESK + D2 01 01`
+# is the exact shape Codex reproduced against `301328d` -- accepted as
+# `encrypted_file:openpgp` despite carrying no encrypted data at all.
+EMPTY_SEIPD_PACKET = bytes([0xD2, 0x01, 0x01])
+
+
+def test_binary_skesk_with_empty_seipd_payload_is_not_detected(tmp_path):
+    (tmp_path / "empty-seipd.gpg").write_bytes(
+        _symmetric_encrypted_bytes(EMPTY_SEIPD_PACKET)
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_binary_pkesk_with_empty_seipd_payload_is_not_detected(tmp_path):
+    (tmp_path / "empty-seipd.gpg").write_bytes(
+        _public_key_encrypted_bytes(EMPTY_SEIPD_PACKET)
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armored_skesk_with_empty_seipd_payload_is_not_detected(tmp_path):
+    (tmp_path / "empty-seipd.asc").write_bytes(
+        _armored(_symmetric_encrypted_bytes(EMPTY_SEIPD_PACKET))
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armored_pkesk_with_empty_seipd_payload_is_not_detected(tmp_path):
+    (tmp_path / "empty-seipd.asc").write_bytes(
+        _armored(_public_key_encrypted_bytes(EMPTY_SEIPD_PACKET))
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_seipd_with_exactly_one_payload_byte_is_still_detected(tmp_path):
+    # The boundary directly above the rejected case: two declared body octets
+    # (version + one payload octet) is a complete encrypted-data packet.
+    one_byte_payload_seipd = bytes([0xD2, 0x02, 0x01, 0xAA])
+    (tmp_path / "one-byte.gpg").write_bytes(
+        _symmetric_encrypted_bytes(one_byte_payload_seipd)
+    )
+    (tmp_path / "one-byte.asc").write_bytes(
+        _armored(_public_key_encrypted_bytes(one_byte_payload_seipd))
+    )
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 2
+    assert all(f.rule_id == "encrypted_file:openpgp" for f in findings)
+
+
 def test_armored_packet_whose_whole_declared_body_is_present_is_detected(tmp_path):
     # The complete armor body is decoded, so a declared body far longer than the
     # packet header itself (94 octets here) is checked against all of it and,
