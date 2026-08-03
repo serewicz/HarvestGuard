@@ -409,12 +409,103 @@ def test_packet_whose_declared_body_exactly_ends_the_file_is_detected(tmp_path):
     assert findings[0].rule_id == "encrypted_file:openpgp"
 
 
-def test_armored_message_is_not_rejected_for_a_body_longer_than_the_decoded_prefix(tmp_path):
-    # Only a leading prefix of an armored packet stream is decoded, so a
-    # declared body longer than that prefix (here 94 octets against a 24-octet
-    # prefix) cannot be checked against the file's length and must not be
-    # treated as truncated. Deliberate asymmetry with the binary path.
+def test_armored_packet_whose_whole_declared_body_is_present_is_detected(tmp_path):
+    # The complete armor body is decoded, so a declared body far longer than the
+    # packet header itself (94 octets here) is checked against all of it and,
+    # being entirely present, is evidence.
     (tmp_path / "recipient.asc").write_bytes(_armored(_public_key_encrypted_bytes()))
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "encrypted_file:openpgp"
+
+
+@pytest.mark.parametrize(
+    ("name", "packet"),
+    [
+        # The armored counterparts of the binary truncated/over-declared cases
+        # above: the declared length is checked against the whole decoded body,
+        # not a prefix of it, so armor is not a way around that check.
+        #
+        # Tag 1 declaring a 94-octet body while carrying 15.
+        ("truncated-pkesk.asc", PKESK_HEADER + b"\x00" * 5),
+        # Tag 3 declaring 13 body octets while carrying 4 of them.
+        ("truncated-salt.asc", SKESK_HEADER + _SALT[:4]),
+        # New-format 5-octet length declaring 4096 body octets, 13 present.
+        (
+            "over-declared-new-format.asc",
+            bytes([0xC3, 0xFF, 0x00, 0x00, 0x10, 0x00, 0x04, 0x09, 0x03, 0x08])
+            + _SALT
+            + _ITERATION_COUNT,
+        ),
+        # Old-format 4-octet length declaring 4096 the same way.
+        (
+            "over-declared-old-format.asc",
+            bytes([0x8E, 0x00, 0x00, 0x10, 0x00, 0x04, 0x09, 0x03, 0x08])
+            + _SALT
+            + _ITERATION_COUNT,
+        ),
+    ],
+)
+def test_armored_declared_body_longer_than_the_armor_carries_is_not_detected(
+    tmp_path, name, packet
+):
+    (tmp_path / name).write_bytes(_armored(packet))
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armored_body_truncated_mid_radix64_quantum_is_not_detected(tmp_path):
+    # Only whole radix-64 quantums decode, so a body chopped mid-quantum yields
+    # a shorter packet stream than the packet declares (12 octets against the
+    # 15 a 13-octet body needs) and is rejected rather than padded out.
+    encoded = base64.b64encode(_symmetric_encrypted_bytes(b"")).decode("ascii")
+    (tmp_path / "truncated-armor.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded[:16]}\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_header_line_with_trailing_content_is_not_read_as_armor(tmp_path):
+    # RFC 4880 section 6.2 puts the armor header line alone on its own line.
+    for name, header in (
+        ("trailing-junk.asc", b"-----BEGIN PGP MESSAGE----- and then some"),
+        ("multipart.asc", b"-----BEGIN PGP MESSAGE, PART 01-----"),
+    ):
+        (tmp_path / name).write_bytes(
+            _armored(_symmetric_encrypted_bytes()).replace(
+                b"-----BEGIN PGP MESSAGE-----", header, 1
+            )
+        )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_without_the_mandatory_blank_separator_is_not_read_as_armor(tmp_path):
+    # The blank line between the armor headers and the radix-64 body is
+    # mandatory, so a body that follows the header line (or an armor header)
+    # directly is not a radix-64 body this scanner will decode.
+    encoded = base64.b64encode(_symmetric_encrypted_bytes()).decode("ascii")
+    (tmp_path / "no-separator.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n{encoded}\n=abcd\n-----END PGP MESSAGE-----\n".encode(
+            "ascii"
+        )
+    )
+    (tmp_path / "no-separator-after-headers.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\nVersion: GnuPG v2\n{encoded}\n"
+        "=abcd\n-----END PGP MESSAGE-----\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_crlf_armored_message_is_detected(tmp_path):
+    # The armor line endings may be CRLF; that is not trailing content.
+    (tmp_path / "crlf.asc").write_bytes(
+        _armored(_symmetric_encrypted_bytes()).replace(b"\n", b"\r\n")
+    )
 
     findings = scan_crypto_inventory_findings(str(tmp_path))
 

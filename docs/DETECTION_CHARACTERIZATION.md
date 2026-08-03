@@ -249,10 +249,15 @@ malformed asset.
 - **Public-Key Encrypted Session Key packet, tag 1, version 3** — the shape
   `gpg --encrypt` writes (a file beginning e.g. `84 5e 03 …` or `85 01 0c …`).
 - **Both of the above inside `-----BEGIN PGP MESSAGE-----` ASCII armor.** RFC
-  4880 §6.2 fixes the armor layout (header line, optional armor headers, blank
-  line, radix-64 body), so the first decoded byte of the body is the first byte
-  of the first packet — the armored counterpart of offset 0, not a search for a
-  signature at an arbitrary position.
+  4880 §6.2 fixes the armor layout (header line alone on the first line,
+  optional armor headers, a mandatory blank line, radix-64 body, checksum,
+  tail), and each of those parts is required: trailing content on the header
+  line, or a body not preceded by the blank separator, is not read as armor at
+  all. The first decoded byte of the body is therefore the first byte of the
+  first packet — the armored counterpart of offset 0, not a search for a
+  signature at an arbitrary position. The whole body is decoded, not a prefix of
+  it, so the decoded stream is the armored counterpart of a binary file's bytes
+  and is held to the same checks.
 
 Both the packet header and the fixed metadata fields the specification defines
 for that packet are validated (version, symmetric algorithm, string-to-key
@@ -277,11 +282,11 @@ inferred from it.
 - Packets whose length is partial (new-format) or indeterminate (old-format),
   and multipart armor (`-----BEGIN PGP MESSAGE, PART …-----`).
 - Packets whose declared body length is inconsistent with their contents: too
-  short to hold the fields the specification requires, or — for a binary file,
-  where the whole packet stream is available — declared to run past the end of
-  the file. A genuine encrypted file that has been truncated on disk therefore
-  produces no finding. In the armored case only a leading prefix of the packet
-  stream is decoded, so only the first (too-short) check applies there.
+  short to hold the fields the specification requires, or declared to run past
+  the end of the packet stream that holds them. Both checks apply equally to a
+  binary file and to an armored one, whose whole radix-64 body is decoded for
+  exactly that reason. A genuine encrypted file that has been truncated on disk
+  therefore produces no finding.
 - A file that begins with a bare encrypted-data packet with no session-key
   packet in front of it, or with any other packet type.
 - Any OpenPGP structure not at the start of the file, including an encrypted

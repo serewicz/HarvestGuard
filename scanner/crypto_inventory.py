@@ -210,11 +210,6 @@ def _openssl_salted_finding(file_path: Path) -> CryptoInventoryFinding:
 # evidence and are deliberately absent here -- the same narrowing the HG-009
 # correction applied to scanner/filesystem.py, which this must not revert.
 _OPENPGP_ARMOR_HEADER = b"-----BEGIN PGP MESSAGE-----"
-_ARMOR_INSPECT_BYTES = 4096
-# Enough radix-64 characters (32 encode 24 octets) to cover the longest packet
-# prefix validated below: a 6-octet new-format header plus the 13 body octets a
-# version 4 symmetric-key packet with an iterated and salted specifier requires.
-_ARMOR_DECODE_CHARS = 32
 
 _OPENPGP_TAG_PKESK = 1
 _OPENPGP_TAG_SKESK = 3
@@ -264,44 +259,68 @@ _OPENPGP_PUBLIC_KEY_ALGORITHMS = {
 
 
 def _openpgp_armor_body(data: bytes) -> bytes | None:
-    """Leading decoded bytes of an ASCII-armored OpenPGP MESSAGE's radix-64
-    body, or None when ``data`` is not MESSAGE-armored or its body cannot be
-    decoded.
+    """The complete decoded packet stream of an ASCII-armored OpenPGP MESSAGE's
+    radix-64 body, or None when ``data`` is not MESSAGE-armored or its body
+    cannot be decoded.
 
-    RFC 4880 section 6.2 fixes this layout: the armor header line, optional
-    ``Key: Value`` armor headers, a blank line, then the radix-64 encoded
-    packet stream. The first decoded byte is therefore the first byte of the
-    first OpenPGP packet, which is the offset the format specification
-    requires this check to read -- the armored counterpart of offset 0 in a
-    binary file, not a scan for a signature at an arbitrary offset. The armor
-    header line itself must start the file.
+    RFC 4880 section 6.2 fixes this layout, and every part of it is required:
+    the armor header line alone on the first line, then optional
+    ``Key: Value`` armor headers, then a blank line, then the radix-64 encoded
+    packet stream, then the radix-64 checksum line and the armor tail line.
+    Trailing content on the header line, or a body that is not preceded by the
+    blank separator, means this is not armor and is not read as though it were.
+
+    The first decoded byte is therefore the first byte of the first OpenPGP
+    packet, which is the offset the format specification requires this check to
+    read -- the armored counterpart of offset 0 in a binary file, not a scan for
+    a signature at an arbitrary offset. The *whole* body is decoded rather than
+    a leading prefix of it, because the decoded stream is the armored
+    counterpart of a binary file's bytes: the caller's declared-length check is
+    only meaningful against the complete content, since a packet declaring more
+    body than the stream actually holds is truncated or over-declared either
+    way. Nothing decoded here is reported; the payload is only ever read for the
+    packet metadata the specification fixes at these offsets.
+
+    Binary-safe: split on line boundaries as bytes, never decoded as text, so a
+    file that only looks armored cannot raise.
     """
     if not data.startswith(_OPENPGP_ARMOR_HEADER):
         return None
 
-    # Armor is ASCII by definition; anything that is not is skipped rather
-    # than allowed to raise on a file that only looks armored.
-    text = data[:_ARMOR_INSPECT_BYTES].decode("ascii", errors="ignore")
-    encoded = ""
-    for line in text.splitlines()[1:]:
+    lines = data.split(b"\n")
+    # Armor may use CRLF line endings, but nothing else may follow the header
+    # line -- "-----BEGIN PGP MESSAGE----- and then some" is not armor.
+    if lines[0].rstrip(b"\r") != _OPENPGP_ARMOR_HEADER:
+        return None
+
+    # The mandatory blank line after the (possibly empty) run of armor headers.
+    # ":" cannot occur in the radix-64 alphabet, so a non-blank line before that
+    # separator is only legal if it is an armor header.
+    body_start = None
+    for index, line in enumerate(lines[1:], start=1):
+        if not line.strip():
+            body_start = index + 1
+            break
+        if b":" not in line:
+            return None
+    if body_start is None:
+        return None
+
+    encoded = bytearray()
+    for line in lines[body_start:]:
         stripped = line.strip()
-        # A blank line separates armor headers from the body; ":" cannot occur
-        # in the radix-64 alphabet, so a line containing one is an armor
-        # header rather than encoded data.
-        if not stripped or ":" in stripped:
-            continue
-        # "=" starts the radix-64 checksum line and "-----" the armor tail:
-        # either way the encoded body has ended.
-        if stripped.startswith(("=", "-----")):
+        # "=" starts the radix-64 checksum line and "-----" the armor tail, and
+        # the body is one contiguous run of lines: any of the three ends it.
+        if not stripped or stripped.startswith((b"=", b"-----")):
             break
         encoded += stripped
-        if len(encoded) >= _ARMOR_DECODE_CHARS:
-            break
 
     # Only whole radix-64 quantums can be decoded; a partial trailing group is
     # dropped rather than padded, so a truncated armor body decodes to
-    # whatever prefix is intact (possibly nothing) instead of raising.
-    usable = encoded[: len(encoded) - len(encoded) % 4]
+    # whatever prefix is intact (possibly nothing) instead of raising -- and a
+    # packet whose declared body runs past that prefix is rejected by the
+    # caller's length check exactly as a truncated binary file is.
+    usable = bytes(encoded[: len(encoded) - len(encoded) % 4])
     if not usable:
         return None
     try:
@@ -457,13 +476,11 @@ def _openpgp_encrypted_evidence(data: bytes) -> tuple[str, str] | None:
     if header is None:
         return None
     tag, body_offset, body_length = header
-    # In the binary case `packet` is the whole file, so a body that is declared
-    # to run past its end is an inconsistent (truncated or fabricated) packet
-    # rather than encrypted-file evidence. In the armored case only a leading
-    # prefix of the packet stream is decoded, so the same comparison would
-    # reject legitimate files and is deliberately not made -- the per-field
-    # containment checks below cover both cases either way.
-    if armored is None and body_offset + body_length > len(packet):
+    # `packet` is the whole packet stream in both cases -- the whole binary file,
+    # or the whole decoded armor body -- so a body declared to run past its end
+    # is an inconsistent (truncated or over-declared) packet rather than
+    # encrypted-file evidence, however it was encoded.
+    if body_offset + body_length > len(packet):
         return None
     if tag == _OPENPGP_TAG_SKESK:
         described = _describe_skesk(packet, body_offset, body_length)
