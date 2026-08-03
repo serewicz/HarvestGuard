@@ -30,6 +30,7 @@ import harvestguard
 from finding_adapters import normalize_crypto_inventory_df
 from harvestguard import _deduplicate_encrypted_file_findings
 from scanner.crypto_inventory import (
+    _openpgp_crc24,
     scan_crypto_inventory,
     scan_crypto_inventory_findings,
 )
@@ -60,34 +61,67 @@ PKESK_HEADER = bytes([0x84, _PKESK_DECLARED_BODY_LENGTH, 0x03]) + bytes(range(0x
 # them is the opaque encrypted session key.
 _PKESK_METADATA_OCTETS = 10
 
+# A minimal, complete Sym. Encrypted Integrity Protected Data packet (RFC 4880
+# section 5.13): new-format header for tag 18, a 1-octet length declaring 17
+# body octets, then a version-1 octet and 16 opaque "ciphertext" octets. This
+# is the real, modern shape GnuPG writes immediately after a session-key
+# packet for both `gpg --symmetric` and `gpg --encrypt`, and is the supported
+# "following encrypted-data packet" HG-031 correction cycle 2's Blocker 1
+# requires -- every existing fixture that used to end with unstructured filler
+# bytes now ends with this instead, so the fixture is a genuine, complete
+# encrypted message rather than a session-key packet with padding after it.
+ENCRYPTED_DATA_PACKET = bytes([0xD2, 0x11, 0x01]) + bytes(range(0x40, 0x50))
+# The legacy, MDC-less counterpart (RFC 4880 section 5.7, tag 9): opaque from
+# its first body octet, no version field. Used where a test specifically wants
+# the *other* supported following-packet shape.
+LEGACY_ENCRYPTED_DATA_PACKET = bytes([0xC9, 0x10]) + bytes(range(0x50, 0x60))
 
-def _symmetric_encrypted_bytes(payload: bytes = b"\x00" * 32) -> bytes:
-    """The field-observed `gpg --symmetric` file shape, plus opaque payload.
 
-    The packet declares a 13-octet body and carries exactly that (version,
-    symmetric algorithm, specifier type, hash algorithm, salt, iteration count);
-    ``payload`` stands in for the encrypted-data packet that follows it.
+def _symmetric_encrypted_bytes(payload: bytes = ENCRYPTED_DATA_PACKET) -> bytes:
+    """The field-observed `gpg --symmetric` file shape: a session-key packet
+    immediately followed by a complete, supported encrypted-data packet.
+
+    The session-key packet declares a 13-octet body and carries exactly that
+    (version, symmetric algorithm, specifier type, hash algorithm, salt,
+    iteration count); ``payload`` is the encrypted-data packet that follows
+    it -- a real one (see ``ENCRYPTED_DATA_PACKET``) by default, since a
+    session-key packet alone is not a supported encrypted message (Blocker 1).
     """
     return SKESK_HEADER + _SALT + _ITERATION_COUNT + payload
 
 
-def _public_key_encrypted_bytes() -> bytes:
-    """A `gpg --encrypt` file shape whose body is as long as its packet header
-    declares -- as a real one is; a declared length that runs past the end of
-    the file is a malformed packet, not evidence."""
+def _public_key_encrypted_bytes(following: bytes = ENCRYPTED_DATA_PACKET) -> bytes:
+    """A `gpg --encrypt` file shape whose session-key packet body is as long
+    as its packet header declares -- as a real one is; a declared length that
+    runs past the end of the file is a malformed packet, not evidence -- and
+    which is followed by a complete, supported encrypted-data packet
+    (``following``), since a session-key packet alone is not a supported
+    encrypted message (Blocker 1)."""
     session_key = b"\x00" * (_PKESK_DECLARED_BODY_LENGTH - _PKESK_METADATA_OCTETS)
-    return PKESK_HEADER + session_key
+    return PKESK_HEADER + session_key + following
+
+
+def _armor_checksum_line(decoded: bytes) -> str:
+    """The real, correct radix-64 checksum line OpenPGP armor requires for
+    ``decoded`` -- HG-031 correction cycle 2's Blocker 2 made the scanner
+    actually validate this against the CRC-24 of the decoded body, so a fixed
+    placeholder no longer produces armor the scanner accepts."""
+    crc_bytes = _openpgp_crc24(decoded).to_bytes(3, "big")
+    return base64.b64encode(crc_bytes).decode("ascii")
 
 
 def _armored(body: bytes, label: str = "PGP MESSAGE") -> bytes:
-    """ASCII armor around ``body``, laid out as RFC 4880 section 6.2 requires:
-    header line, blank line, radix-64 body, checksum-shaped line, tail line."""
+    """Complete ASCII armor around ``body``, laid out as RFC 4880 section 6.2
+    requires: header line, blank line, radix-64 body, a checksum line that is
+    the real CRC-24 of ``body`` (not a placeholder -- see
+    ``_armor_checksum_line``), and a tail line matching ``label`` exactly."""
     encoded = base64.b64encode(body).decode("ascii")
     lines = [encoded[i : i + 64] for i in range(0, len(encoded), 64)]
+    checksum = _armor_checksum_line(body)
     return (
         f"-----BEGIN {label}-----\n\n"
         + "\n".join(lines)
-        + "\n=abcd\n"
+        + f"\n={checksum}\n"
         + f"-----END {label}-----\n"
     ).encode("ascii")
 
@@ -177,7 +211,8 @@ def test_two_octet_length_public_key_packet_is_detected(tmp_path):
     # The declared body is 0x010C = 268 octets, the size of an RSA-2048
     # encrypted session key packet, and the fixture carries all of them.
     packet = bytes([0x85, 0x01, 0x0C, 0x03]) + bytes(range(0x30, 0x38)) + bytes([0x01])
-    (tmp_path / "rsa.gpg").write_bytes(packet + b"\x00" * (268 - _PKESK_METADATA_OCTETS))
+    session_key = b"\x00" * (268 - _PKESK_METADATA_OCTETS)
+    (tmp_path / "rsa.gpg").write_bytes(packet + session_key + ENCRYPTED_DATA_PACKET)
 
     findings = scan_crypto_inventory_findings(str(tmp_path))
 
@@ -190,7 +225,7 @@ def test_new_format_packet_header_is_detected(tmp_path):
     # 0xc3 is the new-format header for tag 3; the following octet is a
     # 1-octet body length.
     packet = bytes([0xC3, 0x0D, 0x04, 0x09, 0x03, 0x08]) + _SALT + _ITERATION_COUNT
-    (tmp_path / "new-format.gpg").write_bytes(packet + b"\x00" * 32)
+    (tmp_path / "new-format.gpg").write_bytes(packet + ENCRYPTED_DATA_PACKET)
 
     findings = scan_crypto_inventory_findings(str(tmp_path))
 
@@ -398,15 +433,118 @@ def test_truncated_declared_body_lengths_are_not_detected(tmp_path):
     assert scan_crypto_inventory_findings(str(tmp_path)) == []
 
 
-def test_packet_whose_declared_body_exactly_ends_the_file_is_detected(tmp_path):
-    # The complementary boundary: a declared body that ends exactly at the end
-    # of the file is complete, so the length check must not reject it.
-    (tmp_path / "exact.gpg").write_bytes(_symmetric_encrypted_bytes(b""))
+def test_packet_stream_ending_exactly_at_the_encrypted_data_packet_is_detected(tmp_path):
+    # The complementary boundary: a file that ends exactly where the trailing
+    # encrypted-data packet's declared body ends -- no extra padding after it
+    # -- is a complete message, so the length check must not reject it.
+    (tmp_path / "exact.gpg").write_bytes(_symmetric_encrypted_bytes())
 
     findings = scan_crypto_inventory_findings(str(tmp_path))
 
     assert len(findings) == 1
     assert findings[0].rule_id == "encrypted_file:openpgp"
+
+
+def test_standalone_skesk_packet_is_not_detected(tmp_path):
+    # HG-031 correction cycle 2, Blocker 1: a session-key packet with a
+    # complete, consistent declared body -- but with *nothing* following it,
+    # not even a truncated one -- is not a supported encrypted message.
+    # Previously misclassified as `Encrypted File`; this is the exact false
+    # positive the correction fixes.
+    (tmp_path / "standalone-skesk.gpg").write_bytes(_symmetric_encrypted_bytes(b""))
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_standalone_pkesk_packet_is_not_detected(tmp_path):
+    (tmp_path / "standalone-pkesk.gpg").write_bytes(_public_key_encrypted_bytes(b""))
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_standalone_skesk_armored_packet_is_not_detected(tmp_path):
+    (tmp_path / "standalone-skesk.asc").write_bytes(_armored(_symmetric_encrypted_bytes(b"")))
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_standalone_pkesk_armored_packet_is_not_detected(tmp_path):
+    (tmp_path / "standalone-pkesk.asc").write_bytes(
+        _armored(_public_key_encrypted_bytes(b""))
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_session_key_packet_followed_only_by_an_unrelated_packet_is_not_detected(tmp_path):
+    # A signature packet (tag 2, old-format, 1-octet length) immediately
+    # after a valid SKESK packet is not an encrypted-data packet.
+    unrelated_packet = bytes([0x89, 0x08]) + bytes(range(8))
+    (tmp_path / "skesk-then-signature.gpg").write_bytes(
+        _symmetric_encrypted_bytes(unrelated_packet)
+    )
+    # Same, for PKESK.
+    (tmp_path / "pkesk-then-signature.gpg").write_bytes(
+        _public_key_encrypted_bytes(unrelated_packet)
+    )
+    # Armored counterparts.
+    (tmp_path / "skesk-then-signature.asc").write_bytes(
+        _armored(_symmetric_encrypted_bytes(unrelated_packet))
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_truncated_encrypted_data_packet_after_valid_session_key_packet_is_not_detected(
+    tmp_path,
+):
+    # The trailing packet's own header is well-formed and names a supported
+    # tag (18), but its declared 16-octet body is not fully present -- a
+    # truncated encrypted-data packet is not evidence of a complete one.
+    truncated_seipd = bytes([0xD2, 0x10, 0x01, 0x02, 0x03])
+    (tmp_path / "skesk-then-truncated.gpg").write_bytes(
+        _symmetric_encrypted_bytes(truncated_seipd)
+    )
+    (tmp_path / "skesk-then-truncated.asc").write_bytes(
+        _armored(_symmetric_encrypted_bytes(truncated_seipd))
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_supported_skesk_followed_by_supported_encrypted_data_packet_is_detected(tmp_path):
+    # Both required positive shapes for Blocker 1, binary and armored: the
+    # modern SEIPD v1 packet (the default payload) and the legacy,
+    # MDC-less SED packet (tag 9) real GnuPG output can also use.
+    (tmp_path / "seipd.gpg").write_bytes(_symmetric_encrypted_bytes(ENCRYPTED_DATA_PACKET))
+    (tmp_path / "sed.gpg").write_bytes(_symmetric_encrypted_bytes(LEGACY_ENCRYPTED_DATA_PACKET))
+    (tmp_path / "seipd.asc").write_bytes(
+        _armored(_symmetric_encrypted_bytes(ENCRYPTED_DATA_PACKET))
+    )
+    (tmp_path / "sed.asc").write_bytes(
+        _armored(_symmetric_encrypted_bytes(LEGACY_ENCRYPTED_DATA_PACKET))
+    )
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 4
+    assert all(f.rule_id == "encrypted_file:openpgp" for f in findings)
+
+
+def test_supported_pkesk_followed_by_supported_encrypted_data_packet_is_detected(tmp_path):
+    (tmp_path / "seipd.gpg").write_bytes(_public_key_encrypted_bytes(ENCRYPTED_DATA_PACKET))
+    (tmp_path / "sed.gpg").write_bytes(_public_key_encrypted_bytes(LEGACY_ENCRYPTED_DATA_PACKET))
+    (tmp_path / "seipd.asc").write_bytes(
+        _armored(_public_key_encrypted_bytes(ENCRYPTED_DATA_PACKET))
+    )
+    (tmp_path / "sed.asc").write_bytes(
+        _armored(_public_key_encrypted_bytes(LEGACY_ENCRYPTED_DATA_PACKET))
+    )
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 4
+    assert all(f.rule_id == "encrypted_file:openpgp" for f in findings)
 
 
 def test_armored_packet_whose_whole_declared_body_is_present_is_detected(tmp_path):
@@ -505,6 +643,186 @@ def test_crlf_armored_message_is_detected(tmp_path):
     # The armor line endings may be CRLF; that is not trailing content.
     (tmp_path / "crlf.asc").write_bytes(
         _armored(_symmetric_encrypted_bytes()).replace(b"\n", b"\r\n")
+    )
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "encrypted_file:openpgp"
+
+
+# --- 2b. Complete armor framing (HG-031 correction cycle 2, Blocker 2) -----
+#
+# Before this correction, armor parsing accepted any line starting with "="
+# as "the checksum line" without validating it, and never checked for a tail
+# line at all -- an incomplete or tampered armored message was still reported
+# at High confidence. Every scenario below is a real, well-formed message
+# (valid checksum computed by `_armor_checksum_line`, valid tail) with exactly
+# one required element broken, so each failure is isolated to the property
+# named in the test.
+
+
+def _valid_armor_parts(body: bytes | None = None):
+    """(encoded body lines joined, real checksum, tail line) for a genuine
+    `_symmetric_encrypted_bytes()` message, so negative tests can build armor
+    that is correct except for the one property under test."""
+    if body is None:
+        body = _symmetric_encrypted_bytes()
+    encoded = base64.b64encode(body).decode("ascii")
+    return encoded, _armor_checksum_line(body), "-----END PGP MESSAGE-----"
+
+
+def test_armor_missing_checksum_line_is_not_detected(tmp_path):
+    encoded, _checksum, end = _valid_armor_parts()
+    (tmp_path / "missing-checksum.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded}\n{end}\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+@pytest.mark.parametrize(
+    "checksum",
+    [
+        "ab",  # too short
+        "abcde",  # too long
+        "ab!d",  # character outside the radix-64 alphabet
+        "ab=d",  # "=" is not a radix-64 character
+    ],
+)
+def test_armor_malformed_checksum_is_not_detected(tmp_path, checksum):
+    encoded, _real_checksum, end = _valid_armor_parts()
+    (tmp_path / "malformed-checksum.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded}\n={checksum}\n{end}\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_checksum_mismatch_is_not_detected(tmp_path):
+    body = _symmetric_encrypted_bytes()
+    encoded = base64.b64encode(body).decode("ascii")
+    real_checksum = _armor_checksum_line(body)
+    # Flip the checksum's first character to something that cannot equal it
+    # -- the radix-64 alphabet has no wraparound at 'A'/'a'/'0'.
+    wrong_checksum = ("B" if real_checksum[0] != "B" else "C") + real_checksum[1:]
+    (tmp_path / "checksum-mismatch.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded}\n={wrong_checksum}\n"
+        "-----END PGP MESSAGE-----\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_missing_end_line_is_not_detected(tmp_path):
+    encoded, checksum, _end = _valid_armor_parts()
+    (tmp_path / "missing-end.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded}\n={checksum}\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+@pytest.mark.parametrize(
+    "end_line",
+    [
+        "----END PGP MESSAGE-----",  # wrong dash count (begin side)
+        "-----END PGP MESSAGE----",  # wrong dash count (end side)
+        "-----END PGP MESSAGE-----extra",  # glued trailing content
+        "-----end pgp message-----",  # wrong case
+        "PGP MESSAGE-----END-----",  # scrambled
+    ],
+)
+def test_armor_malformed_end_line_is_not_detected(tmp_path, end_line):
+    encoded, checksum, _end = _valid_armor_parts()
+    (tmp_path / "malformed-end.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded}\n={checksum}\n{end_line}\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_mismatched_label_is_not_detected(tmp_path):
+    encoded, checksum, _end = _valid_armor_parts()
+    (tmp_path / "mismatched-label.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded}\n={checksum}\n"
+        "-----END PGP SIGNATURE-----\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_trailing_junk_on_end_line_is_not_detected(tmp_path):
+    encoded, checksum, _end = _valid_armor_parts()
+    (tmp_path / "trailing-junk-end.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded}\n={checksum}\n"
+        "-----END PGP MESSAGE----- and then some\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_body_truncated_before_end_is_not_detected(tmp_path):
+    # The body simply stops -- no checksum, no tail, nothing -- partway
+    # through what would otherwise be a valid message.
+    encoded, _checksum, _end = _valid_armor_parts()
+    (tmp_path / "truncated-before-end.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE-----\n\n{encoded[:32]}\n".encode("ascii")
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_valid_looking_prefix_with_no_complete_armored_message_is_not_detected(tmp_path):
+    # Only the header line and the blank separator -- a prefix that "looks
+    # armored" but never becomes a complete message.
+    (tmp_path / "prefix-only.asc").write_bytes(b"-----BEGIN PGP MESSAGE-----\n\n")
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_armor_trailing_junk_on_begin_line_is_not_detected(tmp_path):
+    encoded, checksum, end = _valid_armor_parts()
+    (tmp_path / "trailing-junk-begin.asc").write_bytes(
+        f"-----BEGIN PGP MESSAGE----- and then some\n\n{encoded}\n={checksum}\n{end}\n".encode(
+            "ascii"
+        )
+    )
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_valid_lf_armor_with_complete_checksum_and_end_is_detected(tmp_path):
+    (tmp_path / "valid-lf.asc").write_bytes(_armored(_symmetric_encrypted_bytes()))
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "encrypted_file:openpgp"
+
+
+def test_valid_crlf_armor_with_complete_checksum_and_end_is_detected(tmp_path):
+    (tmp_path / "valid-crlf.asc").write_bytes(
+        _armored(_symmetric_encrypted_bytes()).replace(b"\n", b"\r\n")
+    )
+
+    findings = scan_crypto_inventory_findings(str(tmp_path))
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "encrypted_file:openpgp"
+
+
+def test_valid_armor_with_optional_headers_and_complete_framing_is_detected(tmp_path):
+    body = _symmetric_encrypted_bytes()
+    encoded = base64.b64encode(body).decode("ascii")
+    checksum = _armor_checksum_line(body)
+    (tmp_path / "with-headers.asc").write_bytes(
+        "-----BEGIN PGP MESSAGE-----\n"
+        "Version: GnuPG v2\n"
+        "Comment: HG-031 fixture\n\n"
+        f"{encoded}\n"
+        f"={checksum}\n"
+        "-----END PGP MESSAGE-----\n".encode("ascii")
     )
 
     findings = scan_crypto_inventory_findings(str(tmp_path))

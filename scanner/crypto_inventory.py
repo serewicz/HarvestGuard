@@ -210,6 +210,18 @@ def _openssl_salted_finding(file_path: Path) -> CryptoInventoryFinding:
 # evidence and are deliberately absent here -- the same narrowing the HG-009
 # correction applied to scanner/filesystem.py, which this must not revert.
 _OPENPGP_ARMOR_HEADER = b"-----BEGIN PGP MESSAGE-----"
+_OPENPGP_ARMOR_TAIL = b"-----END PGP MESSAGE-----"
+
+# RFC 4880 section 6.1: the CRC-24 every OpenPGP armor implementation computes
+# over the decoded packet stream to produce the checksum line. Poly and init
+# are the values the specification fixes, transcribed verbatim; verified
+# against the published CRC-24/OpenPGP reference check value (0x21CF02 for
+# the ASCII string "123456789") before this was wired into the parser below.
+_OPENPGP_CRC24_INIT = 0xB704CE
+_OPENPGP_CRC24_POLY = 0x1864CFB
+_RADIX64_ALPHABET = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
 
 _OPENPGP_TAG_PKESK = 1
 _OPENPGP_TAG_SKESK = 3
@@ -257,32 +269,81 @@ _OPENPGP_PUBLIC_KEY_ALGORITHMS = {
     26: "X448",
 }
 
+# A session-key packet alone is not an encrypted message -- it only names how
+# the actual encrypted-data packet's session key was protected. HG-031
+# correction cycle 2's Blocker 1: a supported message also requires at least
+# one following, complete encrypted-data packet, restricted to the two RFC
+# 4880 shapes real GnuPG output uses:
+#
+#   Tag 18, version 1  Sym. Encrypted Integrity Protected Data (RFC 4880
+#                      section 5.13), what current GnuPG writes by default
+#                      for both `gpg -c` and `gpg -e`. Version 2 is the RFC
+#                      9580 AEAD form and is deliberately unsupported.
+#   Tag 9              Symmetrically Encrypted Data (RFC 4880 section 5.7),
+#                      the older, MDC-less shape: opaque from its first body
+#                      octet onward, with no version field to check.
+#
+# Nothing else -- no v6/AEAD packet, no partial or indeterminate length, no
+# other packet family -- counts as the required following packet.
+_OPENPGP_TAG_SEIPD = 18
+_OPENPGP_TAG_SED = 9
+_OPENPGP_SEIPD_VERSION = 1
+
+
+def _openpgp_crc24(data: bytes) -> int:
+    """RFC 4880 section 6.1's CRC-24, computed over a decoded armor body so it
+    can be compared against the declared checksum line."""
+    crc = _OPENPGP_CRC24_INIT
+    for byte in data:
+        crc ^= byte << 16
+        for _ in range(8):
+            crc <<= 1
+            if crc & 0x1000000:
+                crc ^= _OPENPGP_CRC24_POLY
+        crc &= 0xFFFFFF
+    return crc
+
 
 def _openpgp_armor_body(data: bytes) -> bytes | None:
     """The complete decoded packet stream of an ASCII-armored OpenPGP MESSAGE's
-    radix-64 body, or None when ``data`` is not MESSAGE-armored or its body
-    cannot be decoded.
+    radix-64 body, or None when ``data`` is not complete, well-formed MESSAGE
+    armor.
 
-    RFC 4880 section 6.2 fixes this layout, and every part of it is required:
-    the armor header line alone on the first line, then optional
-    ``Key: Value`` armor headers, then a blank line, then the radix-64 encoded
-    packet stream, then the radix-64 checksum line and the armor tail line.
-    Trailing content on the header line, or a body that is not preceded by the
-    blank separator, means this is not armor and is not read as though it were.
+    RFC 4880 section 6.2 fixes this layout, and every part of it is required
+    -- HG-031's correction cycle 2 established that "looks like armor" is not
+    "is complete armor", so every one of these is now enforced, not merely
+    the ones a truncated/malformed file happened to trip over before:
+
+      1. the armor header line alone on the first line;
+      2. optional ``Key: Value`` armor headers;
+      3. the mandatory blank separator line;
+      4. a radix-64 encoded packet stream, whole quantums only;
+      5. a radix-64 checksum line (``=`` plus exactly four radix-64 octets)
+         whose decoded value is the CRC-24 of the decoded packet stream --
+         not merely a line that starts with ``=``;
+      6. an armor tail line matching the *same* label as the header line,
+         exactly, with nothing else on that line.
+
+    Trailing content on the header or tail line, a body that is not preceded
+    by the blank separator, a missing or incorrect checksum, a missing or
+    mismatched tail line, or content the tail line does not immediately
+    follow are all rejected -- this is not armor, and is not read as though
+    it were.
 
     The first decoded byte is therefore the first byte of the first OpenPGP
-    packet, which is the offset the format specification requires this check to
-    read -- the armored counterpart of offset 0 in a binary file, not a scan for
-    a signature at an arbitrary offset. The *whole* body is decoded rather than
-    a leading prefix of it, because the decoded stream is the armored
-    counterpart of a binary file's bytes: the caller's declared-length check is
-    only meaningful against the complete content, since a packet declaring more
-    body than the stream actually holds is truncated or over-declared either
-    way. Nothing decoded here is reported; the payload is only ever read for the
-    packet metadata the specification fixes at these offsets.
+    packet, which is the offset the format specification requires this check
+    to read -- the armored counterpart of offset 0 in a binary file, not a
+    scan for a signature at an arbitrary offset. The *whole* body is decoded
+    rather than a leading prefix of it, because the decoded stream is the
+    armored counterpart of a binary file's bytes: the caller's declared-length
+    check is only meaningful against the complete content, since a packet
+    declaring more body than the stream actually holds is truncated or
+    over-declared either way. Nothing decoded here is reported; the payload is
+    only ever read for the packet metadata the specification fixes at these
+    offsets.
 
-    Binary-safe: split on line boundaries as bytes, never decoded as text, so a
-    file that only looks armored cannot raise.
+    Binary-safe: split on line boundaries as bytes, never decoded as text, so
+    a file that only looks armored cannot raise.
     """
     if not data.startswith(_OPENPGP_ARMOR_HEADER):
         return None
@@ -306,28 +367,59 @@ def _openpgp_armor_body(data: bytes) -> bytes | None:
     if body_start is None:
         return None
 
-    encoded = bytearray()
-    for line in lines[body_start:]:
-        stripped = line.strip()
-        # "=" starts the radix-64 checksum line and "-----" the armor tail, and
-        # the body is one contiguous run of lines: any of the three ends it.
-        if not stripped or stripped.startswith((b"=", b"-----")):
+    # Collect body lines until a checksum line, a blank line, or the end of
+    # the file -- a checksum line is now mandatory (see docstring point 5), so
+    # reaching a tail line, a blank line, or the end of the lines list without
+    # first finding one means this armor is incomplete, not merely body-less.
+    body_lines: list[bytes] = []
+    checksum_line: bytes | None = None
+    checksum_line_index: int | None = None
+    for index in range(body_start, len(lines)):
+        line = lines[index].rstrip(b"\r")
+        if line.startswith(b"="):
+            checksum_line = line
+            checksum_line_index = index
             break
-        encoded += stripped
+        if not line or line.startswith(b"-----"):
+            return None
+        body_lines.append(line)
+    if checksum_line is None:
+        return None
 
-    # Only whole radix-64 quantums can be decoded; a partial trailing group is
-    # dropped rather than padded, so a truncated armor body decodes to
-    # whatever prefix is intact (possibly nothing) instead of raising -- and a
-    # packet whose declared body runs past that prefix is rejected by the
-    # caller's length check exactly as a truncated binary file is.
-    usable = bytes(encoded[: len(encoded) - len(encoded) % 4])
-    if not usable:
+    # Exactly "=" plus four radix-64 octets (24 bits, the whole CRC-24) --
+    # nothing shorter, longer, or containing a character outside the radix-64
+    # alphabet is a valid checksum line.
+    checksum_digits = checksum_line[1:]
+    if len(checksum_digits) != 4 or any(c not in _RADIX64_ALPHABET for c in checksum_digits):
+        return None
+
+    # The tail line must be the very next line, matching the header's label
+    # exactly, with nothing else on it -- a blank line, other content, or the
+    # end of the file between the checksum and the tail is not complete armor.
+    tail_index = checksum_line_index + 1
+    if tail_index >= len(lines):
+        return None
+    if lines[tail_index].rstrip(b"\r") != _OPENPGP_ARMOR_TAIL:
+        return None
+
+    # Only a whole number of radix-64 quantums is a complete, valid body --
+    # unlike a truncated *packet* (which the caller's declared-length check
+    # rejects), a body whose character count is not a multiple of four is
+    # malformed radix-64 itself and is never a partial-but-honest prefix.
+    encoded = b"".join(body_lines)
+    if not encoded or len(encoded) % 4 != 0:
         return None
     try:
-        return base64.b64decode(usable, validate=True)
+        decoded = base64.b64decode(encoded, validate=True)
     except ValueError:
         # binascii.Error (a ValueError) for a body that is not valid radix-64.
         return None
+
+    checksum_bytes = base64.b64decode(checksum_digits, validate=True)
+    if int.from_bytes(checksum_bytes, "big") != _openpgp_crc24(decoded):
+        return None
+
+    return decoded
 
 
 def _openpgp_packet_header(data: bytes) -> tuple[int, int, int] | None:
@@ -460,6 +552,31 @@ def _describe_pkesk(
     )
 
 
+def _openpgp_encrypted_data_packet_follows(packet: bytes, offset: int) -> bool:
+    """Whether a supported, complete encrypted-data packet begins at
+    ``offset`` in ``packet`` (see the tag/version note above
+    ``_OPENPGP_TAG_SEIPD``).
+
+    A determinate header is required, exactly as for the session-key packet
+    it follows, and its declared body must be fully present -- a header with
+    nothing, or too little, after it is a truncated encrypted-data packet,
+    not evidence of a complete one.
+    """
+    header = _openpgp_packet_header(packet[offset:])
+    if header is None:
+        return False
+    tag, body_offset, body_length = header
+    if body_length < 1:
+        return False
+    if offset + body_offset + body_length > len(packet):
+        return False
+    if tag == _OPENPGP_TAG_SEIPD:
+        return packet[offset + body_offset] == _OPENPGP_SEIPD_VERSION
+    if tag == _OPENPGP_TAG_SED:
+        return True
+    return False
+
+
 def _openpgp_encrypted_evidence(data: bytes) -> tuple[str, str] | None:
     """``(evidence text, observed algorithm)`` for a supported OpenPGP
     encrypted-file structure at the start of ``data``, or None.
@@ -492,6 +609,11 @@ def _openpgp_encrypted_evidence(data: bytes) -> tuple[str, str] | None:
         # not encrypted-file evidence.
         return None
     if described is None:
+        return None
+    # A session-key packet alone is not a supported encrypted message: a
+    # complete, supported encrypted-data packet must immediately follow it
+    # (HG-031 correction cycle 2, Blocker 1).
+    if not _openpgp_encrypted_data_packet_follows(packet, body_offset + body_length):
         return None
 
     structure, algorithm = described
