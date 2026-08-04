@@ -903,7 +903,11 @@ def test_relationship_has_no_metadata_or_free_form_field():
     ],
 )
 def test_unknown_metadata_cannot_be_attached(universe, known_ids, extra):
-    with pytest.raises(TypeError):
+    # An unknown keyword is a malformed candidate, not a model defect: there is no
+    # metadata field to absorb it. That the keyword *name* cannot reach the
+    # rejection text is pinned by
+    # `test_secret_bearing_unknown_keys_do_not_leak_into_rejections`.
+    with pytest.raises(MalformedRelationshipError):
         _contains(universe, known_ids, **extra)
 
 
@@ -984,6 +988,45 @@ def test_rejected_candidate_values_do_not_leak_into_rejections(universe, known_i
     assert collection.outcomes != (RelationshipOutcome.VALID,)
     assert collection.rejections
     _assert_no_sentinel(" ".join(collection.rejections))
+
+
+def test_secret_bearing_unknown_keys_do_not_leak_into_rejections(universe, known_ids):
+    """A candidate mapping's *keys* are untrusted caller text too.
+
+    A defective caller can just as easily pass a passphrase as a keyword *name* as
+    it can pass one as a value. Left to the dataclass, that name comes back inside
+    a ``TypeError`` quoting it verbatim, which `collect_relationships` would then
+    retain as rejection text -- so an unrecognized keyword must be refused by count
+    rather than by name.
+    """
+    base = {
+        "relationship_type": RelationshipType.CONTAINS,
+        "source_finding_id": universe["container"].finding_id,
+        "target_finding_id": universe["certificate"].finding_id,
+        "evidence": CONTAINS_EVIDENCE,
+        "confidence": "High",
+        "relationship_rule_id": "container_contains:pkcs12",
+        "scan_id": "scan-1",
+    }
+    collection = collect_relationships(
+        [
+            {**base, LEAK_SENTINEL: "attached anyway"},
+            {**base, LEAK_SENTINEL: {"nested": LEAK_SENTINEL}},
+            # An otherwise-valid candidate whose only defect is the extra keyword
+            # must still be refused: there is no metadata field to absorb it.
+            {**base, "passphrase": LEAK_SENTINEL},
+        ],
+        known_ids,
+    )
+    assert collection.outcomes == (RelationshipOutcome.MALFORMED,) * 3
+    assert collection.relationships == ()
+    assert collection.rejections
+    _assert_no_sentinel(" ".join(collection.rejections))
+
+    with pytest.raises(MalformedRelationshipError) as excinfo:
+        _contains(universe, known_ids, **{LEAK_SENTINEL: "attached anyway"})
+    _assert_no_sentinel(str(excinfo.value))
+    _assert_no_sentinel(repr(excinfo.value))
 
 
 @pytest.mark.parametrize(

@@ -50,7 +50,9 @@ What this module is:
   relationship. Rejection is not a channel either: a validation message names the
   refused *field* and at most the Python type supplied, never the value, so a
   passphrase a defective caller passed where an identifier belonged cannot travel
-  out through an exception or through ``RelationshipCollection.rejections``.
+  out through an exception or through ``RelationshipCollection.rejections``. An
+  unrecognized keyword is refused by count alone, because a candidate's *keys* are
+  untrusted text too.
 
 What this module is **not**: a graph. There is no graph database, no graph
 library, no graph API, no persistence, no traversal, no path search, no
@@ -212,6 +214,9 @@ _PROHIBITED_INFERENCE_TERMS = (
 # rejection text. Quoting the value would carry exactly the material the privacy
 # boundary excludes into a record the model calls safe. The field name is enough
 # to locate the defect; the value is the caller's to log, under its own boundary.
+# The same applies to a candidate mapping's *keys*, which are caller-supplied text
+# as well: an unrecognized keyword is reported by count, never by name (see
+# `_require_known_fields`).
 class RelationshipValidationError(ValueError):
     """A candidate relationship is not a valid internal relationship record.
 
@@ -401,6 +406,14 @@ class CryptoRelationship:
         )
 
 
+# The complete set of constructor keywords a relationship accepts. Derived from
+# the dataclass so it cannot drift from the model, and used to refuse unknown
+# keywords before the dataclass sees them -- see `_require_known_fields`.
+_RELATIONSHIP_FIELD_NAMES = frozenset(
+    model_field.name for model_field in fields(CryptoRelationship)
+)
+
+
 @dataclass(frozen=True)
 class RelationshipCollection:
     """The result of classifying a batch of candidate relationships.
@@ -542,6 +555,31 @@ def validate_endpoints(
             raise MissingEndpointError(f"{label} endpoint does not reference a known finding")
 
 
+def _require_known_fields(kwargs: Mapping[str, Any]) -> None:
+    """Refuse constructor keywords that are not relationship fields.
+
+    A candidate mapping comes from a caller, so its *keys* are untrusted text
+    just as its values are: a defective caller could pass a passphrase, a config
+    line, or a parser payload as a key name. Left to the dataclass, that key
+    would come back inside a ``TypeError`` message quoting it verbatim, and
+    ``collect_relationships`` retains rejection text -- so the key would travel
+    out of the model exactly the way the rejection-reason rule above
+    ``RelationshipValidationError`` forbids for values. Checked here instead,
+    with a reason that names neither key nor value; the count is enough to locate
+    the defect, and the caller knows what it passed.
+
+    Rejecting rather than ignoring them matters: there is no metadata dictionary
+    to absorb an unknown field, so a caller that supplied one has a defect, and
+    silently dropping it would hide that.
+    """
+    unexpected = sum(1 for key in kwargs if key not in _RELATIONSHIP_FIELD_NAMES)
+    if unexpected:
+        raise MalformedRelationshipError(
+            f"candidate supplies {unexpected} keyword(s) that are not relationship "
+            "fields; a relationship has no metadata field"
+        )
+
+
 def build_relationship(
     known_finding_ids: Iterable[str], **kwargs: Any
 ) -> CryptoRelationship:
@@ -549,11 +587,12 @@ def build_relationship(
 
     The construction entry point callers should use: it applies every
     ``CryptoRelationship`` validation *and* endpoint existence, so a relationship
-    that reaches a caller is never dangling. Unexpected keyword arguments raise
-    ``TypeError`` from the dataclass itself -- there is no metadata dictionary to
-    absorb them, which is why arbitrary fields cannot be attached to a
-    relationship at all.
+    that reaches a caller is never dangling. Unexpected keyword arguments are
+    rejected as malformed by ``_require_known_fields`` before the dataclass sees
+    them -- there is no metadata dictionary to absorb them, which is why
+    arbitrary fields cannot be attached to a relationship at all.
     """
+    _require_known_fields(kwargs)
     relationship = CryptoRelationship(**kwargs)
     validate_endpoints(relationship, known_finding_ids)
     return relationship
