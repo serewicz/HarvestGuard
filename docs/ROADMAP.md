@@ -721,6 +721,33 @@ Milestone 2 is fully delivered.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/72
 - **Pull request:** https://github.com/serewicz/HarvestGuard/pull/75
 
+### HG-033
+
+- **Title:** Shared Crypto Detector Framework
+- **Purpose:** Introduce a shared internal crypto-detector framework without
+  adding detection capability, asset types, rule IDs, or format support. The
+  framework provides an explicit static registry, deterministic unique detector
+  IDs and priorities, separate file and root detector concepts, scanner-owned
+  traversal, cached shared scan context, explicit terminal and non-terminal
+  behavior, and detector-specific metadata allowlists.
+- **Status:** Complete
+- **Milestone:** v0.2
+- **Dependencies:** HG-032
+- **Acceptance criteria:** All existing detector families are migrated exactly
+  once with no duplicate legacy dispatch; same-asset partial findings are
+  preserved when a detector fails; duplicate detector priorities are rejected;
+  HG-029 `Files scanned` and HG-030 `Crypto files inspected` accounting are
+  preserved; JSON, Markdown, CLI, DataFrame, Streamlit, rule IDs, finding IDs,
+  evidence wording, and confidence values remain compatible; the known
+  encrypted-summary taxonomy defect remains out of scope; no new asset type,
+  rule ID, or crypto format support is introduced.
+- **Delivered by:** `scanner/crypto_detectors.py`,
+  `scanner/crypto_inventory.py`, `tests/test_crypto_detector_framework.py`,
+  `docs/ARCHITECTURE.md`, `docs/CRYPTO_INVENTORY.md`, and
+  `docs/DETECTION_CHARACTERIZATION.md`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/78
+- **Pull request:** https://github.com/serewicz/HarvestGuard/pull/90
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
