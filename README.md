@@ -115,10 +115,15 @@ evidence and must remain traceable back to it.
   `gpg --symmetric` / `gpg --encrypt` writes, in binary or ASCII armor
   (evidence only, not decryption — signed messages, detached signatures, and
   key blocks are not treated as encrypted files, and OpenPGP coverage is
-  partial, not complete). Only files matching a candidate gate (recognized
-  extension, crypto header, or one of those encrypted-file signatures) are
-  parsed, and broader keystore/crypto-container coverage is not implemented.
-  See [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
+  partial, not complete). Also recognizes standard forward-mode gocryptfs
+  cipher roots (config format version 2 only) by their root-level
+  `gocryptfs.conf`/`gocryptfs.diriv` pair — one finding per validated root
+  directory, never per ciphertext file, and never mounted, unlocked, or
+  decrypted; reverse mode and `PlaintextNames` mode are unsupported. Only
+  files matching a candidate gate (recognized extension, crypto header, or one
+  of those encrypted-file/filesystem signatures) are parsed, and broader
+  keystore/crypto-container coverage is not implemented. See
+  [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Unified CLI** — runs local scanners through the normalized finding model
   with summary, JSON, and Markdown report output. `--json` emits an array of
   normalized findings; `--markdown` emits a local, evidence-only report

@@ -56,6 +56,15 @@ class CryptoInventoryFinding:
     # a specific, nameable detection rule rather than a parsed certificate/key,
     # so every other asset type leaves this None rather than inventing one.
     rule_id: str | None = None
+    # Encrypted-filesystem container metadata (HG-032 gocryptfs; kept generic
+    # rather than gocryptfs-specific field names so a future container format
+    # can reuse them). Unset for every other asset type. Deliberately limited
+    # to what HG-032's privacy contract allows: a format name, the supported
+    # on-disk config version observed, and the supported mode -- never the raw
+    # config, key material, salts, or nonces.
+    format: str | None = None
+    config_version: int | None = None
+    mode: str | None = None
     errors: list[str] = field(default_factory=list)
     scanner: str = SCANNER_NAME
     scanner_version: str = SCANNER_VERSION
@@ -77,6 +86,9 @@ class CryptoInventoryFinding:
             "Evidence": self.evidence,
             "Confidence": self.confidence,
             "Rule ID": self.rule_id,
+            "Format": self.format,
+            "Config Version": self.config_version,
+            "Mode": self.mode,
             "Errors": "; ".join(self.errors),
             "Scanner": self.scanner,
             "Scanner Version": self.scanner_version,
@@ -649,6 +661,141 @@ def _openpgp_encrypted_finding(
     )
 
 
+# --- gocryptfs cipher-root detection (HG-032) -------------------------------
+#
+# Structural only, exactly like the OpenSSL and OpenPGP checks above: this
+# reads gocryptfs.conf's stable JSON fields (Version, FeatureFlags) to confirm
+# a supported standard forward-mode root, and confirms EncryptedKey/
+# ScryptObject are present without ever parsing their contents. No file is
+# decrypted, mounted, or unlocked, no password is requested, and gocryptfs
+# itself is never invoked. One finding is emitted per validated root
+# directory -- never one per ciphertext file, encrypted directory, nested
+# gocryptfs.diriv, or long-name sidecar.
+#
+# gocryptfs.conf has no persisted "this is reverse mode" flag: a forward-mode
+# and a reverse-mode config are structurally identical JSON. What actually
+# distinguishes them on disk is that forward mode physically writes a
+# gocryptfs.diriv file to every real directory, including the root, while
+# reverse mode computes directory IVs live from the plaintext side and never
+# writes one anywhere -- there is nothing on-disk for a reverse root to
+# collect. Requiring a root-level gocryptfs.diriv (mandatory below regardless)
+# is therefore what excludes reverse-mode roots; there is no separate content
+# check to make because the config content does not encode this distinction.
+#
+# Config version 2 is the only version validated here: it has been
+# gocryptfs's on-disk format version continuously since v1.2, and HG-032
+# explicitly does not claim support for versions this repository has not
+# tested against. A version this scanner has not validated produces no
+# finding rather than an unverified guess.
+_GOCRYPTFS_CONFIG_FILENAME = "gocryptfs.conf"
+_GOCRYPTFS_DIRIV_FILENAME = "gocryptfs.diriv"
+_GOCRYPTFS_SUPPORTED_VERSIONS = frozenset({2})
+# The minimum stable top-level fields every gocryptfs.conf has carried since
+# format version 2. Presence is required; EncryptedKey/ScryptObject's
+# contents are never read beyond confirming they are the expected JSON type,
+# since HG-032's privacy contract forbids reporting key material, salts, or
+# KDF parameters.
+_GOCRYPTFS_REQUIRED_CONFIG_FIELDS = ("Version", "FeatureFlags", "EncryptedKey", "ScryptObject")
+# Presence of this feature flag means filenames are stored in plaintext
+# rather than encrypted -- a materially different, unsupported mode HG-032
+# must not claim as a standard forward-mode root.
+_GOCRYPTFS_PLAINTEXTNAMES_FLAG = "PlaintextNames"
+
+
+def _gocryptfs_config_version(config: dict) -> int | None:
+    """The supported gocryptfs config version ``config`` names, or None when
+    ``config`` is missing a required stable field, names an unsupported
+    version, has a malformed FeatureFlags list, or enables PlaintextNames.
+
+    ``config`` must already be a decoded JSON object; this only validates its
+    shape and content, never the file itself.
+    """
+    for required_field in _GOCRYPTFS_REQUIRED_CONFIG_FIELDS:
+        if required_field not in config:
+            return None
+
+    version = config.get("Version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        return None
+    if version not in _GOCRYPTFS_SUPPORTED_VERSIONS:
+        return None
+
+    feature_flags = config.get("FeatureFlags")
+    if not isinstance(feature_flags, list) or not all(
+        isinstance(flag, str) for flag in feature_flags
+    ):
+        return None
+    if _GOCRYPTFS_PLAINTEXTNAMES_FLAG in feature_flags:
+        return None
+
+    # Presence and plausible type only -- never read further (see module note
+    # above): a real EncryptedKey is a non-empty base64 string and a real
+    # ScryptObject is a JSON object of KDF parameters, but this scanner has no
+    # legitimate reason to look inside either one.
+    encrypted_key = config.get("EncryptedKey")
+    if not isinstance(encrypted_key, str) or not encrypted_key:
+        return None
+    if not isinstance(config.get("ScryptObject"), dict):
+        return None
+
+    return version
+
+
+def _gocryptfs_root_finding(config_path: Path, data: bytes) -> CryptoInventoryFinding | None:
+    """A gocryptfs root finding for the directory containing ``config_path``
+    (a file named exactly ``gocryptfs.conf``), or None when that directory is
+    not a validated, supported forward-mode cipher root.
+
+    ``data`` is ``config_path``'s already-read bytes, decoded and validated
+    here; nothing about it is reported beyond the derived version number.
+    """
+    if config_path.name != _GOCRYPTFS_CONFIG_FILENAME:
+        return None
+    # A regular file, not a symlink -- checked explicitly here (independent of
+    # the caller's own symlink handling) because the structural contract
+    # requires a *regular* file named exactly gocryptfs.conf.
+    if config_path.is_symlink():
+        return None
+
+    diriv_path = config_path.parent / _GOCRYPTFS_DIRIV_FILENAME
+    # is_file() alone would follow a symlink; both conditions together require
+    # a genuine regular file, matching gocryptfs.conf's own check above. A
+    # copied/orphaned gocryptfs.conf with no root gocryptfs.diriv, and a
+    # reverse-mode root (which never has one at all -- see module note above),
+    # both stop here.
+    if not diriv_path.is_file() or diriv_path.is_symlink():
+        return None
+
+    if len(data) > _MAX_TEXT_BYTES:
+        return None
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    try:
+        config = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(config, dict):
+        return None
+
+    version = _gocryptfs_config_version(config)
+    if version is None:
+        return None
+
+    root_path = config_path.parent
+    return CryptoInventoryFinding(
+        asset_type="Encrypted Filesystem",
+        location=str(root_path),
+        evidence="Observed supported gocryptfs cipher-root structure.",
+        confidence="High",
+        rule_id="encrypted_filesystem:gocryptfs",
+        format="gocryptfs",
+        config_version=version,
+        mode="forward",
+    )
+
+
 def _scan_file(file_path: Path) -> list[CryptoInventoryFinding]:
     try:
         data = file_path.read_bytes()
@@ -669,6 +816,20 @@ def _scan_file(file_path: Path) -> list[CryptoInventoryFinding]:
     openpgp = _openpgp_encrypted_evidence(data)
     if openpgp is not None:
         return [_openpgp_encrypted_finding(file_path, *openpgp)]
+
+    # Also checked before the candidate gate: gocryptfs.conf is plain JSON
+    # with no recognized extension and no "-----BEGIN " text, so the gate
+    # would otherwise drop it (HG-032). A no-op for every other filename.
+    gocryptfs = _gocryptfs_root_finding(file_path, data)
+    if gocryptfs is not None:
+        return [gocryptfs]
+    if file_path.name == _GOCRYPTFS_CONFIG_FILENAME:
+        # A file literally named gocryptfs.conf that failed root validation
+        # (missing sibling diriv, malformed/empty/unsupported config, reverse
+        # or plaintextnames mode) is not a supported cipher root and not
+        # evidence of any other crypto asset type either -- it must not fall
+        # through into PEM/DER/PKCS12 parsing below.
+        return []
 
     if not _could_contain_crypto_asset(file_path, data):
         return []

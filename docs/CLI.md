@@ -229,6 +229,76 @@ merged or reconciled against each other.
 Absence of an `encrypted_file:openpgp` finding is not proof that no encrypted
 OpenPGP files exist in the target.
 
+#### gocryptfs encrypted-filesystem evidence (HG-032)
+
+A directory containing both a supported `gocryptfs.conf` and a root-level
+`gocryptfs.diriv` — the two on-disk markers a standard `gocryptfs -init`
+cipher root always has — is encrypted-filesystem evidence, and the
+crypto-inventory scanner owns it: a `--type crypto` (or `--type all`) scan
+reports the *root directory* as asset type `Encrypted Filesystem`,
+`rule_id: encrypted_filesystem:gocryptfs`, confidence `High`, with evidence
+text limited to the observed root structure
+(`Observed supported gocryptfs cipher-root structure.`) — never a claim about
+decryption, password/key availability, mounted-state, or configuration
+correctness. This is a *container*-level finding, not a per-file one: a root
+with hundreds of ciphertext files still produces exactly one finding, for the
+root directory, and ordinary ciphertext files, encrypted subdirectories,
+nested `gocryptfs.diriv` files, and long-name sidecars inside it never
+produce their own findings. A directory that independently contains its own
+complete, valid `gocryptfs.conf`/`gocryptfs.diriv` pair nested inside another
+cipher root is a separate root and produces its own separate finding.
+
+**Support is narrow and explicit.** Only standard gocryptfs **forward mode**
+is recognized, and only config format version `2` (the version gocryptfs has
+used since v1.2) is treated as supported — an unrecognized version produces
+no finding rather than an unverified guess. `gocryptfs.conf` must decode as a
+JSON object carrying the stable fields every forward-mode config has
+(`Version`, `FeatureFlags`, `EncryptedKey`, `ScryptObject`), and must not have
+`PlaintextNames` set in `FeatureFlags` (a materially different, unsupported
+mode where filenames are stored unencrypted). **Reverse mode is unsupported**
+and is excluded structurally rather than by a config content check: a
+gocryptfs.conf carries no "this is reverse mode" field at all (forward and
+reverse configs are the same JSON shape), but reverse mode never writes a
+`gocryptfs.diriv` to disk anywhere — its "cipher view" is computed live from
+the plaintext side — so requiring a root-level `gocryptfs.diriv` (already
+mandatory) is what rejects it. Missing either marker, an empty or malformed
+config, an unsupported version, `PlaintextNames`, or a `gocryptfs.conf`
+copied somewhere with no root `gocryptfs.diriv` of its own all produce no
+finding — HG-032 has exactly one behavior for every unsupported/partial case
+(no finding), never a lower-confidence partial finding. See
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#gocryptfs-encrypted-filesystem-hg-032)
+for the full supported/unsupported enumeration.
+
+The **cipher root is not the same thing as a mounted, plaintext-visible
+gocryptfs directory** — HG-032 detects only the on-disk cipher root; it does
+not mount, unlock, decrypt, or correlate a mounted view back to its cipher
+root. The scanner never reads `EncryptedKey`, `ScryptObject`, or any other
+config value beyond what is needed to confirm a supported forward-mode root,
+and none of that is included in output — reported `technical_metadata` is
+limited to the format name (`gocryptfs`), the observed config version, and
+the mode (`forward`).
+
+A validated root finding may still be emitted when traversal beneath the root
+is incomplete (a permission failure or unreadable subdirectory, for example);
+confidence describes only the root-structure observation, not completeness of
+what lies beneath it. HG-032 does not report an aggregate ciphertext or
+subdirectory count at all, so no such count is ever claimed as complete or
+incomplete — existing scanner-error and finding-limitation behavior for an
+actual read or traversal failure is unchanged.
+
+The filesystem scanner does not recognize gocryptfs structure at all (neither
+`gocryptfs.conf` nor `gocryptfs.diriv` matches any filesystem-scanner
+signature), so there is nothing for `--type all` to deduplicate here — the one
+crypto-inventory root finding simply appears alongside whatever aggregate
+filesystem context and coverage records the filesystem scanner produced for
+the same target, which are unrelated evidence and are not removed.
+
+`Files scanned` and `Crypto files inspected` keep exactly the meanings
+described above. Absence of an `encrypted_filesystem:gocryptfs` finding is not
+proof that no gocryptfs cipher root exists in the target — this is one narrow
+detection rule for one specific, well-defined on-disk shape, not general
+encrypted-filesystem or FUSE coverage.
+
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,
 `DefaultAzureCredential` for Azure). The CLI does not read, prompt for, or
