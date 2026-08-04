@@ -78,6 +78,46 @@ Adapters should:
 - avoid business prioritization logic;
 - support pagination, limits, and safe failure behavior.
 
+#### Crypto-inventory detector framework
+
+The crypto-inventory adapter has an internal structure the other adapters do
+not yet need, because it recognizes many independent formats: each supported
+format is a **detector** declared in a static registry
+(`scanner/crypto_detectors.py` for the framework primitives,
+`CRYPTO_DETECTORS` in `scanner/crypto_inventory.py` for the registry itself).
+It is an implementation boundary only — it adds no detection capability and
+changes no finding contract. Its properties:
+
+- **Traversal stays with the scanner.** The scanner walks the target, applies
+  exclusions and symlink rules, counts inspected files, and hands each
+  discovered asset to the registry. Detectors receive one asset at a time and
+  have no filesystem entry point; a root/directory detector receives a
+  candidate root reached through a marker file the scanner already found, plus a
+  fixed-name sibling check, and cannot list or recurse.
+- **One read per file, shared.** A shared scan context offers leading bytes,
+  full bytes, and a bounded text view over a single read, so a detector reads
+  only the view it declared it needs and the registry does not grow into a
+  detectors-times-full-file-read pattern.
+- **Deterministic order, per-detector terminality.** Registry order comes from
+  declared priorities alone, never import or filesystem order. A result is a
+  non-match, a match other evidence may coexist with, or a match that ends
+  evaluation for that asset — not a general "first match wins" rule.
+- **Detector-declared safe metadata allowlists.** Metadata a detector did not
+  declare is omitted centrally, and there is no generic dictionary path from a
+  parser into a finding's technical metadata, so key material, passphrases,
+  salts, ciphertext, plaintext, raw config files, and parser payloads have no
+  channel into normalized findings, JSON, or Markdown.
+- **Accounting independent of detector count.** One regular file contributes at
+  most one unit to `Crypto files inspected` regardless of how many detectors
+  inspect it; classified directories are not counted as files.
+- **Error isolation.** An expected non-match is a result, not an exception. An
+  unexpected detector exception is never converted into a clean non-match: it
+  surfaces through the existing scanner-error path with findings already
+  collected preserved, and its message names the detector and asset path only.
+
+See [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md#detector-framework) for the
+detector lifecycle and how a future detector is added.
+
 ### Normalized Finding Model
 
 The normalized finding model is the contract between scanners and every
@@ -176,7 +216,11 @@ and migration-difficulty models exist.
   than propagating through the `scanner_errors` path the cloud adapters use
   (see [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md)).
 - `scanner/crypto_inventory.py` parses local certificate and key assets into
-  evidence-first inventory findings.
+  evidence-first inventory findings, owns the traversal and scan accounting for
+  those scans, and declares the static detector registry.
+- `scanner/crypto_detectors.py` holds the shared crypto-detector framework the
+  registry is built from: scan contexts, detector declarations, detection
+  results, safe metadata allowlisting, and detector error isolation.
 - `findings.py` defines the versioned normalized finding model.
 - `finding_adapters.py` maps current scanner DataFrames into normalized
   findings without changing existing scanner behavior.
