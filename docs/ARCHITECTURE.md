@@ -121,6 +121,50 @@ changes no finding contract. Its properties:
 See [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md#detector-framework) for the
 detector lifecycle and how a future detector is added.
 
+#### Internal cryptographic relationship model
+
+`scanner/crypto_relationships.py` is an internal-only model for representing
+that two *already discovered* cryptographic assets are structurally connected.
+It belongs to the crypto-inventory architecture, alongside the detector
+framework, and adds **no detection capability** and **no public output**:
+nothing in it reaches the CLI, JSON, Markdown reports, the Streamlit dashboard,
+the legacy DataFrame, or `NormalizedFinding`, and no relationship count appears
+in any summary or in scan accounting. Findings remain the only first-class
+public inventory records; relationships are internal evidence artifacts later
+issues may build on. Its properties:
+
+- **Endpoints are references to existing findings.** Both endpoints name a
+  stable `finding_id` that must already exist; a dangling relationship is
+  rejected, self-relationships are rejected, and relationship construction
+  never creates a synthetic asset, mutates a finding, or changes a finding ID.
+- **Closed vocabulary, explicit direction.** Exactly five types — `contains`,
+  `corresponds_to`, `references`, `member_of`, `issued_by` — so vague or
+  assessment-flavored relations cannot be expressed at all. Four are
+  directional (reversing endpoints is a different relationship); `corresponds_to`
+  is symmetric and canonically ordered.
+- **Deterministic identity and deduplication.** A relationship ID is derived
+  from the type, both stable finding IDs, and the relationship rule ID, and from
+  nothing volatile (timestamps, scan ID, host, ordering, confidence, evidence
+  prose, provenance text, limitations, errors). Duplicate suppression is exact
+  identity over one flat collection, retaining one canonical record; ordering
+  comes from the same stable fields.
+- **Evidence-only, no inference.** Evidence is required and must describe a
+  directly observed structure. Construction-time guards reject assessment
+  wording and inference wording, so a relationship cannot be created from
+  naming similarity, proximity, co-location, extension, ownership, chronology,
+  algorithm compatibility, or business assumption.
+- **Structural privacy boundary.** There is no metadata dictionary and no
+  free-form field, text fields are bounded and must be printable, and raw
+  material markers are rejected — so key material, certificates, ciphertext,
+  plaintext, passphrases, salts, KDF values, raw config, packet bodies, and
+  parser payloads have no channel into a relationship.
+- **Not a graph.** No graph database, graph library, graph API, persistence,
+  visualization, traversal, path search, transitive closure, or cycle analysis.
+
+See
+[CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+for the full contract and how later issues may use it.
+
 ### Normalized Finding Model
 
 The normalized finding model is the contract between scanners and every

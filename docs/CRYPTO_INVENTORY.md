@@ -134,6 +134,86 @@ isolation are then inherited rather than reimplemented. A new metadata key also
 requires extending `SAFE_METADATA_KEYS`, the `to_record()` output, and the
 normalized-finding adapter — deliberately a visible, reviewable change.
 
+## Internal Relationship Model (Internal Only, No Output)
+
+`scanner/crypto_relationships.py` is an **internal** model for representing that
+two *already discovered* cryptographic assets are structurally connected — for
+example a certificate whose public key material matches a private key's, or a
+parsed container that directly contains a certificate object.
+
+**It adds no detection capability and produces no output.** Nothing in this
+model appears in the CLI, in JSON, in a Markdown report, in the Streamlit
+dashboard, in the legacy DataFrame, or in `NormalizedFinding`. There are no new
+flags, no new columns, no new report sections, and no relationship counts in any
+summary. Findings remain the only first-class public inventory records;
+relationships are internal evidence artifacts that later issues may build on.
+
+- **Endpoints are references.** A relationship names two endpoints by the stable
+  `finding_id` of findings HarvestGuard already produced. Both endpoints must
+  exist: a dangling relationship is rejected. Relationships never create a
+  synthetic asset, never mutate a finding, and never change a finding ID. Source
+  and target must differ — self-relationships are rejected because no current
+  relationship type requires one.
+- **The vocabulary is fixed.** Exactly five types: `contains`,
+  `corresponds_to`, `references`, `member_of`, `issued_by`. Anything else is
+  rejected, so vague or assessment-flavored relations (`related_to`,
+  `depends_on`, `uses`, `protects`, `owned_by`, `belongs_to`, `impacts`,
+  `at_risk_from`) cannot be expressed. Adding a type requires an explicit code
+  and test change.
+- **Direction is explicit.** `contains`, `references`, `member_of`, and
+  `issued_by` are directional: reversing the endpoints is a different
+  relationship with a different ID. `corresponds_to` is symmetric: endpoints are
+  canonically ordered, so the two orderings of one observation collapse into a
+  single record with a single ID.
+- **Identity is deterministic.** `relationship_id` is derived from four stable
+  fields only — relationship type, both stable finding IDs (canonicalized for
+  symmetric types), and the relationship rule ID. Timestamps, scan IDs, host,
+  process, traversal or detector order, file counts, confidence, evidence
+  wording, provenance text, limitations, errors, and construction order are all
+  excluded, so re-observing the same relationship yields the same ID and
+  rewording evidence never churns identity.
+- **Deduplication is exact-identity suppression.** The same relationship
+  observed several times collapses to one canonical record; different types and
+  different rule IDs stay distinct. Ordering is derived from the same stable
+  fields, so a collection's order does not depend on the order it was built in.
+  There is no evidence-history aggregation and no transitive deduplication.
+- **Evidence only, no inference.** Every relationship requires evidence text
+  describing what was directly, structurally observed. Construction-time guards
+  reject assessment wording (validity, trust, ownership, business impact,
+  security strength, compliance, remediation, HNDL, quantum readiness,
+  severity, priority) and inference wording, because no relationship may be
+  created from guesswork, naming similarity, proximity, extension, directory
+  co-location, owner or group, host, chronology, algorithm compatibility alone,
+  subject-name similarity, or an assumed application dependency. Confidence uses
+  the same `High`/`Medium`/`Low` vocabulary findings use and describes confidence
+  in the relationship *evidence* only; `High` requires direct structural proof.
+- **Provenance is required and safe.** Each relationship records which internal
+  component created it, which relationship rule created it, the scan context,
+  whether the observation is repeatable, and when HarvestGuard collected the
+  evidence — as short, safe values.
+- **The privacy boundary is structural.** The model has no metadata dictionary
+  and no free-form field, so there is nowhere to put private key material, raw
+  certificate bodies, raw or encrypted key blobs, ciphertext, plaintext,
+  passphrases, salts, KDF values, raw config, OpenPGP packet bodies, Kubernetes
+  or application secrets, parser exception payloads, or arbitrary blobs. Every
+  text field is length-bounded and must be printable, and a field carrying a
+  PEM/OpenPGP armor header or the OpenSSL `Salted__` magic is rejected rather
+  than scrubbed. Unexpected keyword arguments raise rather than being absorbed.
+- **Validation outcomes are distinguishable.** Valid, duplicate, missing
+  endpoint, invalid type, self-relationship, malformed object, and unexpected
+  implementation failure are separate outcomes. An unexpected failure is never
+  converted into a clean "no relationship observed" result.
+- **It is not a graph.** No graph database, graph library, graph API,
+  persistence, visualization, traversal, path search, transitive closure, or
+  cycle analysis. A future relationship set may contain cycles; nothing here
+  requires or checks acyclicity.
+
+**How later issues may use it:** a detector or scanner component that *directly
+observes* a structural connection can build relationship candidates from the
+finding IDs it already produced and hand them to the model, which validates,
+normalizes, deduplicates, and orders them. Whether, where, and how relationships
+are ever surfaced is a separate product decision that this model does not make.
+
 ## Extracted Evidence
 
 Where available, findings include:
