@@ -88,3 +88,23 @@ class CloudScanError(RuntimeError):
     def __init__(self, message: str, partial_findings=()):
         super().__init__(message)
         self.partial_findings = tuple(partial_findings)
+
+
+class LocalScanError(RuntimeError):
+    """Raised when a local scanner's directory traversal could not fully
+    complete -- a subdirectory it could not list (permission denied,
+    unreadable, or another OSError partway through the walk).
+
+    Mirrors CloudScanError's shape for the same reason: the walk itself is
+    not aborted by the failure (a permission failure in one subtree must not
+    discard evidence gathered everywhere else in the target, including a
+    root-level finding whose own markers were already fully validated before
+    traversal continued past it), but the result must not silently look like
+    a clean, fully-covered scan either. ``partial_findings`` carries every
+    finding collected during the scan; callers surface the failure via
+    scanner_errors while still keeping those findings.
+    """
+
+    def __init__(self, message: str, partial_findings=()):
+        super().__init__(message)
+        self.partial_findings = tuple(partial_findings)

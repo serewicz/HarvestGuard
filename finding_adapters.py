@@ -306,6 +306,9 @@ def normalize_crypto_inventory_df(
                     "Issuer",
                     "Subject",
                     "Fingerprint",
+                    "Format",
+                    "Config Version",
+                    "Mode",
                 ],
             ),
         )

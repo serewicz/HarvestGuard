@@ -50,6 +50,12 @@ Example output shape:
   leading encrypted-session-key packet (structure only, not decrypted;
   checked before any extension-based branch above). Support is partial — see
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#openpgpgpg-encrypted-files-hg-031)
+- gocryptfs cipher roots (standard forward mode, config format version 2
+  only), identified by a root-level `gocryptfs.conf` plus `gocryptfs.diriv`
+  pair — one finding per validated root directory, not per ciphertext file,
+  and never decrypted, mounted, or unlocked. Reverse mode and `PlaintextNames`
+  mode are unsupported. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#gocryptfs-encrypted-filesystem-hg-032)
 
 ## Extracted Evidence
 
