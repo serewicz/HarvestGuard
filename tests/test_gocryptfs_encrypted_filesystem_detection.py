@@ -17,13 +17,17 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 import harvestguard
+import scanner.crypto_inventory as crypto_inventory
 from finding_adapters import normalize_crypto_inventory_df
 from harvestguard import _deduplicate_encrypted_file_findings
 from scanner.crypto_inventory import (
     scan_crypto_inventory,
     scan_crypto_inventory_findings,
 )
+from scanner.errors import LocalScanError
 from scanner.filesystem import scan_filesystem_findings
 
 RULE_ID = "encrypted_filesystem:gocryptfs"
@@ -111,6 +115,142 @@ def test_required_stable_config_field_missing_produces_no_finding(tmp_path):
         del config[field]
         target = tmp_path / f"missing-{field}"
         _make_root(target, conf=json.dumps(config).encode("ascii"))
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+# --- Tightened structural validation (Codex correction cycle, Blocker 1) ---
+#
+# The permissive shape Codex reproduced against affcabe: Version 2,
+# FeatureFlags [], EncryptedKey "not-base64-but-nonempty", ScryptObject {}
+# previously passed. None of the cases below may pass either.
+
+
+def _config_with(**overrides) -> dict:
+    config = json.loads(_gocryptfs_conf())
+    config.update(overrides)
+    return config
+
+
+def test_empty_feature_flags_produces_no_finding(tmp_path):
+    _make_root(tmp_path / "vault", conf=json.dumps(_config_with(FeatureFlags=[])).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_malformed_feature_flags_produces_no_finding(tmp_path):
+    for value in ("GCMIV128", 42, None, {"GCMIV128": True}):
+        config = _config_with(FeatureFlags=value)
+        _make_root(tmp_path / f"malformed-{type(value).__name__}", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_non_string_feature_flag_entry_produces_no_finding(tmp_path):
+    config = _config_with(FeatureFlags=["GCMIV128", 7])
+    _make_root(tmp_path / "vault", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_invalid_base64_encrypted_key_produces_no_finding(tmp_path):
+    # Exactly the weak shape Codex reproduced: syntactically non-empty, not
+    # valid base64.
+    config = _config_with(EncryptedKey="not-base64-but-nonempty")
+    _make_root(tmp_path / "vault", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_empty_encrypted_key_produces_no_finding(tmp_path):
+    config = _config_with(EncryptedKey="")
+    _make_root(tmp_path / "vault", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_wrong_type_encrypted_key_produces_no_finding(tmp_path):
+    for value in (12345, None, ["ZmFrZQ=="], True):
+        config = _config_with(EncryptedKey=value)
+        target = tmp_path / f"wrong-type-{type(value).__name__}"
+        _make_root(target, conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_empty_scrypt_object_produces_no_finding(tmp_path):
+    # Exactly the weak shape Codex reproduced: an object, but empty.
+    config = _config_with(ScryptObject={})
+    _make_root(tmp_path / "vault", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_malformed_scrypt_object_produces_no_finding(tmp_path):
+    for value in ("not-an-object", 65536, None, ["Salt", "N"]):
+        config = _config_with(ScryptObject=value)
+        _make_root(tmp_path / f"malformed-{type(value).__name__}", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_scrypt_object_missing_required_key_produces_no_finding(tmp_path):
+    for missing in ("Salt", "N", "R", "P", "KeyLen"):
+        scrypt_object = {"Salt": "c2FsdHNhbHQ=", "N": 65536, "R": 8, "P": 1, "KeyLen": 32}
+        del scrypt_object[missing]
+        config = _config_with(ScryptObject=scrypt_object)
+        _make_root(tmp_path / f"missing-{missing}", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_scrypt_object_wrong_type_value_produces_no_finding(tmp_path):
+    base = {"Salt": "c2FsdHNhbHQ=", "N": 65536, "R": 8, "P": 1, "KeyLen": 32}
+    for key, bad_value in (
+        ("Salt", 12345),
+        ("Salt", ""),
+        ("Salt", "not valid base64!!"),
+        ("N", "65536"),
+        ("N", 0),
+        ("N", -1),
+        ("N", True),
+        ("R", None),
+        ("KeyLen", 0),
+    ):
+        scrypt_object = dict(base)
+        scrypt_object[key] = bad_value
+        config = _config_with(ScryptObject=scrypt_object)
+        target = tmp_path / f"bad-{key}-{bad_value!r}".replace(" ", "")
+        _make_root(target, conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_unrelated_json_with_all_four_top_level_keys_produces_no_finding(tmp_path):
+    # The four required key *names* are present, but nothing about the
+    # values resembles a real gocryptfs config -- key presence alone must
+    # not be mistaken for a validated shape.
+    config = {
+        "Version": 2,
+        "FeatureFlags": ["not", "real", "flags"],
+        "EncryptedKey": "!!!not-base64!!!",
+        "ScryptObject": {"unrelated": "object"},
+    }
+    _make_root(tmp_path / "vault", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_config_version_as_string_produces_no_finding(tmp_path):
+    config = _config_with(Version="2")
+    _make_root(tmp_path / "vault", conf=json.dumps(config).encode())
+
+    assert scan_crypto_inventory_findings(str(tmp_path)) == []
+
+
+def test_config_version_as_bool_produces_no_finding(tmp_path):
+    config = _config_with(Version=True)
+    _make_root(tmp_path / "vault", conf=json.dumps(config).encode())
 
     assert scan_crypto_inventory_findings(str(tmp_path)) == []
 
@@ -505,20 +645,78 @@ def test_markdown_output_is_evidence_only(tmp_path, capsys):
 # --- 32-33. Incomplete subtree traversal, no exact aggregate counts --------
 
 
-def test_incomplete_subtree_traversal_still_permits_root_finding(tmp_path):
+def test_deterministic_traversal_failure_raises_and_preserves_root_finding(tmp_path, monkeypatch):
+    # Deterministic, host-permission-independent: a fake os.walk removes
+    # "blocked" from the directories it descends into (so the real walk
+    # never touches it) and directly invokes the onerror callback exactly
+    # once, the same way a real permission-denied directory would trigger
+    # it -- rather than depending on chmod/root-vs-non-root CI behavior.
+    root = _make_root(tmp_path / "vault")
+    blocked = root / "blocked"
+    blocked.mkdir()
+    (blocked / "hidden_ciphertext").write_bytes(os.urandom(16))
+
+    real_walk = os.walk
+
+    def fake_walk(path, onerror=None, followlinks=False):
+        for current_root, dirs, files in real_walk(path, onerror=onerror, followlinks=followlinks):
+            if Path(current_root) == root and "blocked" in dirs:
+                dirs.remove("blocked")
+                if onerror is not None:
+                    onerror(OSError(13, "Permission denied", str(blocked)))
+            yield current_root, dirs, files
+
+    monkeypatch.setattr(crypto_inventory.os, "walk", fake_walk)
+
+    with pytest.raises(LocalScanError) as exc_info:
+        scan_crypto_inventory_findings(str(tmp_path))
+
+    # A truthful signal naming the path that could not be traversed.
+    assert str(blocked) in str(exc_info.value)
+
+    # The root finding, already fully validated before the walk continued
+    # past the failure, is not discarded.
+    findings = _gocryptfs_findings(exc_info.value.partial_findings)
+    assert len(findings) == 1
+    assert findings[0].location == str(root)
+    assert findings[0].confidence == "High"
+
+    # No aggregate ciphertext/directory count is claimed as complete (or at
+    # all) despite the incomplete subtree.
+    metadata_keys = set(findings[0].technical_metadata.keys())
+    for forbidden_substring in ("count", "files represented", "ciphertext"):
+        assert not any(forbidden_substring in key.lower() for key in metadata_keys)
+
+
+def test_traversal_failure_surfaces_through_cli_scanner_errors(tmp_path, capsys):
+    # Secondary, real-filesystem integration check (chmod-based, so it does
+    # not run under a root/CI user where chmod 0o000 does not actually block
+    # reads) -- the deterministic os.walk-mocking test above is what proves
+    # the mechanism; this just confirms it wires through the real CLI path
+    # end to end when the host permission model actually applies.
+    if os.geteuid() == 0:  # pragma: no cover - not exercised as root
+        pytest.skip("chmod 0o000 does not block reads for uid 0")
+
     root = _make_root(tmp_path / "vault")
     blocked = root / "blocked"
     blocked.mkdir()
     (blocked / "hidden_ciphertext").write_bytes(os.urandom(16))
     blocked.chmod(0o000)
     try:
-        findings = _gocryptfs_findings(scan_crypto_inventory_findings(str(tmp_path)))
+        exit_code = harvestguard.main(
+            ["scan", str(tmp_path), "--type", "crypto", "--json", "--quiet"]
+        )
     finally:
         blocked.chmod(0o755)
 
-    assert len(findings) == 1
-    assert findings[0].location == str(root)
-    assert findings[0].confidence == "High"
+    # A scanner-level failure exits nonzero (existing scanner_errors/exit-code
+    # plumbing, unchanged), but the root finding still appears in the JSON
+    # output rather than being discarded.
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    gocryptfs_records = [r for r in payload if r.get("rule_id") == RULE_ID]
+    assert len(gocryptfs_records) == 1
+    assert gocryptfs_records[0]["location"] == str(root)
 
 
 def test_no_exact_aggregate_counts_are_claimed(tmp_path):

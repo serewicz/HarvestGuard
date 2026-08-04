@@ -19,6 +19,7 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 
 from finding_adapters import normalize_crypto_inventory_df
 from findings import NormalizedFinding
+from scanner.errors import LocalScanError
 
 SCANNER_NAME = "crypto_inventory"
 SCANNER_VERSION = "0.1.0"
@@ -101,6 +102,7 @@ def scan_crypto_inventory(
     exclude_patterns: list[str] | None = None,
     follow_symlinks: bool = False,
     stats: dict[str, int] | None = None,
+    traversal_errors: list[str] | None = None,
 ) -> pd.DataFrame:
     """Recursively scan a local path for cryptographic asset evidence.
 
@@ -110,13 +112,23 @@ def scan_crypto_inventory(
     (HG-030 crypto scan accounting). It is an optional out-of-band channel
     rather than a return-value change, so existing callers of this function
     are unaffected.
+
+    ``traversal_errors``, when given, collects one message per subdirectory
+    ``os.walk`` could not list (permission denied, unreadable, or another
+    OSError) -- see ``_iter_candidate_files``. The walk continues past the
+    failure; this only records that it happened, matching the same
+    ``errors=`` side-channel shape ``scanner/cloud.py`` already uses for the
+    same "collect, don't abort, let the caller decide how to surface it"
+    reason (HG-032 Blocker 2).
     """
     findings = []
     root_path = Path(path)
     patterns = exclude_patterns or []
     files_inspected = 0
 
-    for file_path in _iter_candidate_files(root_path, patterns, follow_symlinks):
+    for file_path in _iter_candidate_files(
+        root_path, patterns, follow_symlinks, traversal_errors
+    ):
         files_inspected += 1
         findings.extend(_scan_file(file_path))
 
@@ -133,26 +145,51 @@ def scan_crypto_inventory_findings(
     scan_id: str | None = None,
     stats: dict[str, int] | None = None,
 ) -> list[NormalizedFinding]:
-    return normalize_crypto_inventory_df(
-        scan_crypto_inventory(
-            path,
-            exclude_patterns=exclude_patterns,
-            follow_symlinks=follow_symlinks,
-            stats=stats,
-        ),
-        scan_id=scan_id,
+    traversal_errors: list[str] = []
+    df = scan_crypto_inventory(
+        path,
+        exclude_patterns=exclude_patterns,
+        follow_symlinks=follow_symlinks,
+        stats=stats,
+        traversal_errors=traversal_errors,
     )
+    findings = normalize_crypto_inventory_df(df, scan_id=scan_id)
+    if traversal_errors:
+        # A directory this scan could not list is a coverage gap, not a
+        # clean, fully-covered result -- but the walk already continued past
+        # it, so everything collected elsewhere (including a gocryptfs root
+        # finding whose own markers/config were already fully validated) must
+        # not be discarded. Mirrors CloudScanError: the caller (the CLI) sees
+        # a scanner_errors entry and a nonzero exit, while these findings
+        # still appear in the output.
+        raise LocalScanError("; ".join(traversal_errors), partial_findings=findings)
+    return findings
 
 
 def _iter_candidate_files(
-    root_path: Path, exclude_patterns: list[str], follow_symlinks: bool
+    root_path: Path,
+    exclude_patterns: list[str],
+    follow_symlinks: bool,
+    traversal_errors: list[str] | None = None,
 ):
     if root_path.is_file():
         if not _is_excluded(root_path, root_path.name, exclude_patterns):
             yield root_path
         return
 
-    for current_root, dirs, files in os.walk(root_path, followlinks=follow_symlinks):
+    def _on_walk_error(exc: OSError) -> None:
+        # Recorded, never raised: os.walk continues to the next directory in
+        # the walk on its own after this callback returns, so one unreadable
+        # subtree does not stop the rest of the scan from being collected
+        # (HG-032 Blocker 2, requirement 3).
+        if traversal_errors is not None:
+            traversal_errors.append(
+                f"{exc.filename or root_path}: {exc.strerror or exc}"
+            )
+
+    for current_root, dirs, files in os.walk(
+        root_path, onerror=_on_walk_error, followlinks=follow_symlinks
+    ):
         current = Path(current_root)
         rel_root = _relative_for_match(current, root_path)
         dirs[:] = [
@@ -691,24 +728,41 @@ _GOCRYPTFS_CONFIG_FILENAME = "gocryptfs.conf"
 _GOCRYPTFS_DIRIV_FILENAME = "gocryptfs.diriv"
 _GOCRYPTFS_SUPPORTED_VERSIONS = frozenset({2})
 # The minimum stable top-level fields every gocryptfs.conf has carried since
-# format version 2. Presence is required; EncryptedKey/ScryptObject's
-# contents are never read beyond confirming they are the expected JSON type,
-# since HG-032's privacy contract forbids reporting key material, salts, or
-# KDF parameters.
+# format version 2. Presence is required; EncryptedKey/ScryptObject are
+# checked for syntactic/structural plausibility only (valid base64, expected
+# sub-keys, sane positive types) -- never for cryptographic correctness, and
+# no value read from either one is ever returned, stored, or reported, since
+# HG-032's privacy contract forbids reporting key material, salts, or KDF
+# parameters.
 _GOCRYPTFS_REQUIRED_CONFIG_FIELDS = ("Version", "FeatureFlags", "EncryptedKey", "ScryptObject")
 # Presence of this feature flag means filenames are stored in plaintext
 # rather than encrypted -- a materially different, unsupported mode HG-032
 # must not claim as a standard forward-mode root.
 _GOCRYPTFS_PLAINTEXTNAMES_FLAG = "PlaintextNames"
+# The stable ScryptObject keys every real gocryptfs v2 config has (Salt plus
+# the three scrypt cost parameters and the derived key length). Presence and
+# type are checked -- Salt must be a non-empty base64 string, the numeric
+# parameters must be positive integers -- but no value is validated as a
+# *correct* or *safe* scrypt parameter: that would be cryptographic
+# verification, which HG-032 explicitly does not attempt. Values are never
+# read into a finding or reported.
+_GOCRYPTFS_SCRYPT_OBJECT_INT_KEYS = ("N", "R", "P", "KeyLen")
 
 
 def _gocryptfs_config_version(config: dict) -> int | None:
     """The supported gocryptfs config version ``config`` names, or None when
     ``config`` is missing a required stable field, names an unsupported
-    version, has a malformed FeatureFlags list, or enables PlaintextNames.
+    version, has a malformed FeatureFlags list, enables PlaintextNames, or has
+    a syntactically implausible EncryptedKey/ScryptObject.
 
     ``config`` must already be a decoded JSON object; this only validates its
-    shape and content, never the file itself.
+    shape and content, never the file itself. Deliberately conservative: a
+    config this narrow enough to accept on the smallest tested gocryptfs v2
+    fixtures, not a permissive "looks roughly right" match -- a config with
+    the right top-level keys but implausible values (an empty FeatureFlags
+    list, non-base64 EncryptedKey, or an empty/incomplete ScryptObject) is
+    not evidence of a real gocryptfs root and must not reach `High`
+    confidence.
     """
     for required_field in _GOCRYPTFS_REQUIRED_CONFIG_FIELDS:
         if required_field not in config:
@@ -721,24 +775,59 @@ def _gocryptfs_config_version(config: dict) -> int | None:
         return None
 
     feature_flags = config.get("FeatureFlags")
-    if not isinstance(feature_flags, list) or not all(
-        isinstance(flag, str) for flag in feature_flags
+    if (
+        not isinstance(feature_flags, list)
+        or not feature_flags
+        or not all(isinstance(flag, str) for flag in feature_flags)
     ):
         return None
     if _GOCRYPTFS_PLAINTEXTNAMES_FLAG in feature_flags:
         return None
 
-    # Presence and plausible type only -- never read further (see module note
-    # above): a real EncryptedKey is a non-empty base64 string and a real
-    # ScryptObject is a JSON object of KDF parameters, but this scanner has no
-    # legitimate reason to look inside either one.
-    encrypted_key = config.get("EncryptedKey")
-    if not isinstance(encrypted_key, str) or not encrypted_key:
+    if not _gocryptfs_encrypted_key_plausible(config.get("EncryptedKey")):
         return None
-    if not isinstance(config.get("ScryptObject"), dict):
+    if not _gocryptfs_scrypt_object_plausible(config.get("ScryptObject")):
         return None
 
     return version
+
+
+def _gocryptfs_encrypted_key_plausible(encrypted_key: object) -> bool:
+    """Whether ``encrypted_key`` is syntactically a real gocryptfs
+    EncryptedKey: a non-empty string that is valid base64 decoding to at
+    least one byte. The decoded value is discarded immediately -- never
+    returned, stored, logged, or reported anywhere (HG-032's privacy
+    contract forbids exposing key material)."""
+    if not isinstance(encrypted_key, str) or not encrypted_key:
+        return False
+    try:
+        decoded = base64.b64decode(encrypted_key, validate=True)
+    except (ValueError, TypeError):
+        return False
+    return len(decoded) > 0
+
+
+def _gocryptfs_scrypt_object_plausible(scrypt_object: object) -> bool:
+    """Whether ``scrypt_object`` has the stable keys and structurally sane
+    types a real gocryptfs v2 ScryptObject has -- never a judgment about
+    whether the parameters are cryptographically safe (HG-032 does not
+    attempt cryptographic verification), and no value from it is ever
+    returned, stored, or reported."""
+    if not isinstance(scrypt_object, dict):
+        return False
+    salt = scrypt_object.get("Salt")
+    if not isinstance(salt, str) or not salt:
+        return False
+    try:
+        if len(base64.b64decode(salt, validate=True)) == 0:
+            return False
+    except (ValueError, TypeError):
+        return False
+    for key in _GOCRYPTFS_SCRYPT_OBJECT_INT_KEYS:
+        value = scrypt_object.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return False
+    return True
 
 
 def _gocryptfs_root_finding(config_path: Path, data: bytes) -> CryptoInventoryFinding | None:
