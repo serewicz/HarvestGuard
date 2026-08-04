@@ -334,10 +334,11 @@ rather than an unverified guess that a newer or older format matches):
   mandatory, and either one missing produces no finding.
 - `gocryptfs.conf` decodes as a JSON object carrying the stable fields every
   forward-mode config has: `Version`, `FeatureFlags`, `EncryptedKey`,
-  `ScryptObject`. `EncryptedKey`/`ScryptObject` are checked for presence and
-  plausible type only — their contents are never read, parsed, or reported;
-  HG-032's privacy contract forbids exposing key material, salts, or KDF
-  parameters.
+  `ScryptObject`. `EncryptedKey` must be non-empty valid base64, and
+  `ScryptObject` must contain the required version-2 structural fields with a
+  valid base64 salt and positive integer work-factor/key-length values. These
+  checks validate supported structure only; HarvestGuard does not verify or
+  emit the underlying secret material.
 - `FeatureFlags` does not contain `PlaintextNames` — a materially different
   mode where filenames are stored unencrypted rather than encrypted, which
   HG-032 does not claim to detect the same way.

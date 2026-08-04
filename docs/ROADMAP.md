@@ -687,6 +687,40 @@ Milestone 2 is fully delivered.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/71
 - **Pull request:** https://github.com/serewicz/HarvestGuard/pull/73
 
+### HG-032
+
+- **Title:** gocryptfs Encrypted-Filesystem Detection
+- **Purpose:** Recognize supported standard forward-mode gocryptfs cipher
+  roots as first-class crypto-inventory evidence without mounting, decrypting,
+  inferring encryption from entropy or filenames, or emitting
+  per-ciphertext-file findings. Preserve deterministic root identity, truthful
+  traversal-failure reporting, and existing filesystem and crypto scan
+  accounting.
+- **Status:** Complete
+- **Milestone:** v0.1.1 Stabilization
+- **Dependencies:** HG-030, HG-031
+- **Acceptance criteria:** Supported gocryptfs config version 2 roots require
+  validated root-level `gocryptfs.conf` and `gocryptfs.diriv`; conservative
+  structural validation rejects malformed, partial, unsupported, reverse-mode,
+  plaintextnames, orphaned, and unrelated configurations; crypto inventory
+  emits one `Encrypted Filesystem` finding per validated root with
+  `rule_id: encrypted_filesystem:gocryptfs` and `confidence: High`;
+  ciphertext files, nested metadata, sidecars, and ordinary directories do not
+  amplify findings; traversal failures are reported through existing
+  scanner-error handling while preserving validated partial findings; HG-029
+  `Files scanned`, HG-030 `Crypto files inspected`, bare-array JSON, and
+  evidence-only Markdown remain unchanged; raw config, encrypted-key material,
+  salts, Scrypt parameters, ciphertext, plaintext, passphrases, and decrypted
+  names are not emitted; no mounting, unlocking, decryption, password handling,
+  other encrypted-filesystem support, or generic entropy inference is
+  introduced.
+- **Delivered by:** `scanner/crypto_inventory.py`, `scanner/errors.py`,
+  `finding_adapters.py`,
+  `tests/test_gocryptfs_encrypted_filesystem_detection.py`,
+  `docs/CRYPTO_INVENTORY.md`, and `docs/DETECTION_CHARACTERIZATION.md`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/72
+- **Pull request:** https://github.com/serewicz/HarvestGuard/pull/75
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
