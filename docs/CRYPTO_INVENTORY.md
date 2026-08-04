@@ -57,6 +57,83 @@ Example output shape:
   mode are unsupported. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#gocryptfs-encrypted-filesystem-hg-032)
 
+## Detector Framework
+
+Internally, every supported format above is a **detector**: a small declaration
+in a static registry (`scanner/crypto_detectors.py` defines the framework,
+`scanner/crypto_inventory.py` declares the registry as `CRYPTO_DETECTORS`).
+This is an implementation structure introduced by HG-033, not a capability:
+**HG-033 added no new detection capability.** Every format the scanner
+recognizes today was recognized before the framework existed, with the same
+asset types, rule IDs, evidence wording, confidence values, and metadata.
+
+**Traversal is owned by the scanner, never by a detector.** The scanner walks
+the requested file or directory, applies exclusions and symlink rules, counts
+inspected files, and hands each discovered asset to the registry. Detectors
+have no filesystem entry point of their own — a root detector receives a
+candidate root reached through a marker file the scanner already found, plus a
+fixed-name sibling check, and cannot list or recurse into a directory.
+
+**Shared scan context.** Each file is read once per scan, and every detector
+that inspects it shares that read through a context offering three views:
+leading bytes (for exact-position signature checks), full bytes (for the
+parsers that genuinely need the whole asset), and a bounded text view (the
+5 MB decode limit described under [Known Limitations](#known-limitations)).
+Adding a detector therefore does not add a read of the file.
+
+**File and root detectors.** Most detectors are file-scope: one asset, one
+file. gocryptfs is root-scope, because the evidence is a directory structure —
+one finding per validated root, never one per ciphertext file.
+
+**Deterministic order and terminal results.** Each detector declares a
+priority, and the registry is ordered by priority alone — never by import
+order, filesystem order, or an environment variable. Priorities must be unique:
+two detectors sharing one priority would have their relative order decided by
+the order they were listed in, so the registry rejects a duplicate priority
+instead of tie-breaking it. A detector's result is
+either "no match", "match, and other evidence may coexist", or "match, and
+this detector owns the asset" (terminal). Terminality is per detector, not a
+general "first match wins" rule: it is what keeps an OpenSSL- or
+OpenPGP-encrypted file saved with a misleading `.p12` extension from also
+being reported as a malformed PKCS#12, while still letting one PEM file report
+a certificate, a private key, and an SSH public key together.
+
+**Safe metadata allowlists.** Detector output is treated as untrusted until
+allowlisted. Each detector declares which of the ten approved metadata keys
+(`Algorithm`, `Key Size`, `Signature Algorithm`, `Expiration`, `Issuer`,
+`Subject`, `Fingerprint`, `Format`, `Config Version`, `Mode`) it may populate;
+anything else it sets is omitted centrally before the finding is emitted, and a
+declaration outside that set is rejected when the registry is built. There is
+no generic dictionary path from a parser into a finding's technical metadata,
+so key material, passphrases, salts, KDF parameters, ciphertext, plaintext, raw
+config files, and parser payloads have no channel into JSON or Markdown output.
+
+**Accounting is unaffected by detector count.** `Crypto files inspected`
+counts files the scan visited and opened — one unit per regular file,
+regardless of how many detectors inspect it, how many views they take of it, or
+how many findings (including malformed ones) they produce. Directories a root
+detector classifies are not counted as files.
+
+**Error isolation.** An expected non-match is a result, not an exception, and
+produces no finding and no error. Malformed input a detector owns produces the
+existing `Malformed ...` findings. An unreadable file produces nothing. A
+traversal failure raises `LocalScanError` with the findings already collected.
+An *unexpected* detector exception is not silently converted into a clean
+non-match: it stops the crypto-inventory scan through the same scanner-error
+path, preserving findings already collected — including the evidence earlier
+detectors already produced for the same file the failing detector was inspecting
+— and the error text names the detector ID and the asset path, never the
+exception's own message, which could quote file content.
+
+**Adding a future detector** means: write a candidate predicate and a detect
+function against the shared context, declare a `FileDetector` or
+`RootDetector` (identifier, priority, rule ID where applicable, confidence,
+evidence wording, terminal behavior, metadata allowlist), and add it to
+`CRYPTO_DETECTORS`. Traversal, accounting, ordering, metadata safety, and error
+isolation are then inherited rather than reimplemented. A new metadata key also
+requires extending `SAFE_METADATA_KEYS`, the `to_record()` output, and the
+normalized-finding adapter — deliberately a visible, reviewable change.
+
 ## Extracted Evidence
 
 Where available, findings include:

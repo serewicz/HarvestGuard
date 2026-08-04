@@ -19,12 +19,21 @@ from cryptography.hazmat.primitives.serialization import pkcs12
 
 from finding_adapters import normalize_crypto_inventory_df
 from findings import NormalizedFinding
+from scanner.crypto_detectors import (
+    MAX_TEXT_BYTES,
+    DetectionResult,
+    DetectorExecutionError,
+    FileContext,
+    FileDetector,
+    RootContext,
+    RootDetector,
+    build_registry,
+    run_detectors,
+)
 from scanner.errors import LocalScanError
 
 SCANNER_NAME = "crypto_inventory"
 SCANNER_VERSION = "0.1.0"
-
-_MAX_TEXT_BYTES = 5_000_000
 _BINARY_PARSE_EXTENSIONS = {".cer", ".crt", ".der", ".jks", ".p12", ".pfx"}
 _PEM_BLOCK_MARKERS = {
     "CERTIFICATE": "PEM Certificate",
@@ -103,6 +112,7 @@ def scan_crypto_inventory(
     follow_symlinks: bool = False,
     stats: dict[str, int] | None = None,
     traversal_errors: list[str] | None = None,
+    detector_errors: list[str] | None = None,
 ) -> pd.DataFrame:
     """Recursively scan a local path for cryptographic asset evidence.
 
@@ -120,6 +130,18 @@ def scan_crypto_inventory(
     ``errors=`` side-channel shape ``scanner/cloud.py`` already uses for the
     same "collect, don't abort, let the caller decide how to surface it"
     reason (HG-032 Blocker 2).
+
+    ``detector_errors``, when given, collects the one message describing an
+    unexpected detector failure (HG-033). Unlike a traversal error, this stops
+    the scan: a detector that raised is a defect, not a coverage gap, and the
+    remaining files cannot be claimed as inspected. Findings collected before
+    the failure are still returned -- including those earlier detectors produced
+    for the same file the failing detector was inspecting -- so the caller
+    surfaces the failure while keeping the evidence already gathered, the same
+    shape as the traversal and cloud partial-finding paths. When the argument is
+    omitted the exception propagates instead, so a caller that has no way to
+    surface the failure never receives a truncated result that looks like a clean
+    one.
     """
     findings = []
     root_path = Path(path)
@@ -130,7 +152,17 @@ def scan_crypto_inventory(
         root_path, patterns, follow_symlinks, traversal_errors
     ):
         files_inspected += 1
-        findings.extend(_scan_file(file_path))
+        try:
+            findings.extend(_scan_file(file_path))
+        except DetectorExecutionError as exc:
+            if detector_errors is None:
+                raise
+            # Including the evidence earlier detectors already produced for this
+            # same file: one detector's defect must not discard another
+            # detector's valid finding about the asset they share.
+            findings.extend(exc.partial_findings)
+            detector_errors.append(str(exc))
+            break
 
     if stats is not None:
         stats["files_inspected"] = files_inspected
@@ -146,15 +178,18 @@ def scan_crypto_inventory_findings(
     stats: dict[str, int] | None = None,
 ) -> list[NormalizedFinding]:
     traversal_errors: list[str] = []
+    detector_errors: list[str] = []
     df = scan_crypto_inventory(
         path,
         exclude_patterns=exclude_patterns,
         follow_symlinks=follow_symlinks,
         stats=stats,
         traversal_errors=traversal_errors,
+        detector_errors=detector_errors,
     )
     findings = normalize_crypto_inventory_df(df, scan_id=scan_id)
-    if traversal_errors:
+    scan_errors = traversal_errors + detector_errors
+    if scan_errors:
         # A directory this scan could not list is a coverage gap, not a
         # clean, fully-covered result -- but the walk already continued past
         # it, so everything collected elsewhere (including a gocryptfs root
@@ -162,7 +197,11 @@ def scan_crypto_inventory_findings(
         # not be discarded. Mirrors CloudScanError: the caller (the CLI) sees
         # a scanner_errors entry and a nonzero exit, while these findings
         # still appear in the output.
-        raise LocalScanError("; ".join(traversal_errors), partial_findings=findings)
+        #
+        # An unexpected detector failure (HG-033) reaches the caller the same
+        # way and for the same reason: the scan is not a clean, complete result,
+        # but the evidence collected before it must not be discarded either.
+        raise LocalScanError("; ".join(scan_errors), partial_findings=findings)
     return findings
 
 
@@ -830,32 +869,35 @@ def _gocryptfs_scrypt_object_plausible(scrypt_object: object) -> bool:
     return True
 
 
-def _gocryptfs_root_finding(config_path: Path, data: bytes) -> CryptoInventoryFinding | None:
-    """A gocryptfs root finding for the directory containing ``config_path``
-    (a file named exactly ``gocryptfs.conf``), or None when that directory is
-    not a validated, supported forward-mode cipher root.
+def _gocryptfs_root_finding(context: RootContext) -> CryptoInventoryFinding | None:
+    """A gocryptfs root finding for ``context``'s candidate root (the directory
+    holding the ``gocryptfs.conf`` marker file the scanner discovered), or None
+    when that directory is not a validated, supported forward-mode cipher root.
 
-    ``data`` is ``config_path``'s already-read bytes, decoded and validated
-    here; nothing about it is reported beyond the derived version number.
+    The marker file's already-read bytes are decoded and validated here; nothing
+    about them is reported beyond the derived version number. No directory is
+    listed or walked: the only other path consulted is the fixed-name
+    ``gocryptfs.diriv`` sibling in the same root.
     """
-    if config_path.name != _GOCRYPTFS_CONFIG_FILENAME:
-        return None
+    config_path = context.marker_path
     # A regular file, not a symlink -- checked explicitly here (independent of
     # the caller's own symlink handling) because the structural contract
     # requires a *regular* file named exactly gocryptfs.conf.
     if config_path.is_symlink():
         return None
 
-    diriv_path = config_path.parent / _GOCRYPTFS_DIRIV_FILENAME
-    # is_file() alone would follow a symlink; both conditions together require
-    # a genuine regular file, matching gocryptfs.conf's own check above. A
-    # copied/orphaned gocryptfs.conf with no root gocryptfs.diriv, and a
+    # A copied/orphaned gocryptfs.conf with no root gocryptfs.diriv, and a
     # reverse-mode root (which never has one at all -- see module note above),
-    # both stop here.
-    if not diriv_path.is_file() or diriv_path.is_symlink():
+    # both stop here. `has_regular_sibling` requires a genuine regular file,
+    # matching gocryptfs.conf's own check above rather than following a symlink.
+    if not context.has_regular_sibling(_GOCRYPTFS_DIRIV_FILENAME):
         return None
 
-    if len(data) > _MAX_TEXT_BYTES:
+    # gocryptfs.conf's own decode boundary, deliberately not the shared text
+    # view: this is strict UTF-8 of the whole marker file, with no NUL
+    # pre-filter and no ASCII fallback, because JSON parsing follows.
+    data = context.marker.data
+    if len(data) > MAX_TEXT_BYTES:
         return None
     try:
         text = data.decode("utf-8")
@@ -872,7 +914,7 @@ def _gocryptfs_root_finding(config_path: Path, data: bytes) -> CryptoInventoryFi
     if version is None:
         return None
 
-    root_path = config_path.parent
+    root_path = context.root_path
     return CryptoInventoryFinding(
         asset_type="Encrypted Filesystem",
         location=str(root_path),
@@ -885,73 +927,300 @@ def _gocryptfs_root_finding(config_path: Path, data: bytes) -> CryptoInventoryFi
     )
 
 
-def _scan_file(file_path: Path) -> list[CryptoInventoryFinding]:
-    try:
-        data = file_path.read_bytes()
-    except (OSError, PermissionError):
-        return []
+# --- Detector registry (HG-033) --------------------------------------------
+#
+# The static, explicit registry of every crypto-inventory detector family. It
+# adds no detection capability: each entry wraps a check this scanner already
+# performed, in the order it already performed them, and `priority` is what
+# makes the intentional precedence between them a declaration rather than the
+# order of `if` statements in one function.
+#
+# Precedence that is intentional and load-bearing (each covered by a regression
+# test):
+#
+#   10 OpenSSL Salted__ ahead of every extension-based branch, so a Salted__
+#      file saved as secret.p12 is Encrypted File evidence rather than a
+#      malformed PKCS#12 (HG-030).
+#   20 OpenPGP structure ahead of the same branches *and* ahead of the shared
+#      candidate gate, since a binary OpenPGP file has no recognized extension
+#      and no "-----BEGIN " text for the gate to admit it by (HG-031).
+#   30 gocryptfs root ahead of the file-format branches and the gate for the
+#      same reason -- gocryptfs.conf is plain JSON -- and terminal for its
+#      marker file either way, so a rejected marker never falls through into
+#      PEM/DER/PKCS#12 parsing (HG-032).
+#   40-60 JKS, PKCS#12, and DER: mutually exclusive in practice, but each
+#      terminal for the file it claims, which is what keeps a keystore or
+#      container from also being read as PEM text.
+#   70-90 The text detectors, deliberately non-terminal: one PEM file may
+#      legitimately hold a certificate, a private key, and an SSH public key,
+#      and all three are reported.
+#
+# Detectors below 70 are terminal; nothing here relies on a general "first
+# detector wins" rule.
 
-    # Checked before any extension-based branch (JKS magic, .p12/.pfx, DER
-    # candidate) so a Salted__ file saved with a misleading extension (e.g.
-    # secret.p12) is reported as Encrypted File evidence, not routed into
-    # PKCS#12/DER parsing and reported as malformed (HG-030).
-    if _looks_like_openssl_salted(data):
-        return [_openssl_salted_finding(file_path)]
 
-    # Also checked before every extension-based branch, and before the
-    # candidate gate below: a binary OpenPGP encrypted file has no recognized
-    # extension and no `-----BEGIN ` text, so the gate would otherwise drop it
-    # (HG-031).
-    openpgp = _openpgp_encrypted_evidence(data)
-    if openpgp is not None:
-        return [_openpgp_encrypted_finding(file_path, *openpgp)]
+def _openssl_candidate(context: FileContext) -> bool:
+    return _looks_like_openssl_salted(
+        context.leading_bytes(len(_OPENSSL_SALTED_SIGNATURE))
+    )
 
-    # Also checked before the candidate gate: gocryptfs.conf is plain JSON
-    # with no recognized extension and no "-----BEGIN " text, so the gate
-    # would otherwise drop it (HG-032). A no-op for every other filename.
-    gocryptfs = _gocryptfs_root_finding(file_path, data)
-    if gocryptfs is not None:
-        return [gocryptfs]
-    if file_path.name == _GOCRYPTFS_CONFIG_FILENAME:
+
+def _detect_openssl_salted(context: FileContext) -> DetectionResult:
+    return DetectionResult.match([_openssl_salted_finding(context.path)])
+
+
+def _openpgp_candidate(context: FileContext) -> bool:
+    """The cheap leading-byte gate for the OpenPGP detector, equivalent to the
+    conditions ``_openpgp_encrypted_evidence`` itself requires before it can
+    return anything: either a first octet with bit 7 set (the start of any
+    OpenPGP packet header, with at least one length octet after it) or the
+    literal ASCII-armor MESSAGE header. A file matching neither could only ever
+    produce None, so skipping it changes no result."""
+    leading = context.leading_bytes(len(_OPENPGP_ARMOR_HEADER))
+    if leading.startswith(_OPENPGP_ARMOR_HEADER):
+        return True
+    return len(leading) >= 2 and bool(leading[0] & 0x80)
+
+
+def _detect_openpgp_encrypted(context: FileContext) -> DetectionResult:
+    # The full bytes are required, not a prefix: the declared-length check that
+    # rejects a truncated or over-declared packet is only meaningful against the
+    # complete packet stream (see _openpgp_encrypted_evidence).
+    evidence = _openpgp_encrypted_evidence(context.data)
+    if evidence is None:
+        return DetectionResult.no_match()
+    return DetectionResult.match([_openpgp_encrypted_finding(context.path, *evidence)])
+
+
+def _detect_gocryptfs_root(context: RootContext) -> DetectionResult:
+    finding = _gocryptfs_root_finding(context)
+    if finding is None:
         # A file literally named gocryptfs.conf that failed root validation
         # (missing sibling diriv, malformed/empty/unsupported config, reverse
         # or plaintextnames mode) is not a supported cipher root and not
-        # evidence of any other crypto asset type either -- it must not fall
-        # through into PEM/DER/PKCS12 parsing below.
-        return []
+        # evidence of any other crypto asset type either -- this detector owns
+        # it, terminally, rather than letting it fall through into the
+        # PEM/DER/PKCS#12 detectors.
+        return DetectionResult.claim()
+    return DetectionResult.match([finding])
 
-    if not _could_contain_crypto_asset(file_path, data):
-        return []
 
-    findings: list[CryptoInventoryFinding] = []
-    if _looks_like_jks(data):
-        findings.append(
+def _jks_candidate(context: FileContext) -> bool:
+    return _passes_candidate_gate(context) and _looks_like_jks(context.leading_bytes(4))
+
+
+def _detect_jks(context: FileContext) -> DetectionResult:
+    return DetectionResult.match(
+        [
             CryptoInventoryFinding(
                 asset_type="Java Keystore",
-                location=str(file_path),
+                location=context.location,
                 evidence="JKS magic header detected",
                 confidence="Medium",
                 errors=["JKS entry parsing is not implemented in the MVP scanner"],
             )
-        )
-        return findings
+        ]
+    )
 
-    if file_path.suffix.lower() in {".p12", ".pfx"}:
-        return _parse_pkcs12(file_path, data)
 
-    if _looks_like_der_candidate(file_path, data):
-        findings.extend(_parse_der_certificate(file_path, data))
-        if findings:
-            return findings
+def _pkcs12_candidate(context: FileContext) -> bool:
+    return _passes_candidate_gate(context) and context.suffix in {".p12", ".pfx"}
 
-    text = _decode_text(data)
-    if text is None:
-        return findings
 
-    findings.extend(_parse_pem_certificates(file_path, text))
-    findings.extend(_parse_pem_private_keys(file_path, text, data))
-    findings.extend(_parse_ssh_public_keys(file_path, text))
-    return findings
+def _detect_pkcs12(context: FileContext) -> DetectionResult:
+    # A match even when the container parsed cleanly but held nothing
+    # reportable: this detector is declared terminal, so a .p12/.pfx file it
+    # claimed is not then read as DER or PEM text.
+    return DetectionResult.match(_parse_pkcs12(context.path, context.data))
+
+
+def _der_candidate(context: FileContext) -> bool:
+    return _passes_candidate_gate(context) and _looks_like_der_candidate(
+        context.path, context.leading_bytes(len(b"-----BEGIN "))
+    )
+
+
+def _detect_der_certificate(context: FileContext) -> DetectionResult:
+    findings = _parse_der_certificate(context.path, context.data)
+    if not findings:
+        # Unreachable today (the parser always returns either a certificate or a
+        # malformed-certificate finding), but a non-match here falls through to
+        # the text detectors exactly as the pre-HG-033 dispatch did.
+        return DetectionResult.no_match()
+    return DetectionResult.match(findings)
+
+
+def _text_candidate(context: FileContext) -> bool:
+    return _passes_candidate_gate(context) and context.text is not None
+
+
+def _detect_pem_certificates(context: FileContext) -> DetectionResult:
+    return DetectionResult.match(_parse_pem_certificates(context.path, context.text))
+
+
+def _detect_pem_private_keys(context: FileContext) -> DetectionResult:
+    return DetectionResult.match(
+        _parse_pem_private_keys(context.path, context.text, context.data)
+    )
+
+
+def _detect_ssh_public_keys(context: FileContext) -> DetectionResult:
+    return DetectionResult.match(_parse_ssh_public_keys(context.path, context.text))
+
+
+# The safe metadata allowlist for a successfully parsed certificate, shared by
+# the three detectors that emit one.
+_CERTIFICATE_METADATA_KEYS = frozenset(
+    {
+        "Algorithm",
+        "Key Size",
+        "Signature Algorithm",
+        "Expiration",
+        "Issuer",
+        "Subject",
+        "Fingerprint",
+    }
+)
+_KEY_METADATA_KEYS = frozenset({"Algorithm", "Key Size", "Fingerprint"})
+
+CRYPTO_DETECTORS = build_registry(
+    [
+        FileDetector(
+            detector_id="encrypted_file:openssl",
+            priority=10,
+            candidate=_openssl_candidate,
+            detect=_detect_openssl_salted,
+            evidence="Observed OpenSSL Salted__ encrypted file.",
+            confidence="High",
+            terminal=True,
+            rule_id="encrypted_file:openssl",
+            verification_rationale=(
+                "Exact-position match on the 8-byte header `openssl enc -salt` "
+                "writes; the protected content is never read or decrypted."
+            ),
+        ),
+        FileDetector(
+            detector_id="encrypted_file:openpgp",
+            priority=20,
+            candidate=_openpgp_candidate,
+            detect=_detect_openpgp_encrypted,
+            evidence="Observed OpenPGP encrypted-session-key packet structure.",
+            confidence="High",
+            terminal=True,
+            rule_id="encrypted_file:openpgp",
+            metadata_keys=frozenset({"Algorithm"}),
+            verification_rationale=(
+                "Leading OpenPGP packet header and the fixed RFC 4880 metadata "
+                "fields it declares, each validated against the values the "
+                "specification allows; the encrypted payload is never "
+                "interpreted and gpg is never invoked."
+            ),
+        ),
+        RootDetector(
+            detector_id="encrypted_filesystem:gocryptfs",
+            priority=30,
+            marker_filename=_GOCRYPTFS_CONFIG_FILENAME,
+            detect=_detect_gocryptfs_root,
+            evidence="Observed supported gocryptfs cipher-root structure.",
+            confidence="High",
+            rule_id="encrypted_filesystem:gocryptfs",
+            metadata_keys=frozenset({"Format", "Config Version", "Mode"}),
+            owns_marker=True,
+            verification_rationale=(
+                "Root-level gocryptfs.conf and gocryptfs.diriv both present as "
+                "regular files, plus the config's stable version and feature "
+                "flags; never mounted, unlocked, or decrypted, and no key "
+                "material, salt, or KDF parameter is read into the finding."
+            ),
+        ),
+        FileDetector(
+            detector_id="java_keystore:jks_magic",
+            priority=40,
+            candidate=_jks_candidate,
+            detect=_detect_jks,
+            evidence="JKS magic header detected",
+            confidence="Medium",
+            terminal=True,
+            verification_rationale="Magic header only; entries are not parsed.",
+        ),
+        FileDetector(
+            detector_id="pkcs12:container",
+            priority=50,
+            candidate=_pkcs12_candidate,
+            detect=_detect_pkcs12,
+            evidence="PKCS#12 container parsed",
+            confidence="High",
+            terminal=True,
+            metadata_keys=_CERTIFICATE_METADATA_KEYS,
+            verification_rationale=(
+                "Container parsed with no password; a container requiring one is "
+                "reported as malformed rather than attempted."
+            ),
+        ),
+        FileDetector(
+            detector_id="certificate:der",
+            priority=60,
+            candidate=_der_candidate,
+            detect=_detect_der_certificate,
+            evidence="DER Certificate parsed successfully",
+            confidence="High",
+            terminal=True,
+            metadata_keys=_CERTIFICATE_METADATA_KEYS,
+            verification_rationale="Structural DER X.509 parse of the file's bytes.",
+        ),
+        FileDetector(
+            detector_id="certificate:pem",
+            priority=70,
+            candidate=_text_candidate,
+            detect=_detect_pem_certificates,
+            evidence="PEM Certificate parsed successfully",
+            confidence="High",
+            metadata_keys=_CERTIFICATE_METADATA_KEYS,
+            verification_rationale="Structural PEM X.509 parse of each CERTIFICATE block.",
+        ),
+        FileDetector(
+            detector_id="private_key:pem",
+            priority=80,
+            candidate=_text_candidate,
+            detect=_detect_pem_private_keys,
+            evidence="PEM block BEGIN <label>",
+            confidence="High",
+            metadata_keys=_KEY_METADATA_KEYS,
+            verification_rationale=(
+                "PEM/OpenSSH private-key block parsed with no passphrase; an "
+                "encrypted block is identified by its header and reported "
+                "without being decrypted."
+            ),
+        ),
+        FileDetector(
+            detector_id="public_key:ssh",
+            priority=90,
+            candidate=_text_candidate,
+            detect=_detect_ssh_public_keys,
+            evidence="OpenSSH public key prefix <type>",
+            confidence="High",
+            metadata_keys=_KEY_METADATA_KEYS,
+            verification_rationale="OpenSSH public-key line parsed from its prefix.",
+        ),
+    ]
+)
+
+
+def _scan_file(
+    file_path: Path, detectors: tuple | None = None
+) -> list[CryptoInventoryFinding]:
+    """Every finding the detector registry produces for one file the scanner's
+    traversal already selected.
+
+    One read per file, shared by every detector through the file context -- the
+    same single read this function performed before HG-033. An unreadable file
+    (permission denied, vanished or replaced mid-scan) produces no findings and
+    no evidence, unchanged.
+    """
+    context = FileContext(file_path)
+    if not context.readable():
+        return []
+    return run_detectors(context, detectors or CRYPTO_DETECTORS)
 
 
 def _parse_pem_certificates(file_path: Path, text: str) -> list[CryptoInventoryFinding]:
@@ -1222,18 +1491,25 @@ def _extract_pem_blocks(text: str, label: str) -> list[str]:
         start = block_end
 
 
-def _decode_text(data: bytes) -> str | None:
-    if len(data) > _MAX_TEXT_BYTES:
-        return None
-    if b"\x00" in data[:4096]:
-        return None
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        try:
-            return data.decode("ascii")
-        except UnicodeDecodeError:
-            return None
+_CANDIDATE_GATE_MEMO_KEY = "could_contain_crypto_asset"
+
+
+def _passes_candidate_gate(context: FileContext) -> bool:
+    """The shared candidate gate every file-format detector below priority 40
+    sits behind, memoized per file.
+
+    Unchanged from the single pre-HG-033 gate call in ``_scan_file``: the same
+    conditions, evaluated once per file rather than once per detector, so adding
+    a gated detector cannot turn the gate's 5 MB substring scan into repeated
+    work. Detectors above the gate (OpenSSL, OpenPGP, gocryptfs) deliberately do
+    not consult it -- their formats have no recognized extension and no
+    ``-----BEGIN `` text for it to admit them by.
+    """
+    cached = context.memo.get(_CANDIDATE_GATE_MEMO_KEY)
+    if cached is None:
+        cached = _could_contain_crypto_asset(context.path, context.data)
+        context.memo[_CANDIDATE_GATE_MEMO_KEY] = cached
+    return cached
 
 
 def _could_contain_crypto_asset(file_path: Path, data: bytes) -> bool:
@@ -1244,7 +1520,7 @@ def _could_contain_crypto_asset(file_path: Path, data: bytes) -> bool:
         return True
     if _looks_like_jks(data):
         return True
-    if b"-----BEGIN " in data[:_MAX_TEXT_BYTES]:
+    if b"-----BEGIN " in data[:MAX_TEXT_BYTES]:
         return True
     if data.startswith((b"ssh-rsa ", b"ssh-ed25519 ", b"ecdsa-sha2-")):
         return True

@@ -216,6 +216,22 @@ reported without decrypting them. See
 [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md) for the full supported-asset-type
 list and usage.
 
+Each supported format below is implemented as one detector in a static internal
+registry (HG-033). That framework is an implementation boundary only: **it added
+no new detection capability, and no format, asset type, rule ID, evidence
+wording, confidence value, or metadata field in this section changed when it was
+introduced.** Everything characterized here — including every false-positive and
+false-negative condition — describes the same detection rules that existed
+before it. The registry's own properties (scanner-owned traversal, one shared
+read per file, deterministic ordering and terminality, detector-declared safe
+metadata allowlists, accounting that counts files rather than detector
+invocations, and detector error isolation) are described in
+[CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md#detector-framework). One consequence
+is worth stating here as a coverage fact: an unexpected detector defect stops
+the crypto-inventory scan and is reported as a scanner error with the findings
+already collected preserved, so a detector failure is never presented as a
+clean, complete result.
+
 **OpenSSL `Salted__` encrypted files (HG-030).** A file whose content begins
 with the exact 8-byte header `openssl enc -salt` writes is reported as asset
 type `Encrypted File` (`rule_id: encrypted_file:openssl`), based solely on
