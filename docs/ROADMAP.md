@@ -656,6 +656,37 @@ Milestone 2 is fully delivered.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/66
 - **Pull request:** https://github.com/serewicz/HarvestGuard/pull/69
 
+### HG-031
+
+- **Title:** PGP/GPG Encrypted-File Detection
+- **Purpose:** Recognize supported binary and ASCII-armored OpenPGP
+  encrypted-message structures as first-class crypto-inventory evidence
+  without decrypting content, relying on filename extensions alone, or
+  inferring encryption from entropy. Preserve deterministic combined-output
+  deduplication and existing filesystem and crypto scan accounting.
+- **Status:** Complete
+- **Milestone:** v0.1.1 Stabilization
+- **Dependencies:** HG-030
+- **Acceptance criteria:** Supported binary OpenPGP encrypted-message packet
+  sequences are detected structurally; supported ASCII-armored OpenPGP
+  messages require complete framing and a valid CRC-24 checksum; standalone
+  session-key packets and packets without encrypted payload are not classified
+  as encrypted files; public keys, private keys, signatures, clear-signed text,
+  random bytes, malformed armor, unsupported packet versions, and
+  extension-only matches do not produce encrypted-file evidence; crypto
+  inventory emits `Encrypted File` with `rule_id: encrypted_file:openpgp` and
+  `confidence: High`; combined `--type all` output deterministically retains
+  one crypto-inventory finding without removing unrelated evidence; HG-029
+  `Files scanned`, HG-030 `Crypto files inspected`, bare-array JSON, and
+  evidence-only Markdown remain unchanged; no decryption, password prompting,
+  keyring access, plaintext emission, or raw encrypted-payload emission is
+  introduced.
+- **Delivered by:** `scanner/crypto_inventory.py`, `harvestguard.py`,
+  `tests/test_openpgp_encrypted_file_detection.py`,
+  `docs/DETECTION_CHARACTERIZATION.md`, and `docs/CRYPTO_INVENTORY.md`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/71
+- **Pull request:** https://github.com/serewicz/HarvestGuard/pull/73
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
