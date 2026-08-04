@@ -928,6 +928,130 @@ def test_unknown_metadata_candidate_is_a_malformed_outcome(universe, known_ids):
     assert "hunter2" not in " ".join(collection.rejections)
 
 
+# A rejected candidate value is untrusted content: a defective caller could pass
+# a passphrase, a key fragment, a config line, or a parser payload where an
+# identifier, a confidence, a timestamp, or a finding ID belonged. Validation
+# messages and `RelationshipCollection.rejections` must therefore name the
+# refused field only -- these tokens stand in for whatever a caller passed, and
+# must not survive anywhere in a rejection.
+LEAK_SENTINEL = "hunter2 TOP-SECRET-PASSPHRASE"
+LEAK_SENTINEL_TOKENS = ("hunter2", "TOP-SECRET-PASSPHRASE")
+
+# One entry per field that can refuse a value. The sentinel is invalid for every
+# one of them: it is outside both closed vocabularies, is not a machine
+# identifier, is not a 64-hex finding ID, and is not an ISO-8601 date-time.
+LEAKABLE_FIELDS = [
+    "relationship_type",
+    "confidence",
+    "scan_id",
+    "relationship_rule_id",
+    "created_by",
+    "source_finding_id",
+    "target_finding_id",
+    "observed_at",
+]
+
+
+def _assert_no_sentinel(text: str) -> None:
+    for token in LEAK_SENTINEL_TOKENS:
+        assert token not in text
+        assert token.lower() not in text.lower()
+
+
+@pytest.mark.parametrize("field", LEAKABLE_FIELDS)
+def test_rejected_candidate_values_do_not_leak_into_exceptions(universe, known_ids, field):
+    with pytest.raises(RelationshipValidationError) as excinfo:
+        _contains(universe, known_ids, **{field: LEAK_SENTINEL})
+    # The field name is enough to locate the caller's defect; the value is not.
+    assert field in str(excinfo.value)
+    _assert_no_sentinel(str(excinfo.value))
+    _assert_no_sentinel(repr(excinfo.value))
+
+
+@pytest.mark.parametrize("field", LEAKABLE_FIELDS)
+def test_rejected_candidate_values_do_not_leak_into_rejections(universe, known_ids, field):
+    base = {
+        "relationship_type": RelationshipType.CONTAINS,
+        "source_finding_id": universe["container"].finding_id,
+        "target_finding_id": universe["certificate"].finding_id,
+        "evidence": CONTAINS_EVIDENCE,
+        "confidence": "High",
+        "relationship_rule_id": "container_contains:pkcs12",
+        "scan_id": "scan-1",
+    }
+    collection = collect_relationships([{**base, field: LEAK_SENTINEL}], known_ids)
+    assert collection.relationships == ()
+    assert collection.outcomes != (RelationshipOutcome.VALID,)
+    assert collection.rejections
+    _assert_no_sentinel(" ".join(collection.rejections))
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        f"{LEAK_SENTINEL} was found in the same directory as the certificate",
+        f"The container probably holds {LEAK_SENTINEL}",
+        f"Container relationship carries business impact for {LEAK_SENTINEL}",
+    ],
+)
+def test_rejected_evidence_prose_does_not_leak_into_rejections(
+    universe, known_ids, evidence
+):
+    with pytest.raises(MalformedRelationshipError) as excinfo:
+        _contains(universe, known_ids, evidence=evidence)
+    _assert_no_sentinel(str(excinfo.value))
+    collection = collect_relationships(
+        [
+            {
+                "relationship_type": RelationshipType.CONTAINS,
+                "source_finding_id": universe["container"].finding_id,
+                "target_finding_id": universe["certificate"].finding_id,
+                "evidence": evidence,
+                "confidence": "High",
+                "relationship_rule_id": "container_contains:pkcs12",
+                "scan_id": "scan-1",
+            }
+        ],
+        known_ids,
+    )
+    assert collection.outcomes == (RelationshipOutcome.MALFORMED,)
+    _assert_no_sentinel(" ".join(collection.rejections))
+
+
+@pytest.mark.parametrize("payload", RAW_MATERIAL_SAMPLES)
+def test_rejected_raw_material_does_not_leak_into_rejections(universe, known_ids, payload):
+    for field in ("evidence", "scan_id", "relationship_rule_id"):
+        with pytest.raises(MalformedRelationshipError) as excinfo:
+            _contains(universe, known_ids, **{field: payload})
+        assert payload not in str(excinfo.value)
+    collection = collect_relationships(
+        [
+            {
+                "relationship_type": RelationshipType.CONTAINS,
+                "source_finding_id": universe["container"].finding_id,
+                "target_finding_id": universe["certificate"].finding_id,
+                "evidence": payload,
+                "confidence": "High",
+                "relationship_rule_id": "container_contains:pkcs12",
+                "scan_id": "scan-1",
+            },
+            payload,
+            (payload,),
+        ],
+        known_ids,
+    )
+    assert collection.relationships == ()
+    assert payload not in " ".join(collection.rejections)
+
+
+def test_rejected_limitations_and_errors_do_not_leak_into_exceptions(universe, known_ids):
+    for field in ("limitations", "errors"):
+        with pytest.raises(MalformedRelationshipError) as excinfo:
+            _contains(universe, known_ids, **{field: (LEAK_SENTINEL * 40,)})
+        assert field in str(excinfo.value)
+        _assert_no_sentinel(str(excinfo.value))
+
+
 def test_relationship_is_immutable(universe, known_ids):
     relationship = _contains(universe, known_ids)
     with pytest.raises(FrozenInstanceError):

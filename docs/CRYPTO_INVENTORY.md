@@ -209,6 +209,10 @@ relationships are internal evidence artifacts that later issues may build on.
   text field is length-bounded and must be printable, and a field carrying a
   PEM/OpenPGP armor header or the OpenSSL `Salted__` magic is rejected rather
   than scrubbed. Unexpected keyword arguments raise rather than being absorbed.
+  Rejection is not a channel either: a validation message names the refused
+  *field* and at most the Python type supplied, never the value, so a passphrase
+  a defective caller passed where an identifier belonged cannot travel out
+  through an exception or through the collection's rejection text.
 - **Validation outcomes are distinguishable.** Valid, duplicate, missing
   endpoint, invalid type, self-relationship, malformed object, and unexpected
   implementation failure are separate outcomes. An unexpected failure is never

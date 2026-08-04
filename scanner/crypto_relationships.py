@@ -47,7 +47,10 @@ What this module is:
   PEM/OpenPGP armor header or the OpenSSL ``Salted__`` magic, so raw keys,
   certificates, ciphertext, plaintext, passphrases, salts, KDF values, config
   contents, packet bodies, and parser payloads have no channel into a
-  relationship.
+  relationship. Rejection is not a channel either: a validation message names the
+  refused *field* and at most the Python type supplied, never the value, so a
+  passphrase a defective caller passed where an identifier belonged cannot travel
+  out through an exception or through ``RelationshipCollection.rejections``.
 
 What this module is **not**: a graph. There is no graph database, no graph
 library, no graph API, no persistence, no traversal, no path search, no
@@ -200,6 +203,15 @@ _PROHIBITED_INFERENCE_TERMS = (
 )
 
 
+# Rejection-reason rule: a validation message names the *field* that was refused,
+# and at most the Python *type* of what was supplied. It never quotes the
+# supplied value. A rejected candidate value is untrusted content by definition --
+# it may be a passphrase, a key fragment, a config line, or a parser payload that
+# a defective caller passed where an identifier or timestamp belonged -- and
+# `collect_relationships` retains these messages as `RelationshipCollection`
+# rejection text. Quoting the value would carry exactly the material the privacy
+# boundary excludes into a record the model calls safe. The field name is enough
+# to locate the defect; the value is the caller's to log, under its own boundary.
 class RelationshipValidationError(ValueError):
     """A candidate relationship is not a valid internal relationship record.
 
@@ -331,7 +343,8 @@ class CryptoRelationship:
         target = _require_finding_id(self.target_finding_id, "target_finding_id")
         if source == target:
             raise SelfRelationshipError(
-                f"source and target must differ for {relationship_type.value}: {source}"
+                "source_finding_id and target_finding_id must differ for "
+                f"{relationship_type.value}"
             )
         evidence = _require_evidence(self.evidence)
         confidence = _require_confidence(self.confidence)
@@ -394,8 +407,12 @@ class RelationshipCollection:
 
     ``relationships`` holds the deduplicated, deterministically ordered valid
     records. ``outcomes`` is index-aligned with the input, so every candidate is
-    accounted for. ``rejections`` carries one safe line per non-valid candidate
-    (outcome plus reason, never raw content).
+    accounted for. ``rejections`` carries one safe line per non-valid candidate:
+    the candidate index, the outcome, and a reason naming the refused field (and
+    at most the Python type supplied). A rejected candidate *value* never appears
+    -- an invalid value is untrusted content, and the rejection-reason rule above
+    ``RelationshipValidationError`` explains why quoting it would defeat the
+    privacy boundary.
 
     ``has_model_errors`` exists so an unexpected failure cannot masquerade as
     absence of relationships: a caller that reads ``relationships`` must check
@@ -438,11 +455,13 @@ def coerce_relationship_type(value: Any) -> RelationshipType:
         try:
             return RelationshipType(value)
         except ValueError as exc:
+            # The rejected value is deliberately not quoted -- see the
+            # rejection-reason rule above `RelationshipValidationError`.
             raise UnknownRelationshipTypeError(
-                f"unsupported relationship type: {value!r}"
+                "relationship_type is outside the fixed relationship vocabulary"
             ) from exc
     raise UnknownRelationshipTypeError(
-        f"unsupported relationship type of {type(value).__name__}"
+        f"relationship_type must be a relationship type or string: {type(value).__name__}"
     )
 
 
@@ -520,9 +539,7 @@ def validate_endpoints(
         ("target", relationship.target_finding_id),
     ):
         if finding_id not in known:
-            raise MissingEndpointError(
-                f"{label} endpoint does not reference a known finding: {finding_id}"
-            )
+            raise MissingEndpointError(f"{label} endpoint does not reference a known finding")
 
 
 def build_relationship(
@@ -735,15 +752,19 @@ def _require_text(value: Any, label: str) -> str:
 def _require_evidence(value: Any) -> str:
     text = _require_text(value, "evidence")
     lowered = text.lower()
+    # The matched term is not quoted either: it is a substring of the rejected
+    # evidence, so echoing it would echo part of the candidate.
     for term in _PROHIBITED_CLAIM_TERMS:
         if term in lowered:
             raise MalformedRelationshipError(
-                f"evidence must describe only what was observed, not {term!r}"
+                "evidence must describe only what was observed, not an assessment "
+                "claim"
             )
     for term in _PROHIBITED_INFERENCE_TERMS:
         if term in lowered:
             raise MalformedRelationshipError(
-                f"evidence must be directly observed structural evidence, not {term!r}"
+                "evidence must be directly observed structural evidence, not "
+                "inference wording"
             )
     return text
 
@@ -751,8 +772,7 @@ def _require_evidence(value: Any) -> str:
 def _require_confidence(value: Any) -> str:
     if value not in SUPPORTED_RELATIONSHIP_CONFIDENCE:
         raise MalformedRelationshipError(
-            f"confidence must be one of {list(SUPPORTED_RELATIONSHIP_CONFIDENCE)}: "
-            f"{value!r}"
+            f"confidence must be one of {list(SUPPORTED_RELATIONSHIP_CONFIDENCE)}"
         )
     return value
 
@@ -760,18 +780,14 @@ def _require_confidence(value: Any) -> str:
 def _require_identifier(value: Any, label: str) -> str:
     text = _require_text(value, label)
     if not _IDENTIFIER_PATTERN.match(text):
-        raise MalformedRelationshipError(
-            f"{label} must be a machine identifier: {text!r}"
-        )
+        raise MalformedRelationshipError(f"{label} must be a machine identifier")
     return text
 
 
 def _require_finding_id(value: Any, label: str) -> str:
     text = _require_text(value, label)
     if not _FINDING_ID_PATTERN.match(text):
-        raise MalformedRelationshipError(
-            f"{label} must be a stable finding id: {text!r}"
-        )
+        raise MalformedRelationshipError(f"{label} must be a stable finding id")
     return text
 
 
@@ -811,15 +827,11 @@ def _normalize_observed_at(value: str | datetime | None) -> str:
     # emitted one. Python 3.10's parser also predates 'Z' support.
     normalized = (text[:-1] + "+00:00") if text.endswith("Z") else text
     if "T" not in normalized:
-        raise MalformedRelationshipError(
-            f"observed_at must be an ISO-8601 date-time: {text!r}"
-        )
+        raise MalformedRelationshipError("observed_at must be an ISO-8601 date-time")
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:
-        raise MalformedRelationshipError(
-            f"observed_at must be an ISO-8601 date-time: {text!r}"
-        ) from exc
+        raise MalformedRelationshipError("observed_at must be an ISO-8601 date-time") from exc
     return _format_observed_at(parsed)
 
 

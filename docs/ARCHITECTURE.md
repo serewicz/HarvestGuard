@@ -161,7 +161,9 @@ issues may build on. Its properties:
   free-form field, text fields are bounded and must be printable, and raw
   material markers are rejected — so key material, certificates, ciphertext,
   plaintext, passphrases, salts, KDF values, raw config, packet bodies, and
-  parser payloads have no channel into a relationship.
+  parser payloads have no channel into a relationship. Validation messages and
+  rejection text name the refused field and at most the type supplied, never the
+  rejected value.
 - **Not a graph.** No graph database, graph library, graph API, persistence,
   visualization, traversal, path search, transitive closure, or cycle analysis.
 
