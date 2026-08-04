@@ -32,6 +32,13 @@ Roadmap IDs such as `HG-006` are planning references; they help connect work to
 product direction, but they do not replace a GitHub Issue. If a roadmap item
 and an Issue disagree, pause and reconcile the Issue before implementation.
 
+All implementation issues must follow
+[docs/ISSUE_AUTHORING_STANDARD.md](docs/ISSUE_AUTHORING_STANDARD.md) before
+implementation begins. The standard is the canonical template for issue
+purpose, product boundaries, architecture decisions, compatibility, privacy,
+acceptance criteria, regression requirements, documentation requirements, and
+Definition of Ready.
+
 Use this workflow for all non-trivial changes:
 
 1. **Issue:** Open or select a GitHub issue that describes the business purpose,
