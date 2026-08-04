@@ -182,6 +182,25 @@ def test_registry_priorities_are_strictly_increasing_and_unique():
     assert len(priorities) == len(set(priorities))
 
 
+def test_build_registry_rejects_duplicate_priorities():
+    # A shared priority would leave the relative order of the two detectors
+    # decided by the caller's listing order -- the input-order dependence a
+    # static registry exists to rule out -- so it is rejected at build time
+    # rather than tie-broken silently.
+    def _stub(detector_id: str):
+        return FileDetector(
+            detector_id=detector_id,
+            priority=7,
+            candidate=lambda context: False,
+            detect=lambda context: DetectionResult.no_match(),
+            evidence="",
+            confidence="Low",
+        )
+
+    with pytest.raises(ValueError, match="duplicate crypto detector priority 7"):
+        build_registry([_stub("test:a"), _stub("test:b")])
+
+
 def test_every_detector_declares_a_supported_scope():
     for detector in CRYPTO_DETECTORS:
         assert detector.scope in {SCOPE_FILE, SCOPE_ROOT}
@@ -428,6 +447,93 @@ def test_detector_exception_is_not_silently_a_clean_non_match(tmp_path, monkeypa
     assert list(df["Asset Type"]) == ["PEM Certificate"]
     # The failing file was inspected; nothing past it is claimed as inspected.
     assert stats["files_inspected"] == 2
+
+
+def _boom_after_earlier_detectors_registry():
+    """The registry plus a detector that fails *after* the non-terminal text
+    detectors have already produced evidence for the same file."""
+
+    def boom(context):
+        raise RuntimeError(_LEAKY_MESSAGE)
+
+    return build_registry(
+        [
+            *CRYPTO_DETECTORS,
+            FileDetector(
+                detector_id="test:boom_late",
+                priority=100,
+                candidate=lambda context: context.suffix == ".pem",
+                detect=boom,
+                evidence="",
+                confidence="Low",
+            ),
+        ]
+    )
+
+
+def test_detector_exception_preserves_findings_from_the_same_asset(
+    tmp_path, monkeypatch
+):
+    # One file three non-terminal detectors report on, then a fourth detector on
+    # that same file raises: the three findings must survive. They only exist in
+    # the abandoned per-file dispatch, so losing them would let one detector's
+    # defect discard another detector's valid evidence.
+    _multi_asset_pem(tmp_path)
+    monkeypatch.setattr(
+        crypto_inventory, "CRYPTO_DETECTORS", _boom_after_earlier_detectors_registry()
+    )
+
+    with pytest.raises(LocalScanError) as exc_info:
+        scan_crypto_inventory_findings(str(tmp_path))
+
+    message = str(exc_info.value)
+    assert "test:boom_late" in message
+    assert _LEAKY_MESSAGE not in message
+
+    partial = list(exc_info.value.partial_findings)
+    assert [f.asset_type for f in partial] == [
+        "PEM Certificate",
+        "PEM Private Key",
+        "OpenSSH Public Key",
+    ]
+
+
+def test_same_asset_partial_findings_reach_the_dataframe(tmp_path, monkeypatch):
+    _multi_asset_pem(tmp_path)
+    monkeypatch.setattr(
+        crypto_inventory, "CRYPTO_DETECTORS", _boom_after_earlier_detectors_registry()
+    )
+
+    detector_errors: list[str] = []
+    stats: dict[str, int] = {}
+    df = scan_crypto_inventory(
+        str(tmp_path), stats=stats, detector_errors=detector_errors
+    )
+
+    assert len(detector_errors) == 1
+    assert list(df["Asset Type"]) == [
+        "PEM Certificate",
+        "PEM Private Key",
+        "OpenSSH Public Key",
+    ]
+    # The failing file was still inspected exactly once.
+    assert stats["files_inspected"] == 1
+
+
+def test_detector_error_carries_the_same_asset_findings_it_interrupted(tmp_path):
+    target = _multi_asset_pem(tmp_path)
+    registry = _boom_after_earlier_detectors_registry()
+    context = FileContext(target)
+    assert context.readable() is True
+
+    with pytest.raises(DetectorExecutionError) as exc_info:
+        run_detectors(context, registry)
+
+    assert [f.asset_type for f in exc_info.value.partial_findings] == [
+        "PEM Certificate",
+        "PEM Private Key",
+        "OpenSSH Public Key",
+    ]
 
 
 def test_detector_returning_a_non_result_is_a_detector_error(tmp_path):

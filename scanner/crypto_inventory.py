@@ -135,11 +135,13 @@ def scan_crypto_inventory(
     unexpected detector failure (HG-033). Unlike a traversal error, this stops
     the scan: a detector that raised is a defect, not a coverage gap, and the
     remaining files cannot be claimed as inspected. Findings collected before
-    the failure are still returned, so the caller surfaces the failure while
-    keeping the evidence already gathered -- the same shape as the traversal and
-    cloud partial-finding paths. When the argument is omitted the exception
-    propagates instead, so a caller that has no way to surface the failure never
-    receives a truncated result that looks like a clean one.
+    the failure are still returned -- including those earlier detectors produced
+    for the same file the failing detector was inspecting -- so the caller
+    surfaces the failure while keeping the evidence already gathered, the same
+    shape as the traversal and cloud partial-finding paths. When the argument is
+    omitted the exception propagates instead, so a caller that has no way to
+    surface the failure never receives a truncated result that looks like a clean
+    one.
     """
     findings = []
     root_path = Path(path)
@@ -155,6 +157,10 @@ def scan_crypto_inventory(
         except DetectorExecutionError as exc:
             if detector_errors is None:
                 raise
+            # Including the evidence earlier detectors already produced for this
+            # same file: one detector's defect must not discard another
+            # detector's valid finding about the asset they share.
+            findings.extend(exc.partial_findings)
             detector_errors.append(str(exc))
             break
 

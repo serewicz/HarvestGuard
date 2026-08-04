@@ -99,7 +99,9 @@ changes no finding contract. Its properties:
   only the view it declared it needs and the registry does not grow into a
   detectors-times-full-file-read pattern.
 - **Deterministic order, per-detector terminality.** Registry order comes from
-  declared priorities alone, never import or filesystem order. A result is a
+  declared priorities alone, never import or filesystem order; priorities must be
+  unique, so no pair of detectors can have their order decided by how they were
+  listed. A result is a
   non-match, a match other evidence may coexist with, or a match that ends
   evaluation for that asset — not a general "first match wins" rule.
 - **Detector-declared safe metadata allowlists.** Metadata a detector did not
@@ -113,7 +115,8 @@ changes no finding contract. Its properties:
 - **Error isolation.** An expected non-match is a result, not an exception. An
   unexpected detector exception is never converted into a clean non-match: it
   surfaces through the existing scanner-error path with findings already
-  collected preserved, and its message names the detector and asset path only.
+  collected preserved (including those earlier detectors produced for the same
+  asset), and its message names the detector and asset path only.
 
 See [CRYPTO_INVENTORY.md](CRYPTO_INVENTORY.md#detector-framework) for the
 detector lifecycle and how a future detector is added.

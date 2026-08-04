@@ -25,7 +25,8 @@ What this module owns:
   tuple from an explicit input sequence. There is no reflection, no import-
   order or filesystem dependence, no environment variable, no entry point, and
   no runtime discovery -- the registry is whatever the caller listed, sorted by
-  declared priority.
+  declared priority, with duplicate priorities rejected so no pair of detectors
+  can have their relative order decided by the caller's listing order.
 - **Terminal/non-terminal interaction.** ``DetectionResult`` models the four
   outcomes the current scanner actually needs: no match; match and continue;
   match and stop for this asset; and "this detector owns the asset but found
@@ -140,12 +141,25 @@ class DetectorExecutionError(RuntimeError):
     parser exception can quote the bytes it choked on, and raw bytes, key
     material, passphrases, ciphertext, plaintext, and parser payloads must never
     reach scanner errors, CLI output, or Markdown reports.
+
+    ``partial_findings`` carries the findings earlier detectors already produced
+    for the *same* asset before the failure. Without it those findings would be
+    lost with the abandoned ``run_detectors`` call and could never reach
+    ``LocalScanError.partial_findings``, which would make one detector's defect
+    silently discard another detector's valid evidence about the same file.
     """
 
-    def __init__(self, detector_id: str, location: str, cause: BaseException):
+    def __init__(
+        self,
+        detector_id: str,
+        location: str,
+        cause: BaseException,
+        partial_findings: Iterable[Any] = (),
+    ):
         self.detector_id = detector_id
         self.location = location
         self.cause = cause
+        self.partial_findings: tuple[Any, ...] = tuple(partial_findings)
         super().__init__(
             f"crypto detector '{detector_id}' failed on {location}: "
             f"{type(cause).__name__}"
@@ -385,19 +399,27 @@ def build_registry(detectors: Sequence[Detector]) -> tuple[Detector, ...]:
     """The static detector registry: ``detectors`` ordered deterministically by
     declared priority.
 
-    Ordering depends only on the declared ``priority`` (ties broken by the
-    caller's listed order, since the sort is stable) -- never on import order,
+    Ordering depends only on the declared ``priority`` -- never on import order,
     filesystem order, or an environment variable. Perturbing the input order
     therefore cannot change the registry, which is what makes intentional
     precedence a property of the declarations rather than of how this module
     happened to be imported.
 
-    Raises ``ValueError`` for a duplicate detector id, an empty id, or a
-    metadata key outside ``SAFE_METADATA_KEYS``: all three are programming
-    errors that would otherwise weaken ordering determinism or the privacy
-    boundary silently.
+    Priorities must therefore be unique: two detectors sharing one priority
+    would leave their relative order decided by whichever came first in the
+    caller's list, which is exactly the input-order dependence a static registry
+    exists to rule out. A duplicate is rejected rather than tie-broken, so the
+    ambiguity is fixed in the declaration where the intended precedence is
+    visible. The sort key still names ``detector_id`` as a secondary term so the
+    ordering is total by construction rather than relying on sort stability.
+
+    Raises ``ValueError`` for a duplicate detector id, an empty id, a duplicate
+    priority, or a metadata key outside ``SAFE_METADATA_KEYS``: all four are
+    programming errors that would otherwise weaken ordering determinism or the
+    privacy boundary silently.
     """
     seen: set[str] = set()
+    priorities: dict[int, str] = {}
     for detector in detectors:
         detector_id = detector.detector_id
         if not detector_id:
@@ -405,13 +427,21 @@ def build_registry(detectors: Sequence[Detector]) -> tuple[Detector, ...]:
         if detector_id in seen:
             raise ValueError(f"duplicate crypto detector id: {detector_id}")
         seen.add(detector_id)
+        if detector.priority in priorities:
+            raise ValueError(
+                f"duplicate crypto detector priority {detector.priority}: "
+                f"{priorities[detector.priority]} and {detector_id}"
+            )
+        priorities[detector.priority] = detector_id
         unsafe = set(detector.metadata_keys) - SAFE_METADATA_KEYS
         if unsafe:
             raise ValueError(
                 f"detector {detector_id} declares metadata keys outside the safe "
                 f"allowlist: {sorted(unsafe)}"
             )
-    return tuple(sorted(detectors, key=lambda detector: detector.priority))
+    return tuple(
+        sorted(detectors, key=lambda detector: (detector.priority, detector.detector_id))
+    )
 
 
 def enforce_metadata_allowlist(finding: Any, metadata_keys: frozenset[str]) -> Any:
@@ -457,35 +487,47 @@ def run_detectors(
     before calling this, so the number of detectors that inspect it, the number
     of views they take of it, and the number of findings they produce (including
     malformed ones) cannot change ``Crypto files inspected``.
+
+    An unexpected detector failure raises ``DetectorExecutionError`` carrying the
+    findings collected for this file so far, so evidence an earlier non-terminal
+    detector already produced for the same asset survives a later detector's
+    defect instead of being lost with this call.
     """
     findings: list[Any] = []
     for detector in detectors:
-        owns_asset = False
-        if detector.scope == SCOPE_ROOT:
-            if context.name != detector.marker_filename:
-                continue
-            result = _invoke(detector, detector.detect, context.root_context())
-            # Belt and braces alongside the detector's own terminal result: a
-            # marker file an owning root detector rejected is not evidence of
-            # some other asset type either, so it must not fall through into the
-            # file-format detectors even if a future root detector forgets to
-            # say so in its result.
-            owns_asset = detector.owns_marker
-        else:
-            if not _invoke(detector, detector.candidate, context):
-                continue
-            result = _invoke(detector, detector.detect, context)
-            # Terminality is the detector's declaration, not its result:
-            # `terminal=True` on a file detector means "a match ends evaluation
-            # for this asset", which is what the OpenSSL, OpenPGP, JKS, PKCS#12,
-            # and DER precedence relies on.
-            owns_asset = detector.terminal
-        if not isinstance(result, DetectionResult):
-            raise DetectorExecutionError(
-                detector.detector_id,
-                context.location,
-                TypeError(f"detector returned {type(result).__name__}"),
-            )
+        try:
+            owns_asset = False
+            if detector.scope == SCOPE_ROOT:
+                if context.name != detector.marker_filename:
+                    continue
+                result = _invoke(detector, detector.detect, context.root_context())
+                # Belt and braces alongside the detector's own terminal result: a
+                # marker file an owning root detector rejected is not evidence of
+                # some other asset type either, so it must not fall through into
+                # the file-format detectors even if a future root detector forgets
+                # to say so in its result.
+                owns_asset = detector.owns_marker
+            else:
+                if not _invoke(detector, detector.candidate, context):
+                    continue
+                result = _invoke(detector, detector.detect, context)
+                # Terminality is the detector's declaration, not its result:
+                # `terminal=True` on a file detector means "a match ends
+                # evaluation for this asset", which is what the OpenSSL, OpenPGP,
+                # JKS, PKCS#12, and DER precedence relies on.
+                owns_asset = detector.terminal
+            if not isinstance(result, DetectionResult):
+                raise DetectorExecutionError(
+                    detector.detector_id,
+                    context.location,
+                    TypeError(f"detector returned {type(result).__name__}"),
+                )
+        except DetectorExecutionError as exc:
+            # Attributed to the failing detector, but the valid evidence earlier
+            # detectors produced for this same file travels with the error so the
+            # scanner can preserve it as partial findings.
+            exc.partial_findings = tuple(findings)
+            raise
         if result.matched:
             for finding in result.findings:
                 findings.append(

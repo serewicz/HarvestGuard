@@ -87,7 +87,10 @@ one finding per validated root, never one per ciphertext file.
 
 **Deterministic order and terminal results.** Each detector declares a
 priority, and the registry is ordered by priority alone — never by import
-order, filesystem order, or an environment variable. A detector's result is
+order, filesystem order, or an environment variable. Priorities must be unique:
+two detectors sharing one priority would have their relative order decided by
+the order they were listed in, so the registry rejects a duplicate priority
+instead of tie-breaking it. A detector's result is
 either "no match", "match, and other evidence may coexist", or "match, and
 this detector owns the asset" (terminal). Terminality is per detector, not a
 general "first match wins" rule: it is what keeps an OpenSSL- or
@@ -117,9 +120,10 @@ existing `Malformed ...` findings. An unreadable file produces nothing. A
 traversal failure raises `LocalScanError` with the findings already collected.
 An *unexpected* detector exception is not silently converted into a clean
 non-match: it stops the crypto-inventory scan through the same scanner-error
-path, preserving findings already collected, and the error text names the
-detector ID and the asset path — never the exception's own message, which could
-quote file content.
+path, preserving findings already collected — including the evidence earlier
+detectors already produced for the same file the failing detector was inspecting
+— and the error text names the detector ID and the asset path, never the
+exception's own message, which could quote file content.
 
 **Adding a future detector** means: write a candidate predicate and a detect
 function against the shared context, declare a `FileDetector` or
