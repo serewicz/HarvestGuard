@@ -30,6 +30,7 @@ import json
 import random
 from collections.abc import Mapping
 from dataclasses import FrozenInstanceError, asdict, fields
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,7 @@ from scanner.crypto_relationships import (
     UnknownRelationshipTypeError,
     build_relationship,
     canonical_endpoints,
+    canonical_record_key,
     collect_relationships,
     deduplicate_relationships,
     derive_relationship_id,
@@ -208,6 +210,7 @@ def test_invalid_relationship_type_is_a_distinguishable_outcome(universe, known_
                 "evidence": CONTAINS_EVIDENCE,
                 "confidence": "High",
                 "relationship_rule_id": "container_contains:pkcs12",
+                "scan_id": "scan-1",
             }
         ],
         known_ids,
@@ -249,6 +252,7 @@ def test_dangling_relationship_is_a_distinguishable_outcome(universe, known_ids)
                 "evidence": CONTAINS_EVIDENCE,
                 "confidence": "High",
                 "relationship_rule_id": "container_contains:pkcs12",
+                "scan_id": "scan-1",
             }
         ],
         known_ids,
@@ -292,6 +296,7 @@ def test_self_relationship_is_a_distinguishable_outcome(universe, known_ids):
                 "evidence": CORRESPONDS_EVIDENCE,
                 "confidence": "High",
                 "relationship_rule_id": "key_match:public_key_fingerprint",
+                "scan_id": "scan-1",
             }
         ],
         known_ids,
@@ -375,7 +380,6 @@ def test_identity_uses_only_type_endpoints_and_rule_id(universe, known_ids):
     [
         {"observed_at": "2020-01-01T00:00:00+00:00"},
         {"scan_id": "some-other-scan"},
-        {"scan_id": None},
         {"evidence": "Parsed PKCS#12 container directly contains the certificate object"},
         {"confidence": "Medium"},
         {"confidence": "Low"},
@@ -387,7 +391,6 @@ def test_identity_uses_only_type_endpoints_and_rule_id(universe, known_ids):
     ids=[
         "timestamp",
         "scan_id",
-        "no_scan_id",
         "evidence_prose",
         "confidence_medium",
         "confidence_low",
@@ -498,8 +501,95 @@ def test_duplicate_suppression_keeps_deterministic_evidence_wording(universe, kn
     )
     deduplicated = deduplicate_relationships([first, second])
     assert len(deduplicated) == 1
-    # One canonical record, no evidence-history aggregation in HG-034.
-    assert deduplicated[0].evidence == first.evidence
+    # One canonical record, no evidence-history aggregation in HG-034: the
+    # surviving evidence is one of the observed wordings verbatim, never a merge.
+    assert deduplicated[0].evidence in {first.evidence, second.evidence}
+    assert deduplicated[0] in {first, second}
+
+
+# The volatile fields two same-identity candidates can disagree on. Selecting a
+# canonical record must not depend on which of them arrived first, so each pair
+# below is deduplicated in both orders.
+DIVERGENT_DUPLICATE_OVERRIDES = [
+    {"evidence": "Parsed PKCS#12 container directly contains the certificate object"},
+    {"confidence": "Medium"},
+    {"created_by": "crypto_inventory.other"},
+    {"scan_id": "scan-2"},
+    {"observed_at": "2020-01-01T00:00:00+00:00"},
+    {"repeatable": False},
+    {"limitations": ("container entry order was not recorded",)},
+    {"errors": ("one container entry could not be parsed",)},
+]
+
+
+@pytest.mark.parametrize("overrides", DIVERGENT_DUPLICATE_OVERRIDES)
+def test_duplicate_selection_is_independent_of_input_order(universe, known_ids, overrides):
+    first = _contains(universe, known_ids)
+    second = _contains(universe, known_ids, **overrides)
+    assert first.relationship_id == second.relationship_id
+    assert first != second
+
+    forward = deduplicate_relationships([first, second])
+    reversed_order = deduplicate_relationships([second, first])
+    assert len(forward) == len(reversed_order) == 1
+    # The same record, field for field -- not merely the same identity.
+    assert forward[0] == reversed_order[0]
+
+
+@pytest.mark.parametrize("overrides", DIVERGENT_DUPLICATE_OVERRIDES)
+def test_collect_relationships_selects_the_same_record_in_either_order(
+    universe, known_ids, overrides
+):
+    first = _contains(universe, known_ids)
+    second = _contains(universe, known_ids, **overrides)
+    forward = collect_relationships([first, second], known_ids)
+    reversed_order = collect_relationships([second, first], known_ids)
+    assert forward.relationships == reversed_order.relationships
+    # Outcomes stay positional: the first arrival of an identity is valid and the
+    # later repeat is a duplicate, whichever record is retained.
+    assert forward.outcomes == reversed_order.outcomes == (
+        RelationshipOutcome.VALID,
+        RelationshipOutcome.DUPLICATE,
+    )
+
+
+def test_every_non_identity_field_is_covered_by_canonical_selection(universe, known_ids):
+    """Order-independent selection has to consider every field duplicates can
+    differ on, so a new field must extend the tie-break key -- otherwise two
+    records differing only in that field would tie and input order would decide
+    again."""
+    identity_fields = {
+        "relationship_type",
+        "source_finding_id",
+        "target_finding_id",
+        "relationship_rule_id",
+        "relationship_id",
+    }
+    volatile_fields = {
+        model_field.name for model_field in fields(CryptoRelationship)
+    } - identity_fields
+    covered = {name for overrides in DIVERGENT_DUPLICATE_OVERRIDES for name in overrides}
+    assert covered == volatile_fields
+
+    baseline = _contains(universe, known_ids)
+    for overrides in DIVERGENT_DUPLICATE_OVERRIDES:
+        divergent = _contains(universe, known_ids, **overrides)
+        assert canonical_record_key(divergent) != canonical_record_key(baseline)
+
+
+def test_canonical_duplicate_selection_is_stable_across_shuffles(universe, known_ids):
+    variants = [_contains(universe, known_ids)] + [
+        _contains(universe, known_ids, **overrides)
+        for overrides in DIVERGENT_DUPLICATE_OVERRIDES
+    ]
+    expected = deduplicate_relationships(variants)
+    assert len(expected) == 1
+    shuffler = random.Random(20260805)
+    for _ in range(10):
+        shuffled = list(variants)
+        shuffler.shuffle(shuffled)
+        assert deduplicate_relationships(shuffled) == expected
+        assert collect_relationships(shuffled, known_ids).relationships == expected
 
 
 def test_relationship_ordering_is_deterministic(universe, known_ids):
@@ -648,6 +738,98 @@ def test_repeatability_is_represented_and_must_be_boolean(universe, known_ids):
 def test_observed_at_defaults_to_a_collection_timestamp(universe, known_ids):
     relationship = _contains(universe, known_ids, observed_at=None)
     assert relationship.observed_at and relationship.observed_at.endswith("+00:00")
+    # Always a real timestamp, whether defaulted or supplied.
+    assert datetime.fromisoformat(relationship.observed_at).tzinfo is not None
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        ("2026-08-04T12:30:05+00:00", "2026-08-04T12:30:05+00:00"),
+        ("2026-08-04T12:30:05Z", "2026-08-04T12:30:05+00:00"),
+        ("2026-08-04T12:30:05.123456+00:00", "2026-08-04T12:30:05+00:00"),
+        ("2026-08-04T12:30:05", "2026-08-04T12:30:05+00:00"),
+        (datetime(2026, 8, 4, 12, 30, 5, tzinfo=timezone.utc), "2026-08-04T12:30:05+00:00"),
+        (datetime(2026, 8, 4, 12, 30, 5), "2026-08-04T12:30:05+00:00"),
+    ],
+)
+def test_observed_at_accepts_and_normalizes_iso_timestamps(
+    universe, known_ids, value, expected
+):
+    assert _contains(universe, known_ids, observed_at=value).observed_at == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "recently",
+        "scan time unknown",
+        "2026-08-04",
+        "04/08/2026 12:30",
+        "not-a-timestamp",
+        "2026-13-40T99:99:99+00:00",
+        "",
+        "   ",
+        7,
+        1754308205,
+    ],
+)
+def test_arbitrary_observed_at_strings_are_rejected(universe, known_ids, value):
+    with pytest.raises(MalformedRelationshipError):
+        _contains(universe, known_ids, observed_at=value)
+
+
+def test_scan_context_is_required(universe, known_ids):
+    kwargs = {
+        "relationship_type": RelationshipType.CONTAINS,
+        "source_finding_id": universe["container"].finding_id,
+        "target_finding_id": universe["certificate"].finding_id,
+        "evidence": CONTAINS_EVIDENCE,
+        "confidence": "High",
+        "relationship_rule_id": "container_contains:pkcs12",
+    }
+    # Omitting the scan context is not a relationship with unknown provenance;
+    # there is no such record to construct.
+    with pytest.raises(TypeError):
+        build_relationship(known_ids, **kwargs)
+    assert build_relationship(known_ids, scan_id="scan-1", **kwargs).scan_id == "scan-1"
+
+
+@pytest.mark.parametrize("scan_id", [None, "", "   ", "scan 1", "scan;1", 5])
+def test_invalid_scan_context_is_rejected(universe, known_ids, scan_id):
+    with pytest.raises(MalformedRelationshipError):
+        _contains(universe, known_ids, scan_id=scan_id)
+
+
+def test_missing_scan_context_candidate_is_a_malformed_outcome(universe, known_ids):
+    collection = collect_relationships(
+        [
+            {
+                "relationship_type": RelationshipType.CONTAINS,
+                "source_finding_id": universe["container"].finding_id,
+                "target_finding_id": universe["certificate"].finding_id,
+                "evidence": CONTAINS_EVIDENCE,
+                "confidence": "High",
+                "relationship_rule_id": "container_contains:pkcs12",
+            },
+            {
+                "relationship_type": RelationshipType.CONTAINS,
+                "source_finding_id": universe["container"].finding_id,
+                "target_finding_id": universe["certificate"].finding_id,
+                "evidence": CONTAINS_EVIDENCE,
+                "confidence": "High",
+                "relationship_rule_id": "container_contains:pkcs12",
+                "scan_id": "scan-1",
+                "observed_at": "sometime during the scan",
+            },
+        ],
+        known_ids,
+    )
+    assert collection.outcomes == (
+        RelationshipOutcome.MALFORMED,
+        RelationshipOutcome.MALFORMED,
+    )
+    assert collection.relationships == ()
 
 
 @pytest.mark.parametrize("rule_id", ["", "   ", None, "contains certificates", "rule;drop", 5])
@@ -735,6 +917,7 @@ def test_unknown_metadata_candidate_is_a_malformed_outcome(universe, known_ids):
                 "evidence": CONTAINS_EVIDENCE,
                 "confidence": "High",
                 "relationship_rule_id": "container_contains:pkcs12",
+                "scan_id": "scan-1",
                 "technical_metadata": {"passphrase": "hunter2"},
             }
         ],
@@ -811,6 +994,7 @@ def test_every_validation_outcome_is_distinguishable(universe, known_ids):
         "evidence": CONTAINS_EVIDENCE,
         "confidence": "High",
         "relationship_rule_id": "container_contains:pkcs12",
+        "scan_id": "scan-1",
     }
     collection = collect_relationships(
         [

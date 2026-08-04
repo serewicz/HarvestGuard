@@ -30,6 +30,11 @@ What this module is:
   a *different* relationship and gets a different ID); ``corresponds_to`` is
   symmetric (endpoints are canonically ordered, so reversed input yields one
   identical record).
+- **Required provenance.** Every relationship names the component and the
+  relationship rule that created it, the scan context it was observed in, whether
+  the observation is repeatable, and the ISO-8601 time HarvestGuard collected the
+  evidence. None of these is optional, and each accepts safe values only -- a
+  machine identifier or a real timestamp, never prose or asset contents.
 - **Evidence-only.** Every relationship requires evidence text describing what
   was structurally observed. Construction-time guards reject assessment wording
   (risk, remediation, compliance, HNDL, quantum, severity, business impact) and
@@ -48,7 +53,9 @@ What this module is **not**: a graph. There is no graph database, no graph
 library, no graph API, no persistence, no traversal, no path search, no
 transitive closure, and no cycle analysis. A future relationship set may well
 contain cycles; nothing here requires or checks acyclicity. Deduplication is
-exact-identity suppression over one flat collection, never transitive merging.
+exact-identity suppression over one flat collection, never transitive merging,
+and the record that survives is selected independently of the order the
+duplicates arrived in.
 """
 
 from __future__ import annotations
@@ -283,8 +290,8 @@ class RelationshipProvenance:
 
     created_by: str
     relationship_rule_id: str
-    scan_id: str | None
-    collected_at: str | None
+    scan_id: str
+    collected_at: str
     repeatable: bool
 
 
@@ -310,8 +317,8 @@ class CryptoRelationship:
     evidence: str
     confidence: str
     relationship_rule_id: str
+    scan_id: str
     created_by: str = RELATIONSHIP_MODEL_COMPONENT
-    scan_id: str | None = None
     observed_at: str | datetime | None = None
     repeatable: bool = True
     limitations: tuple[str, ...] = ()
@@ -330,11 +337,10 @@ class CryptoRelationship:
         confidence = _require_confidence(self.confidence)
         rule_id = _require_identifier(self.relationship_rule_id, "relationship_rule_id")
         created_by = _require_identifier(self.created_by, "created_by")
-        scan_id = (
-            None
-            if self.scan_id is None
-            else _require_identifier(self.scan_id, "scan_id")
-        )
+        # Required, not optional: provenance must explain which scan context
+        # observed the relationship, so a record with no scan context is
+        # malformed rather than a record with unknown provenance.
+        scan_id = _require_identifier(self.scan_id, "scan_id")
         if not isinstance(self.repeatable, bool):
             raise MalformedRelationshipError(
                 "repeatable must be a bool: "
@@ -551,6 +557,43 @@ def relationship_sort_key(relationship: CryptoRelationship) -> tuple[str, ...]:
     )
 
 
+def canonical_record_key(relationship: CryptoRelationship) -> tuple[object, ...]:
+    """The tie-break order among duplicates that share one identity.
+
+    Two candidates with the same identity may still differ in volatile fields:
+    evidence wording, confidence, creating component, scan context, collection
+    time, repeatability, limitations, errors. Which one survives suppression must
+    not depend on the order the candidates happened to arrive in, so this covers
+    every non-identity field and gives duplicates a total order.
+
+    The ordering is plain lexicographic and carries no meaning: it is a
+    deterministic tie-break, not a ranking, not a merge, and not evidence-history
+    aggregation. Identity fields are excluded because duplicates share them.
+    """
+    return (
+        relationship.evidence,
+        relationship.confidence,
+        relationship.created_by,
+        relationship.scan_id,
+        relationship.observed_at,
+        relationship.repeatable,
+        relationship.limitations,
+        relationship.errors,
+    )
+
+
+def _canonical_of(
+    existing: CryptoRelationship, candidate: CryptoRelationship
+) -> CryptoRelationship:
+    """The canonical one of two records sharing an identity.
+
+    Commutative, so folding a batch in any order reaches the same record.
+    """
+    if canonical_record_key(candidate) < canonical_record_key(existing):
+        return candidate
+    return existing
+
+
 def deduplicate_relationships(
     relationships: Iterable[CryptoRelationship],
 ) -> tuple[CryptoRelationship, ...]:
@@ -561,15 +604,21 @@ def deduplicate_relationships(
     match -- that is exactly the identity tuple, so suppression and identity can
     never disagree. Different types and different rule IDs stay distinct.
 
-    First occurrence wins, which is well-defined precisely because the retained
-    record's identity fields are identical to every suppressed duplicate's. HG-034
-    does not aggregate evidence history, merge unrelated evidence types, or
-    deduplicate transitively: there is no traversal here, only exact identity.
+    Selection is order-independent: the retained record is the minimum under
+    ``canonical_record_key``, not the first one seen, so two batches holding the
+    same observations in different orders produce the same canonical record even
+    when duplicates differ in evidence wording or provenance. HG-034 does not
+    aggregate evidence history, merge unrelated evidence types, or deduplicate
+    transitively: there is no traversal here, only exact identity.
     """
     canonical: dict[str, CryptoRelationship] = {}
     for relationship in relationships:
-        assert relationship.relationship_id is not None  # set in __post_init__
-        canonical.setdefault(relationship.relationship_id, relationship)
+        relationship_id = relationship.relationship_id
+        assert relationship_id is not None  # set in __post_init__
+        existing = canonical.get(relationship_id)
+        canonical[relationship_id] = (
+            relationship if existing is None else _canonical_of(existing, relationship)
+        )
     return tuple(sorted(canonical.values(), key=relationship_sort_key))
 
 
@@ -582,7 +631,12 @@ def collect_relationships(
     keyword arguments. Every candidate gets exactly one outcome, so no rejection
     is silent: an invalid type, a dangling endpoint, a self-relationship, a
     malformed object, a duplicate, and an unexpected model failure are all
-    distinguishable, and only ``VALID`` candidates reach ``relationships``.
+    distinguishable, and no rejected candidate reaches ``relationships``.
+
+    ``VALID`` versus ``DUPLICATE`` describes each candidate's position -- the
+    first arrival of an identity against a later repeat of it -- while the
+    canonical record kept for that identity is chosen order-independently by
+    ``deduplicate_relationships``.
 
     An unexpected exception is recorded as ``MODEL_ERROR`` rather than dropped,
     so a caller cannot mistake a broken batch for a batch that observed no
@@ -638,6 +692,13 @@ def collect_relationships(
         if relationship_id in accepted:
             outcomes.append(RelationshipOutcome.DUPLICATE)
             rejections.append(f"candidate {index}: duplicate: {relationship_id}")
+            # The outcome per candidate is positional -- the first arrival of an
+            # identity is VALID and later ones are DUPLICATE -- but which record
+            # is retained is not: duplicates are folded so the canonical record
+            # is the same whatever order the batch arrived in.
+            accepted[relationship_id] = _canonical_of(
+                accepted[relationship_id], relationship
+            )
             continue
         accepted[relationship_id] = relationship
         outcomes.append(RelationshipOutcome.VALID)
@@ -729,17 +790,43 @@ def _safe_text_tuple(value: Any, label: str) -> tuple[str, ...]:
 def _normalize_observed_at(value: str | datetime | None) -> str:
     """The collection timestamp, normalized the way findings normalize theirs.
 
-    Defaults to now: provenance must record when HarvestGuard collected the
-    relationship evidence. It is never part of identity, so a new timestamp on
-    every observation cannot churn relationship IDs.
+    Defaults to now: provenance must record *when* HarvestGuard collected the
+    relationship evidence, so this field is always populated. A supplied value
+    must be an actual point in time -- a ``datetime``, or an ISO-8601 date-time
+    string of the shape ``datetime.isoformat()`` produces -- and is normalized to
+    a timezone-aware, whole-second string (a naive value is read as UTC, matching
+    ``findings._normalize_timestamp``). Arbitrary text is rejected: a string that
+    is not a timestamp is a malformed relationship, not a collection time.
+
+    The timestamp is never part of identity, so a new one on every observation
+    cannot churn relationship IDs.
     """
     if value is None:
         value = datetime.now(timezone.utc)
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
-        return value.replace(microsecond=0).isoformat()
-    return _require_text(value, "observed_at")
+        return _format_observed_at(value)
+    text = _require_text(value, "observed_at")
+    # `fromisoformat` accepts a bare date, which is not a collection time;
+    # requiring the date/time separator keeps the accepted shape the same as the
+    # emitted one. Python 3.10's parser also predates 'Z' support.
+    normalized = (text[:-1] + "+00:00") if text.endswith("Z") else text
+    if "T" not in normalized:
+        raise MalformedRelationshipError(
+            f"observed_at must be an ISO-8601 date-time: {text!r}"
+        )
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise MalformedRelationshipError(
+            f"observed_at must be an ISO-8601 date-time: {text!r}"
+        ) from exc
+    return _format_observed_at(parsed)
+
+
+def _format_observed_at(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.replace(microsecond=0).isoformat()
 
 
 def _check_vocabulary_partition() -> None:

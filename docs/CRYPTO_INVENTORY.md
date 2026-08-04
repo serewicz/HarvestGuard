@@ -176,7 +176,13 @@ relationships are internal evidence artifacts that later issues may build on.
   observed several times collapses to one canonical record; different types and
   different rule IDs stay distinct. Ordering is derived from the same stable
   fields, so a collection's order does not depend on the order it was built in.
-  There is no evidence-history aggregation and no transitive deduplication.
+  Neither does *which* record survives: when duplicates disagree on a volatile
+  field — evidence wording, confidence, creating component, scan context,
+  collection time, repeatability, limitations, errors — the retained record is
+  selected by a deterministic tie-break over those fields rather than by input
+  order. That tie-break is not a ranking: there is no evidence-history
+  aggregation, no merging of unrelated evidence, and no transitive
+  deduplication.
 - **Evidence only, no inference.** Every relationship requires evidence text
   describing what was directly, structurally observed. Construction-time guards
   reject assessment wording (validity, trust, ownership, business impact,
@@ -190,7 +196,11 @@ relationships are internal evidence artifacts that later issues may build on.
 - **Provenance is required and safe.** Each relationship records which internal
   component created it, which relationship rule created it, the scan context,
   whether the observation is repeatable, and when HarvestGuard collected the
-  evidence — as short, safe values.
+  evidence — as short, safe values. None of these is optional: a record with no
+  scan context is malformed rather than a record with unknown provenance, the
+  component, rule, and scan context must be machine identifiers, and the
+  collection time must be an ISO-8601 date-time (normalized to whole seconds,
+  UTC when no offset is given) rather than arbitrary text.
 - **The privacy boundary is structural.** The model has no metadata dictionary
   and no free-form field, so there is nowhere to put private key material, raw
   certificate bodies, raw or encrypted key blobs, ciphertext, plaintext,

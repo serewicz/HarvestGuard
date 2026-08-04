@@ -146,8 +146,12 @@ issues may build on. Its properties:
   from the type, both stable finding IDs, and the relationship rule ID, and from
   nothing volatile (timestamps, scan ID, host, ordering, confidence, evidence
   prose, provenance text, limitations, errors). Duplicate suppression is exact
-  identity over one flat collection, retaining one canonical record; ordering
-  comes from the same stable fields.
+  identity over one flat collection, retaining one canonical record; both the
+  collection's ordering and the choice of which duplicate survives are
+  independent of the order candidates arrived in.
+- **Required, safe provenance.** Creating component, relationship rule, scan
+  context, repeatability, and an ISO-8601 collection time are all mandatory and
+  restricted to machine identifiers or a real timestamp.
 - **Evidence-only, no inference.** Evidence is required and must describe a
   directly observed structure. Construction-time guards reject assessment
   wording and inference wording, so a relationship cannot be created from
