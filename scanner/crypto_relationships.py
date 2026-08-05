@@ -312,14 +312,41 @@ class RelationshipProvenance:
     repeatable: bool
 
 
+class _RejectsUnknownKeywords(type):
+    """Refuse unknown constructor keywords before the dataclass ``__init__``.
+
+    A generated dataclass ``__init__`` reports an unexpected keyword by quoting
+    its *name* in a raw ``TypeError`` -- and a keyword name is caller-supplied,
+    untrusted text, exactly like a value (a defective caller can pass a
+    passphrase as either). ``build_relationship`` already prevalidates its own
+    keywords, but direct ``CryptoRelationship(...)`` construction would still
+    reach the generated ``__init__`` unguarded, so the check has to sit on the
+    class-construction boundary itself. This metaclass is that boundary: it
+    keeps the generated ``__init__`` (and ``fields()``, equality, hashing, and
+    frozen semantics) untouched, and only screens keyword names first.
+
+    ``_require_known_fields`` -- resolved at call time, so its later definition
+    in this module is fine -- derives the accepted names from the dataclass's
+    own fields and reports a refusal by count alone, never by name or value.
+    Positional arguments carry no caller-supplied names and pass through
+    unchanged.
+    """
+
+    def __call__(cls, *args: Any, **kwargs: Any) -> Any:
+        _require_known_fields(kwargs)
+        return super().__call__(*args, **kwargs)
+
+
 @dataclass(frozen=True)
-class CryptoRelationship:
+class CryptoRelationship(metaclass=_RejectsUnknownKeywords):
     """One directly observed structural relationship between two findings.
 
     Immutable, and narrow on purpose: there is no metadata dictionary and no
     free-form field, so the only things a relationship can carry are stable
     finding IDs, a vocabulary type, a rule ID, bounded evidence text,
     confidence, safe provenance, repeatability, limitations, and errors.
+    Unknown constructor keywords are refused before the generated ``__init__``
+    can quote them back (see ``_RejectsUnknownKeywords``).
 
     Validation happens in ``__post_init__``, so an invalid relationship object
     cannot be constructed at all. Endpoint *existence* is the one check this
@@ -571,6 +598,11 @@ def _require_known_fields(kwargs: Mapping[str, Any]) -> None:
     Rejecting rather than ignoring them matters: there is no metadata dictionary
     to absorb an unknown field, so a caller that supplied one has a defect, and
     silently dropping it would hide that.
+
+    Enforced on every construction path: ``build_relationship`` calls this
+    directly, and ``_RejectsUnknownKeywords`` applies the same check to direct
+    ``CryptoRelationship(...)`` construction before the generated dataclass
+    ``__init__`` can quote an unknown keyword name in a raw ``TypeError``.
     """
     unexpected = sum(1 for key in kwargs if key not in _RELATIONSHIP_FIELD_NAMES)
     if unexpected:

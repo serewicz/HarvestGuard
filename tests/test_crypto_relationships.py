@@ -1029,6 +1029,101 @@ def test_secret_bearing_unknown_keys_do_not_leak_into_rejections(universe, known
     _assert_no_sentinel(repr(excinfo.value))
 
 
+# Direct `CryptoRelationship(...)` construction is a boundary of its own:
+# `build_relationship` prevalidates its keywords, but a caller constructing the
+# dataclass directly would otherwise reach the generated `__init__`, whose raw
+# `TypeError` quotes the unknown keyword name verbatim. These tests pin the
+# `_RejectsUnknownKeywords` metaclass boundary that closes that path.
+
+
+def _valid_direct_kwargs(universe):
+    return {
+        "relationship_type": RelationshipType.CONTAINS,
+        "source_finding_id": universe["container"].finding_id,
+        "target_finding_id": universe["certificate"].finding_id,
+        "evidence": CONTAINS_EVIDENCE,
+        "confidence": "High",
+        "relationship_rule_id": "container_contains:pkcs12",
+        "scan_id": "scan-1",
+    }
+
+
+def test_direct_construction_with_unknown_secret_key_is_malformed_and_leak_free(universe):
+    with pytest.raises(MalformedRelationshipError) as excinfo:
+        CryptoRelationship(**{**_valid_direct_kwargs(universe), LEAK_SENTINEL: "attached"})
+    # Neither the secret-shaped keyword name nor its value survives into the
+    # exception's str() or repr().
+    _assert_no_sentinel(str(excinfo.value))
+    _assert_no_sentinel(repr(excinfo.value))
+    assert "attached" not in str(excinfo.value)
+    assert "attached" not in repr(excinfo.value)
+
+
+def test_direct_construction_with_multiple_unknown_keys_reports_count_only(universe):
+    with pytest.raises(MalformedRelationshipError) as excinfo:
+        CryptoRelationship(
+            **{
+                **_valid_direct_kwargs(universe),
+                LEAK_SENTINEL: "one",
+                "passphrase": LEAK_SENTINEL,
+            }
+        )
+    message = str(excinfo.value)
+    # Reported by count alone: the number appears, the names and values do not.
+    assert "2" in message
+    assert "passphrase" not in message
+    assert "one" not in message
+    _assert_no_sentinel(message)
+    _assert_no_sentinel(repr(excinfo.value))
+
+
+def test_direct_positional_construction_still_works(universe):
+    kwargs = _valid_direct_kwargs(universe)
+    positional = CryptoRelationship(
+        kwargs["relationship_type"],
+        kwargs["source_finding_id"],
+        kwargs["target_finding_id"],
+        kwargs["evidence"],
+        kwargs["confidence"],
+        kwargs["relationship_rule_id"],
+        kwargs["scan_id"],
+    )
+    by_keyword = CryptoRelationship(**kwargs)
+    # The metaclass boundary changes nothing about valid construction: the two
+    # spellings produce equal records with the same deterministic identity, and
+    # frozen-dataclass semantics survive.
+    assert positional == by_keyword
+    assert hash(positional) == hash(by_keyword)
+    assert positional.relationship_id == by_keyword.relationship_id
+    with pytest.raises(FrozenInstanceError):
+        positional.evidence = "mutated"
+
+
+def test_direct_keyword_construction_still_works(universe):
+    relationship = CryptoRelationship(**_valid_direct_kwargs(universe))
+    assert relationship.relationship_type is RelationshipType.CONTAINS
+    assert relationship.relationship_id is not None
+    assert {model_field.name for model_field in fields(CryptoRelationship)} >= set(
+        _valid_direct_kwargs(universe)
+    )
+
+
+def test_build_relationship_still_works_after_constructor_boundary(universe, known_ids):
+    relationship = _contains(universe, known_ids)
+    assert relationship.relationship_id is not None
+
+
+def test_collect_relationships_still_classifies_unknown_key_mappings_as_malformed(
+    universe, known_ids
+):
+    collection = collect_relationships(
+        [{**_valid_direct_kwargs(universe), LEAK_SENTINEL: "attached"}], known_ids
+    )
+    assert collection.outcomes == (RelationshipOutcome.MALFORMED,)
+    assert collection.relationships == ()
+    _assert_no_sentinel(" ".join(collection.rejections))
+
+
 @pytest.mark.parametrize(
     "evidence",
     [
