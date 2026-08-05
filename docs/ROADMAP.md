@@ -748,6 +748,34 @@ Milestone 2 is fully delivered.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/78
 - **Pull request:** https://github.com/serewicz/HarvestGuard/pull/90
 
+### HG-034
+
+- **Title:** Cryptographic Relationship Model
+- **Purpose:** Introduce an internal-only cryptographic relationship model for
+  direct structural links between existing findings. The model records
+  immutable relationship records with a fixed bounded vocabulary, existing-
+  finding endpoint requirements, explicit directional and symmetric semantics,
+  deterministic relationship IDs, symmetric endpoint canonicalization,
+  deterministic duplicate suppression, evidence-only wording, High confidence
+  only for direct structural proof, safe provenance, and distinct malformed and
+  model-error outcomes.
+- **Status:** Complete
+- **Milestone:** v0.2
+- **Dependencies:** HG-033
+- **Acceptance criteria:** Dangling and self-relationships are rejected; unknown
+  constructor keywords are rejected before dataclass construction and secret-
+  bearing keyword names and values do not leak; valid dataclass construction,
+  replacement, equality, hashing, and frozen semantics are preserved; findings
+  are not mutated; no JSON, Markdown, CLI, DataFrame, Streamlit, summary,
+  accounting, or schema behavior changes; no graph database, inference,
+  persistence, public relationship output, or new detection capability is
+  introduced; the known encrypted-summary taxonomy defect remains out of scope.
+- **Delivered by:** `scanner/crypto_relationships.py`,
+  `tests/test_crypto_relationships.py`, `docs/ARCHITECTURE.md`, and
+  `docs/CRYPTO_INVENTORY.md`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/79
+- **Pull request:** https://github.com/serewicz/HarvestGuard/pull/93
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
