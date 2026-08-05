@@ -54,12 +54,14 @@ from scanner.errors import LocalScanError
 
 FIXTURE_DIR = Path(__file__).parent / "fixtures" / "crypto_inventory"
 
-# Every detector family the crypto-inventory scanner supported before HG-033,
-# exactly once each. A new entry here means a new detection capability, which
-# HG-033 explicitly does not add -- this list is what makes that reviewable.
+# Every detector family the crypto-inventory scanner supports, exactly once
+# each. A new entry here means a new detection capability, which is what makes
+# one reviewable: HG-033 (the framework itself) added none, and HG-035 added
+# exactly one -- the native age v1 encrypted-file detector.
 EXPECTED_DETECTOR_IDS = [
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
+    "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
     "java_keystore:jks_magic",
     "pkcs12:container",
@@ -71,10 +73,11 @@ EXPECTED_DETECTOR_IDS = [
 
 # The only rule IDs any crypto-inventory detector may carry. Every other asset
 # type leaves rule_id unset (parsed certificates and keys have no named
-# detection rule), and HG-033 introduces none.
+# detection rule); HG-033 introduced none, and HG-035 introduced exactly one.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
+    "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
 }
 

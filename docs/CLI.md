@@ -181,8 +181,8 @@ finding is not proof no encrypted files exist: the scanner's other
 candidate-gate limitations (see
 [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#local-cryptographic-asset-inventory))
 still apply to every signature this issue did not add — only the exact
-`Salted__` OpenSSL header is recognized by *this* rule (OpenPGP/GPG is covered
-separately, below), not age, LUKS, encrypted ZIP, or any other
+`Salted__` OpenSSL header is recognized by *this* rule (OpenPGP/GPG and age are
+covered separately, below), not LUKS, encrypted ZIP, or any other
 encrypted-container format.
 
 #### OpenPGP/GPG encrypted-file evidence (HG-031)
@@ -228,6 +228,52 @@ merged or reconciled against each other.
 
 Absence of an `encrypted_file:openpgp` finding is not proof that no encrypted
 OpenPGP files exist in the target.
+
+#### age encrypted-file evidence (HG-035)
+
+A **native age v1** encrypted file — one whose content begins with the
+`age-encryption.org/v1` version line and follows the format's own header
+grammar — is cryptographic evidence, and the crypto-inventory scanner owns it:
+a `--type crypto` (or `--type all`) scan reports it as asset type
+`Encrypted File`, `rule_id: encrypted_file:age`, confidence `High`, with
+evidence text limited to `Observed age encrypted file.` One finding is emitted
+per valid supported file, and as with the `Salted__` and OpenPGP checks, content
+is evaluated before any extension-based parsing, so valid age content saved as
+`secret.p12` is still reported as `Encrypted File`. Confidence is `High` only
+because the header structure was read directly out of the file.
+
+**Support is narrow and explicit.** Only the native format is recognized:
+the exact version line at byte offset 0, one or more structurally valid
+recipient stanzas, a header MAC line of exactly `--- ` plus 43
+unpadded-base64 characters, LF line endings, and an encrypted payload of at
+least 32 bytes immediately after the header. **ASCII-armored age files
+(`-----BEGIN AGE ENCRYPTED FILE-----`) are not supported in HG-035**, nor are
+other age versions, CRLF native headers, or malformed/truncated age-like
+content — each produces no finding rather than a lower-confidence guess, and
+nothing is inferred from a filename, a `.age` extension, or entropy. The full
+supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#age-encrypted-files-hg-035).
+
+The scanner does **not** decrypt, prompt for or accept a passphrase or identity
+file, read a keyring or SSH agent, resolve or name recipients, or shell out to
+`age`. Recipient types and arguments, stanza bodies, the header MAC, and the
+encrypted payload never appear in output — an age finding carries no technical
+metadata at all — and no claim is made about encryption strength,
+decryptability, or who holds a key.
+
+The filesystem scanner independently recognizes the leading bytes
+`age-encryption.org/v1` as a broader, prefix-only signature, as it always has
+(`--type filesystem`, `rule_id: file_signature:file_level_age`, asset type
+`file`, `Encryption: File-level (age)`). That behavior is unchanged, and HG-035
+adds no dedup pairing for age: under `--type all`, that separate filesystem
+record still appears alongside the one crypto-inventory `Encrypted File`
+finding. `Files scanned` and `Crypto files inspected` keep exactly the meanings
+described above — an age file counts once in `Crypto files inspected`, and no
+age-specific count or summary bucket was added.
+
+Absence of an `encrypted_file:age` finding is not proof that no age-encrypted
+content exists in the target — this is one narrow detection rule for one
+explicitly enumerated on-disk shape, not general encrypted-file detection.
 
 #### gocryptfs encrypted-filesystem evidence (HG-032)
 
