@@ -776,6 +776,40 @@ Milestone 2 is fully delivered.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/79
 - **Pull request:** https://github.com/serewicz/HarvestGuard/pull/93
 
+### HG-035
+
+- **Title:** age Encrypted-File Detection
+- **Purpose:** Recognize supported native age v1 encrypted-file structures as
+  first-class crypto-inventory evidence without decrypting content, invoking
+  external tools, relying on filename extensions, or inferring encryption from
+  entropy. Preserve the existing filesystem signature behavior, scanner
+  accounting, and public output contracts while keeping age-specific parser
+  details out of normalized findings and reports.
+- **Status:** Complete
+- **Milestone:** v0.2
+- **Dependencies:** HG-033, HG-034
+- **Acceptance criteria:** Supported native age v1 files with LF-terminated
+  version, recipient stanzas, header MAC, and encrypted payload are detected
+  structurally; malformed, truncated, offset, near-match, ASCII-armored,
+  non-v1, random, documentation-only, and extension-only inputs do not produce
+  age encrypted-file evidence; crypto inventory emits `Encrypted File` with
+  `rule_id: encrypted_file:age` and `confidence: High`; `--type crypto` emits
+  the crypto-inventory finding, `--type filesystem` retains its existing
+  filesystem signature behavior, and `--type all` does not introduce a new
+  age-specific cross-scanner deduplication path; HG-029 `Files scanned`,
+  HG-030 `Crypto files inspected`, bare-array JSON, evidence-only Markdown,
+  DataFrame compatibility, rule IDs, finding IDs, and summary structure remain
+  compatible; no decryption, passphrase prompting, key-agent access,
+  recipient disclosure, plaintext emission, encrypted-payload emission, new
+  relationship output, or new dependency is introduced.
+- **Delivered by:** `scanner/crypto_inventory.py`,
+  `tests/test_age_encrypted_file_detection.py`,
+  `tests/test_crypto_detector_framework.py`,
+  `docs/DETECTION_CHARACTERIZATION.md`, `docs/CLI.md`,
+  `docs/CRYPTO_INVENTORY.md`, and `README.md`.
+- **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/80
+- **Pull request:** https://github.com/serewicz/HarvestGuard/pull/96
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
