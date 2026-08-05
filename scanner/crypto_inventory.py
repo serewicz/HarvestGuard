@@ -60,11 +60,12 @@ class CryptoInventoryFinding:
     fingerprint: str | None = None
     evidence: str = ""
     confidence: str = "Low"
-    # Unset for every asset type except the two Encrypted File findings -- the
-    # OpenSSL Salted__ signature (HG-030) and the OpenPGP encrypted-file
-    # structure (HG-031): a rule_id is only meaningful for a finding backed by
-    # a specific, nameable detection rule rather than a parsed certificate/key,
-    # so every other asset type leaves this None rather than inventing one.
+    # Unset for every asset type except the Encrypted File findings -- the
+    # OpenSSL Salted__ signature (HG-030), the OpenPGP encrypted-file structure
+    # (HG-031), and the native age v1 encrypted file (HG-035): a rule_id is only
+    # meaningful for a finding backed by a specific, nameable detection rule
+    # rather than a parsed certificate/key, so every other asset type leaves
+    # this None rather than inventing one.
     rule_id: str | None = None
     # Encrypted-filesystem container metadata (HG-032 gocryptfs; kept generic
     # rather than gocryptfs-specific field names so a future container format
@@ -737,6 +738,179 @@ def _openpgp_encrypted_finding(
     )
 
 
+# --- age encrypted-file detection (HG-035) ----------------------------------
+#
+# Structural only, exactly like the OpenSSL and OpenPGP checks above: the
+# native age v1 header is parsed just far enough to confirm the format's own
+# grammar -- the version line, one or more recipient stanzas, the header MAC
+# line's shape, and the presence of an encrypted payload -- and nothing read
+# here is ever reported. The file is never decrypted, no identity file,
+# passphrase, keyring, or SSH agent is consulted, and the `age` binary is never
+# invoked.
+#
+# Deliberately narrow: only the native (binary) age v1 format, the shape `age
+# -e` writes without `--armor`. ASCII-armored age files
+# (`-----BEGIN AGE ENCRYPTED FILE-----`), non-v1 versions, and CRLF line
+# endings are out of scope for HG-035 and are documented as false negatives in
+# docs/DETECTION_CHARACTERIZATION.md rather than guessed at.
+#
+# Recipient stanzas are parsed for *shape* only. The recipient type and its
+# arguments are read past, never interpreted, resolved, checked for usability,
+# or emitted: HG-035 makes no claim about who can decrypt a file, and naming
+# recipients would be identity output the privacy contract forbids.
+_AGE_V1_VERSION_LINE = b"age-encryption.org/v1\n"
+_AGE_STANZA_PREFIX = b"-> "
+_AGE_HEADER_MAC_PREFIX = b"--- "
+# The header MAC is an HMAC-SHA-256 (32 octets) written as unpadded base64,
+# which is always exactly 43 characters. Only that shape is validated: verifying
+# the MAC itself requires the file key, which would mean decryption.
+_AGE_HEADER_MAC_LENGTH = 43
+# age wraps a stanza body at 64 base64 characters per line, and a stanza's last
+# body line is always shorter than that -- being short is what marks the end of
+# the body.
+_AGE_STANZA_BODY_LINE_LENGTH = 64
+# The payload is a 16-octet header nonce followed by at least one STREAM chunk,
+# and every chunk carries a 16-octet authentication tag, so the smallest
+# possible payload (an empty plaintext) is 32 octets. Only the length is
+# checked; the payload is never read, decrypted, stored, or emitted.
+_AGE_MIN_PAYLOAD_BYTES = 32
+# Unpadded base64 (the RFC 4648 standard alphabet with no `=` padding), the
+# encoding age uses for stanza bodies and for the header MAC.
+_AGE_BASE64_ALPHABET = frozenset(
+    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+)
+
+
+def _age_line(data: bytes, offset: int) -> tuple[bytes, int] | None:
+    """The LF-terminated line beginning at ``offset`` and the offset just past
+    it, or None when no LF follows.
+
+    An unterminated final line is not a header line, which is what rejects a
+    header truncated mid-line. Binary-safe: the line is returned as bytes and
+    never decoded, so a file that only looks like an age header cannot raise.
+    Requiring LF is also what rejects a CRLF native header -- the trailing CR
+    is left on the line, where it fails every character check below.
+    """
+    end = data.find(b"\n", offset)
+    if end == -1:
+        return None
+    return data[offset:end], end + 1
+
+
+def _age_stanza_arguments_are_valid(line: bytes) -> bool:
+    """Whether ``line`` is structurally an age recipient-stanza line: the
+    literal ``-> `` prefix followed by one or more non-empty, space-separated
+    printable arguments.
+
+    Shape only. The first argument is the recipient type and the rest are its
+    arguments; none of them is interpreted, resolved, validated as a usable
+    recipient, or emitted.
+    """
+    arguments = line[len(_AGE_STANZA_PREFIX) :].split(b" ")
+    if any(not argument for argument in arguments):
+        return False
+    return all(0x21 <= byte <= 0x7E for argument in arguments for byte in argument)
+
+
+def _age_stanza_body_end(data: bytes, offset: int) -> int | None:
+    """The offset just past the wrapped base64 stanza body beginning at
+    ``offset``, or None when the body is absent or does not follow the format's
+    wrapping rules.
+
+    Every full line is exactly 64 unpadded-base64 characters and the final line
+    is shorter, so a line that is longer, that carries a character outside the
+    alphabet, or that never terminates rejects the stanza -- which is also what
+    rejects a stanza whose body is missing entirely, since the next line would
+    then be another stanza or the header MAC line and neither is base64.
+    HG-035 additionally requires at least one body character.
+
+    Body characters are validated and immediately discarded: the body is never
+    decoded, stored, or emitted.
+    """
+    body_characters = 0
+    while True:
+        line_and_offset = _age_line(data, offset)
+        if line_and_offset is None:
+            return None
+        line, offset = line_and_offset
+        if len(line) > _AGE_STANZA_BODY_LINE_LENGTH:
+            return None
+        if any(byte not in _AGE_BASE64_ALPHABET for byte in line):
+            return None
+        body_characters += len(line)
+        if len(line) < _AGE_STANZA_BODY_LINE_LENGTH:
+            return offset if body_characters else None
+
+
+def _age_v1_header_end(data: bytes) -> int | None:
+    """The offset just past a complete native age v1 header at offset 0 of
+    ``data``, or None when ``data`` does not begin with one.
+
+    The whole grammar is required: the exact version line at byte offset 0, one
+    or more syntactically valid recipient stanzas, and a header MAC line that is
+    exactly ``--- `` plus 43 unpadded-base64 characters. Every line must be
+    LF-terminated. A match is only ever at offset 0 -- an age header further
+    into a file is not a match, because the format puts the version line first.
+    """
+    if not data.startswith(_AGE_V1_VERSION_LINE):
+        return None
+
+    offset = len(_AGE_V1_VERSION_LINE)
+    stanzas = 0
+    while True:
+        line_and_offset = _age_line(data, offset)
+        if line_and_offset is None:
+            return None
+        line, next_offset = line_and_offset
+
+        if line.startswith(_AGE_HEADER_MAC_PREFIX):
+            # The MAC line ends the header, so a header with no recipient stanza
+            # in front of it is incomplete rather than a supported match.
+            if not stanzas:
+                return None
+            mac = line[len(_AGE_HEADER_MAC_PREFIX) :]
+            if len(mac) != _AGE_HEADER_MAC_LENGTH:
+                return None
+            if any(byte not in _AGE_BASE64_ALPHABET for byte in mac):
+                return None
+            return next_offset
+
+        if not line.startswith(_AGE_STANZA_PREFIX):
+            return None
+        if not _age_stanza_arguments_are_valid(line):
+            return None
+        body_end = _age_stanza_body_end(data, next_offset)
+        if body_end is None:
+            return None
+        offset = body_end
+        stanzas += 1
+
+
+def _looks_like_age_v1_encrypted_file(data: bytes) -> bool:
+    """Whether ``data`` is a supported native age v1 encrypted file: a complete,
+    structurally valid header at offset 0 followed immediately by an encrypted
+    payload long enough to be one (see ``_AGE_MIN_PAYLOAD_BYTES``).
+
+    Length-safe and binary-safe throughout, so an empty, truncated, or arbitrary
+    binary file returns False instead of raising. The payload is never read,
+    decrypted, or emitted -- only its length is measured.
+    """
+    header_end = _age_v1_header_end(data)
+    if header_end is None:
+        return False
+    return len(data) - header_end >= _AGE_MIN_PAYLOAD_BYTES
+
+
+def _age_encrypted_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Encrypted File",
+        location=str(file_path),
+        evidence="Observed age encrypted file.",
+        confidence="High",
+        rule_id="encrypted_file:age",
+    )
+
+
 # --- gocryptfs cipher-root detection (HG-032) -------------------------------
 #
 # Structural only, exactly like the OpenSSL and OpenPGP checks above: this
@@ -944,6 +1118,11 @@ def _gocryptfs_root_finding(context: RootContext) -> CryptoInventoryFinding | No
 #   20 OpenPGP structure ahead of the same branches *and* ahead of the shared
 #      candidate gate, since a binary OpenPGP file has no recognized extension
 #      and no "-----BEGIN " text for the gate to admit it by (HG-031).
+#   25 age encrypted file ahead of the same branches and the gate, for the same
+#      reason: a native age file has no recognized extension and no
+#      "-----BEGIN " text, and valid age content saved as secret.p12 must be
+#      classified from its content rather than as a malformed container
+#      (HG-035).
 #   30 gocryptfs root ahead of the file-format branches and the gate for the
 #      same reason -- gocryptfs.conf is plain JSON -- and terminal for its
 #      marker file either way, so a rejected marker never falls through into
@@ -990,6 +1169,23 @@ def _detect_openpgp_encrypted(context: FileContext) -> DetectionResult:
     if evidence is None:
         return DetectionResult.no_match()
     return DetectionResult.match([_openpgp_encrypted_finding(context.path, *evidence)])
+
+
+def _age_candidate(context: FileContext) -> bool:
+    """The cheap leading-byte gate for the age detector: the exact native age v1
+    version line at byte offset 0, which is the one condition
+    ``_looks_like_age_v1_encrypted_file`` itself requires before it can return
+    True. Content only -- never the filename, the extension, entropy, or a
+    broader text heuristic."""
+    return context.leading_bytes(len(_AGE_V1_VERSION_LINE)) == _AGE_V1_VERSION_LINE
+
+
+def _detect_age_encrypted(context: FileContext) -> DetectionResult:
+    # The full bytes are required, not a prefix: the header runs to its MAC line
+    # and the payload-length check is only meaningful against the whole file.
+    if not _looks_like_age_v1_encrypted_file(context.data):
+        return DetectionResult.no_match()
+    return DetectionResult.match([_age_encrypted_finding(context.path)])
 
 
 def _detect_gocryptfs_root(context: RootContext) -> DetectionResult:
@@ -1114,6 +1310,23 @@ CRYPTO_DETECTORS = build_registry(
                 "fields it declares, each validated against the values the "
                 "specification allows; the encrypted payload is never "
                 "interpreted and gpg is never invoked."
+            ),
+        ),
+        FileDetector(
+            detector_id="encrypted_file:age",
+            priority=25,
+            candidate=_age_candidate,
+            detect=_detect_age_encrypted,
+            evidence="Observed age encrypted file.",
+            confidence="High",
+            terminal=True,
+            rule_id="encrypted_file:age",
+            verification_rationale=(
+                "Exact native age v1 version line at offset 0 plus the format's "
+                "own header grammar -- recipient stanza shape, header MAC line "
+                "shape, and the presence of an encrypted payload; the header MAC "
+                "is not verified, no recipient is interpreted, and the payload is "
+                "never read or decrypted."
             ),
         ),
         RootDetector(

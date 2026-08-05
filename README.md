@@ -115,7 +115,11 @@ evidence and must remain traceable back to it.
   `gpg --symmetric` / `gpg --encrypt` writes, in binary or ASCII armor
   (evidence only, not decryption — signed messages, detached signatures, and
   key blocks are not treated as encrypted files, and OpenPGP coverage is
-  partial, not complete). Also recognizes standard forward-mode gocryptfs
+  partial, not complete). Also recognizes native age v1 encrypted files by
+  their own header structure (version line, recipient stanzas, header MAC-line
+  shape, and payload presence) — evidence only, never decrypted, with no
+  recipient identity reported; ASCII-armored age files and other age versions
+  are unsupported. Also recognizes standard forward-mode gocryptfs
   cipher roots (config format version 2 only) by their root-level
   `gocryptfs.conf`/`gocryptfs.diriv` pair — one finding per validated root
   directory, never per ciphertext file, and never mounted, unlocked, or

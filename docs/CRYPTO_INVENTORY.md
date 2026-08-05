@@ -50,6 +50,13 @@ Example output shape:
   leading encrypted-session-key packet (structure only, not decrypted;
   checked before any extension-based branch above). Support is partial — see
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#openpgpgpg-encrypted-files-hg-031)
+- age encrypted files, **native age v1 only** (`age-encryption.org/v1`),
+  identified by the format's own header structure — version line, recipient
+  stanzas, header MAC line shape, and the presence of an encrypted payload
+  (structure only, never decrypted; checked before any extension-based branch
+  above). ASCII-armored age files are not supported, and no recipient identity
+  is interpreted or reported. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#age-encrypted-files-hg-035)
 - gocryptfs cipher roots (standard forward mode, config format version 2
   only), identified by a root-level `gocryptfs.conf` plus `gocryptfs.diriv`
   pair — one finding per validated root directory, not per ciphertext file,
@@ -271,6 +278,12 @@ Recursive scans do not follow symbolic links by default. Use
   whole OpenPGP specification: an encrypted file whose leading packet is not
   one of the supported shapes produces no finding, and the scanner never
   decrypts, prompts for a passphrase, verifies a signature, or invokes `gpg`.
+- age detection covers native age v1 files only: ASCII-armored age files, other
+  age versions, and malformed or truncated age-like content produce no finding,
+  and the scanner never decrypts, prompts for a passphrase or identity file,
+  reads a keyring or SSH agent, resolves recipients, or invokes `age`. Absence
+  of an `encrypted_file:age` finding is not proof that no age-encrypted content
+  exists in the target.
 - The scanner reports observed local evidence only. It does not calculate risk
   scores, quantum exposure, or executive priority.
 

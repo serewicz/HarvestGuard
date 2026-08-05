@@ -329,6 +329,90 @@ read past, never reported), never verifies a signature, and never invokes
 `gpg` or any other external tool. Absence of an `encrypted_file:openpgp`
 finding is not proof that no encrypted OpenPGP files exist in the target.
 
+#### age encrypted files (HG-035)
+
+A file whose content is a **native age v1** encrypted file is reported as asset
+type `Encrypted File` (`rule_id: encrypted_file:age`, confidence `High`,
+evidence `Observed age encrypted file.`), based solely on the directly observed
+header structure described below. Like the `Salted__` and OpenPGP checks, it
+runs before every extension-based branch, so valid age content saved with a
+`.p12`, `.pfx`, `.der`, `.pem`, `.gpg`, or any other extension is still
+classified from its content rather than as a malformed container. One finding is
+emitted per valid supported file, and the match is terminal: no later detector
+also reads that file as PEM, DER, PKCS#12, JKS, SSH, OpenPGP, or OpenSSL
+content.
+
+**What is supported** — the native (non-armored) age v1 format, and only when
+every one of these holds:
+
+- The file begins **at byte offset 0** with the exact version line
+  `age-encryption.org/v1` followed by LF. A near-match version string, a
+  different version, or the same line further into the file is not a match.
+- **One or more recipient stanzas**, in the native header grammar: a line
+  beginning `-> ` followed by one or more non-empty, space-separated printable
+  arguments, then the stanza body — zero or more lines of exactly 64
+  unpadded-base64 characters (`A-Z`, `a-z`, `0-9`, `+`, `/`) followed by one
+  final line shorter than 64 characters. At least one body character is
+  required, so a stanza with an empty body is not a match. Stanza arguments are
+  parsed only far enough to confirm the line is structurally a stanza.
+- A **header MAC line** of exactly `--- ` plus 43 unpadded-base64 characters,
+  followed by LF. Only the *shape* is validated — verifying the HMAC itself
+  would require the file key, which would mean decryption.
+- An **encrypted payload present immediately after the header**, at least 32
+  bytes long (a 16-byte nonce plus at least one chunk authentication tag). The
+  payload's length is the only thing read from it.
+- **LF line endings.** Every parsed header line must be LF-terminated; a CRLF
+  native header is out of scope for HG-035 and produces no finding rather than
+  being accepted on a relaxed reading of the grammar.
+
+**What is not supported** — each of these produces no finding at all, and never
+a lower-confidence partial finding or a "malformed age" asset type:
+
+- **ASCII-armored age files** (`-----BEGIN AGE ENCRYPTED FILE-----`). Deferred:
+  HG-035 covers the native format only.
+- Non-v1 (older or future) native age versions.
+- A file with only the version line, only a stanza prefix, a header with no MAC
+  line, a header with no payload, or a payload shorter than 32 bytes — a
+  genuine age file truncated on disk therefore produces no finding.
+- Malformed stanzas: a bad argument line, an empty stanza body, body characters
+  outside the unpadded-base64 alphabet, or body line lengths that do not follow
+  the wrapping rule.
+- A malformed MAC line: wrong prefix, wrong length, or characters outside the
+  unpadded-base64 alphabet.
+- Copied documentation or example text, arbitrary text containing the word
+  `age`, plaintext carrying a `.age` extension, and random bytes. **No detection
+  is based on filename, extension, entropy, or random-looking content**, so an
+  encrypted file this rule does not recognize is not caught by a fallback
+  heuristic either.
+
+**No decryption, no recipients, no key material.** The scanner never decrypts,
+never prompts for or accepts a passphrase or identity file, never reads a local
+keyring or SSH agent, never resolves or reports recipients, and never invokes
+`age` or any other external tool. Recipient types and arguments, stanza bodies,
+the header MAC, the payload, and its length are all absent from output: an age
+finding carries no technical metadata at all. It also makes no claim about
+encryption strength, decryptability, confidentiality, or who holds a key.
+Absence of an `encrypted_file:age` finding is not proof that no age-encrypted
+content exists in the target — this is one narrow rule for one explicitly
+enumerated on-disk shape, not general encrypted-file detection.
+
+**Scanner ownership.** Crypto inventory owns `encrypted_file:age`; the
+filesystem scanner never emits it, and `--type filesystem` produces no
+`Encrypted File` finding. The filesystem scanner does independently recognize
+the *leading bytes* `age-encryption.org/v1` as `File-level (age)` (see [local
+filesystem encryption evidence](#local-filesystem-encryption-evidence)) — a
+broader, prefix-only signature that also matches age-like content this rule
+rejects. HG-035 adds no cross-scanner deduplication pairing for age, so under
+`--type all` that separate `local_filesystem` `file` record still appears
+alongside the one crypto-inventory `Encrypted File` finding, exactly as it did
+before HG-035. Accounting is unchanged and stays separate: an age file counts
+once in `Crypto files inspected`, there is no age-specific count, and no
+summary bucket was added.
+
+**No relationship output.** HG-035 adds age detection only; it creates no
+[internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+and emits nothing beyond the single finding described above.
+
 #### gocryptfs encrypted filesystem (HG-032)
 
 A directory containing both a supported `gocryptfs.conf` and a root-level
@@ -430,9 +514,10 @@ encrypted-filesystem or FUSE coverage.
 - `High` — a certificate or key was fully parsed and its cryptographic
   properties extracted, or an encrypted PEM/OpenSSH private key block was
   positively identified by its header (algorithm/key-size may still be
-  unavailable without a passphrase), or an OpenSSL `Salted__` header or a
-  supported OpenPGP encrypted-session-key packet structure was directly
-  observed in the file's content (a signature or packet-structure match, not a
+  unavailable without a passphrase), or an OpenSSL `Salted__` header, a
+  supported OpenPGP encrypted-session-key packet structure, or a supported
+  native age v1 header structure was directly
+  observed in the file's content (a signature or structure match, not a
   parse of the protected content — `High` here describes the certainty of the
   byte-level observation, not anything about the encryption's strength or
   recoverability). An `Encrypted File` finding is never emitted at any other
@@ -449,8 +534,9 @@ encrypted-filesystem or FUSE coverage.
 ### What this scanner can miss
 
 - **The candidate-file gate is a silent pre-filter.** A file is inspected if
-  it begins with the OpenSSL `Salted__` signature (HG-030) or a supported
-  OpenPGP encrypted-file structure (HG-031), both checked ahead of the gate;
+  it begins with the OpenSSL `Salted__` signature (HG-030), a supported OpenPGP
+  encrypted-file structure (HG-031), or the native age v1 version line
+  (HG-035), all checked ahead of the gate;
   otherwise `_could_contain_crypto_asset` requires it to have a recognized
   extension (`.cer`, `.crt`, `.der`, `.jks`, `.p12`, `.pfx`), start with an SSH
   public-key prefix, match the JKS magic header, or contain the literal bytes
@@ -459,13 +545,14 @@ encrypted-filesystem or FUSE coverage.
   filesystem scanner, there is no explicit "not inspected" marker for
   gate-excluded files. An empty crypto-inventory result does not distinguish
   "no crypto assets present" from "assets present in a format or extension
-  this gate does not recognize." `Salted__` and the supported OpenPGP shapes
-  are now recognized and no longer examples of this gap, but every other
-  encrypted-container format (age, LUKS, encrypted ZIP/PDF/Office, the OpenPGP
-  structures listed as unsupported above, and any signature not listed above)
+  this gate does not recognize." `Salted__`, the supported OpenPGP shapes, and
+  native age v1 files are now recognized and no longer examples of this gap,
+  but every other encrypted-container format (LUKS, encrypted
+  ZIP/PDF/Office, armored age files, the OpenPGP and age structures listed as
+  unsupported above, and any signature not listed above)
   remains outside this gate for the crypto-inventory scanner specifically —
-  HG-030 and HG-031 added exactly two named detection rules, not general
-  encrypted-file detection.
+  HG-030, HG-031, and HG-035 added exactly three named detection rules, not
+  general encrypted-file detection.
 - **Password-protected PKCS#12 containers** are reported as
   `Malformed PKCS#12` (confidence `Low`) because the scanner does not attempt
   passphrases. This is a known, already-documented limitation (see
