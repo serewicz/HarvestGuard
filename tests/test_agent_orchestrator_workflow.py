@@ -1111,8 +1111,16 @@ def test_build_runs_two_forty_turn_claude_segments_and_uploads_complete_checkpoi
         if turn == 40:
             assert "steps.claude_1.outcome" in preserve["run"]
             assert preserve["if"] == "always() && steps.claude_1.outcome != 'skipped'"
+            assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
+                "${{ steps.claude_1.outputs.execution_file }}"
+            )
         else:
             assert preserve["if"] == "always() && steps.segment_1.outputs.run_segment_2 == 'true'"
+            assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
+                "${{ steps.claude.outputs.execution_file }}"
+            )
+        assert preserve["env"]["CHECKPOINT_BASE_SHA"] == "${{ github.sha }}"
+        assert preserve["env"]["CHECKPOINT_BRANCH"] == "${{ steps.branch.outputs.branch }}"
         assert upload["with"]["name"] == f"claude-build-turn-{turn}-checkpoint"
         assert upload["with"]["if-no-files-found"] == "error"
 
@@ -1133,9 +1141,38 @@ def test_correction_failures_upload_complete_recovery_checkpoints(workflow, n):
     assert preserve["if"] == "always() && steps.claude.conclusion == 'failure'"
     assert "collect_worktree_checkpoint.py" in preserve["run"]
     assert f'"correct_{n}"' in preserve["run"]
+    expected_base = {
+        1: "${{ needs.publish.outputs.pr_head_sha }}",
+        2: "${{ needs.publish_correction_1.outputs.correction_sha }}",
+        3: "${{ needs.publish_correction_2.outputs.correction_sha }}",
+    }[n]
+    assert preserve["env"]["CHECKPOINT_BASE_SHA"] == expected_base
+    assert preserve["env"]["CHECKPOINT_CORRECTION_PROMPT"] == (
+        "${{ runner.temp }}/correction_prompt.txt"
+    )
+    assert preserve["env"]["CHECKPOINT_CODEX_BLOCKERS"] == (
+        "${{ runner.temp }}/correction_context.json"
+    )
+    assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
+        "${{ steps.claude.outputs.execution_file }}"
+    )
     assert upload["if"] == "always() && steps.claude.conclusion == 'failure'"
     assert upload["with"]["name"] == CHECKPOINT_ARTIFACT_NAMES[f"correct_{n}"]
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_rendered_correction_prompt_is_exact_action_prompt(workflow, n):
+    from scripts.render_correction_prompt import render
+
+    job = workflow["jobs"][f"correct_{n}"]
+    names = [step.get("name") for step in job["steps"]]
+    render_step = job["steps"][names.index("Render exact correction prompt")]
+    assert f"render_correction_prompt.py {n}" in render_step["run"]
+    assert names.index("Render exact correction prompt") < names.index("Run Claude Code correction")
+    action = job["steps"][names.index("Run Claude Code correction")]
+    context_path = "${{ runner.temp }}/correction_context.json"
+    assert render(n, context_path) == action["with"]["prompt"]
 
 
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)

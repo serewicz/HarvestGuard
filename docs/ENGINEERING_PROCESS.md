@@ -373,16 +373,19 @@ To recover, fetch the repository, create a branch at the checkpoint's recorded
 base SHA, apply `staged.patch` with `git apply --index --binary`, apply
 `unstaged.patch` with `git apply --binary`, extract `untracked-files.tar.gz`,
 verify sizes and SHA-256 values from `untracked-manifest.json`, and inspect
-`git status --short`. Read the builder result and diagnostics, then continue
+`git status --short`. The checkpoint's `verify-untracked.py` performs the hash
+verification. Read the builder result and sanitized diagnostics, then continue
 without rerunning completed work. The same complete package is produced when a
-correction cycle fails, together with its correction/Codex context when
-available.
+correction cycle fails, based explicitly on the reviewed PR implementation HEAD
+and including its exact rendered correction prompt and correction/Codex context.
 
 Eligible untracked source, test, documentation, script, and binary fixture
 files are preserved. `.git`, ignored files, virtual environments,
 `node_modules`, caches, environment files, authentication stores, and paths
 outside the repository are excluded. Checkpoint text is secret-scanned and
-binary contents are not logged.
+binary contents are not logged. Credential-like paths and credential-shaped
+contents are reported without their contents and omitted from the archive. A
+narrow exception preserves disposable files under `tests/**/fixtures/`.
 
 For issues that mandate real or official detector fixtures, the builder must
 obtain and document approved fixtures and add minimal loading tests before

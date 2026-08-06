@@ -146,20 +146,25 @@ third segment and the cumulative build budget remains 80 turns.
 Each checkpoint artifact records workflow/run identity, issue, base SHA,
 current HEAD and branch, NUL-safe status, separate staged and unstaged binary
 patches, a hash-and-size manifest, an archive of eligible untracked files,
-builder result/diagnostics and test output when available, and standalone
-recovery instructions. Empty untracked sets are valid. Recovery must work on a
-fresh checkout after the runner is gone.
+builder result, sanitized structured execution diagnostics and test output when
+available, an executable hash verifier, and standalone recovery instructions.
+Empty untracked sets are valid. Recovery must work on a fresh checkout after
+the runner is gone.
 
 Correction cycles follow the same recovery principle: if a correction Claude
 run fails before publishing, the orchestrator preserves a complete worktree
 checkpoint so human recovery does not depend on text-only diffs or logs.
 Correction recovery also carries the correction context, including Codex
-blocker input, when available.
+blocker input, the exact rendered correction prompt, and an explicit recovery
+base equal to the reviewed PR implementation HEAD before correction.
 
 Checkpoints exclude ignored files, virtual environments, dependencies, caches,
 environment files, authentication stores, `.git`, and paths outside the
 repository. Generated checkpoint text is secret-scanned before upload; binary
-fixture contents are never printed to logs.
+fixture contents are never printed to logs. Credential-like paths and
+credential-shaped file contents are excluded with path-and-reason-only reports;
+only files under repository `tests/**/fixtures/` receive the narrow disposable
+fixture exception.
 
 ## Detector fixture discipline
 

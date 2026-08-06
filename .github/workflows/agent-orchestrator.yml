@@ -561,7 +561,10 @@ jobs:
         if: always() && steps.claude_1.outcome != 'skipped'
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CHECKPOINT_BASE_SHA: ${{ github.sha }}
+          CHECKPOINT_BRANCH: ${{ steps.branch.outputs.branch }}
           CHECKPOINT_BUILDER_RESULT: ${{ runner.temp }}/agent_result.json
+          CHECKPOINT_EXECUTION_FILE: ${{ steps.claude_1.outputs.execution_file }}
         run: |
           python3 scripts/collect_worktree_checkpoint.py \
             "build" 40 "${{ runner.temp }}/checkpoint_turn40" \
@@ -727,7 +730,10 @@ jobs:
         if: always() && steps.segment_1.outputs.run_segment_2 == 'true'
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CHECKPOINT_BASE_SHA: ${{ github.sha }}
+          CHECKPOINT_BRANCH: ${{ steps.branch.outputs.branch }}
           CHECKPOINT_BUILDER_RESULT: ${{ runner.temp }}/agent_result.json
+          CHECKPOINT_EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
         run: |
           python3 scripts/collect_worktree_checkpoint.py \
             "build" 80 "${{ runner.temp }}/checkpoint_turn80" \
@@ -1518,6 +1524,12 @@ jobs:
 
           rm -f issue.json issue.err
 
+      - name: Render exact correction prompt
+        run: |
+          python3 scripts/render_correction_prompt.py 1 \
+            "${{ runner.temp }}/correction_context.json" \
+            "${{ runner.temp }}/correction_prompt.txt"
+
       # Same technical controls as the build job's Claude step: the prompt
       # is entirely static, issue/review text reaches Claude only via the
       # context file, `settings` denies protected-path writes and every
@@ -1726,8 +1738,11 @@ jobs:
         if: always() && steps.claude.conclusion == 'failure'
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CHECKPOINT_BASE_SHA: ${{ needs.publish.outputs.pr_head_sha }}
+          CHECKPOINT_BRANCH: agent/claude/issue-${{ inputs.issue_number }}
           CHECKPOINT_BUILDER_RESULT: ${{ runner.temp }}/agent_result.json
-          CHECKPOINT_CORRECTION_PROMPT: ${{ runner.temp }}/correction_context.json
+          CHECKPOINT_EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          CHECKPOINT_CORRECTION_PROMPT: ${{ runner.temp }}/correction_prompt.txt
           CHECKPOINT_CODEX_BLOCKERS: ${{ runner.temp }}/correction_context.json
         run: |
           python3 scripts/collect_worktree_checkpoint.py \
@@ -2387,6 +2402,12 @@ jobs:
 
           rm -f issue.json issue.err
 
+      - name: Render exact correction prompt
+        run: |
+          python3 scripts/render_correction_prompt.py 2 \
+            "${{ runner.temp }}/correction_context.json" \
+            "${{ runner.temp }}/correction_prompt.txt"
+
       # Same technical controls as the build job's Claude step: the prompt
       # is entirely static, issue/review text reaches Claude only via the
       # context file, `settings` denies protected-path writes and every
@@ -2595,8 +2616,11 @@ jobs:
         if: always() && steps.claude.conclusion == 'failure'
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CHECKPOINT_BASE_SHA: ${{ needs.publish_correction_1.outputs.correction_sha }}
+          CHECKPOINT_BRANCH: agent/claude/issue-${{ inputs.issue_number }}
           CHECKPOINT_BUILDER_RESULT: ${{ runner.temp }}/agent_result.json
-          CHECKPOINT_CORRECTION_PROMPT: ${{ runner.temp }}/correction_context.json
+          CHECKPOINT_EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          CHECKPOINT_CORRECTION_PROMPT: ${{ runner.temp }}/correction_prompt.txt
           CHECKPOINT_CODEX_BLOCKERS: ${{ runner.temp }}/correction_context.json
         run: |
           python3 scripts/collect_worktree_checkpoint.py \
@@ -3256,6 +3280,12 @@ jobs:
 
           rm -f issue.json issue.err
 
+      - name: Render exact correction prompt
+        run: |
+          python3 scripts/render_correction_prompt.py 3 \
+            "${{ runner.temp }}/correction_context.json" \
+            "${{ runner.temp }}/correction_prompt.txt"
+
       # Same technical controls as the build job's Claude step: the prompt
       # is entirely static, issue/review text reaches Claude only via the
       # context file, `settings` denies protected-path writes and every
@@ -3464,8 +3494,11 @@ jobs:
         if: always() && steps.claude.conclusion == 'failure'
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CHECKPOINT_BASE_SHA: ${{ needs.publish_correction_2.outputs.correction_sha }}
+          CHECKPOINT_BRANCH: agent/claude/issue-${{ inputs.issue_number }}
           CHECKPOINT_BUILDER_RESULT: ${{ runner.temp }}/agent_result.json
-          CHECKPOINT_CORRECTION_PROMPT: ${{ runner.temp }}/correction_context.json
+          CHECKPOINT_EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
+          CHECKPOINT_CORRECTION_PROMPT: ${{ runner.temp }}/correction_prompt.txt
           CHECKPOINT_CODEX_BLOCKERS: ${{ runner.temp }}/correction_context.json
         run: |
           python3 scripts/collect_worktree_checkpoint.py \
