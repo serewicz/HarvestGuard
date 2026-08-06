@@ -133,6 +133,49 @@ Requires:
 - no unexplained scope expansion;
 - draft PR created.
 
+## Recovery checkpoints
+
+Claude builder execution is split into two 40-turn segments. The
+orchestrator must preserve complete worktree checkpoints after turn 40 and
+turn 80, including tracked, staged, and untracked files and binary fixtures.
+Segment 2 runs only when segment 1 exhausted its turn budget; it resumes the
+same Claude session in the same workspace and branch. COMPLETE, NEEDS_HUMAN,
+and non-budget failures never trigger an automatic continuation. There is no
+third segment and the cumulative build budget remains 80 turns.
+
+Each checkpoint artifact records workflow/run identity, issue, base SHA,
+current HEAD and branch, NUL-safe status, separate staged and unstaged binary
+patches, a hash-and-size manifest, an archive of eligible untracked files,
+builder result/diagnostics and test output when available, and standalone
+recovery instructions. Empty untracked sets are valid. Recovery must work on a
+fresh checkout after the runner is gone.
+
+Correction cycles follow the same recovery principle: if a correction Claude
+run fails before publishing, the orchestrator preserves a complete worktree
+checkpoint so human recovery does not depend on text-only diffs or logs.
+Correction recovery also carries the correction context, including Codex
+blocker input, when available.
+
+Checkpoints exclude ignored files, virtual environments, dependencies, caches,
+environment files, authentication stores, `.git`, and paths outside the
+repository. Generated checkpoint text is secret-scanned before upload; binary
+fixture contents are never printed to logs.
+
+## Detector fixture discipline
+
+When an issue requires real or official format fixtures, detector work is
+fixture-first. The builder obtains them only from issue-approved official
+tooling, official upstream test data, or existing provenance-documented
+repository fixtures. It records source/tool, version, safe generation command
+or upstream path, size, SHA-256, and artifact category, adds minimal fixture
+loading tests, and confirms availability before substantive detector code.
+
+If mandatory fixtures require unapproved installation, prohibited network
+access, production credentials, or fabricated bytes where real fixtures are
+required, the builder returns `NEEDS_HUMAN` before most product implementation.
+The result lists exactly the missing fixtures, required provenance, and
+acceptable human-supply options. Unrelated work is not forced to add fixtures.
+
 ## Review vocabulary
 
 Use exactly:

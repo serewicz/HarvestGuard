@@ -137,6 +137,16 @@ change.
 - no unrelated scope is added;
 - PR remains draft until review is complete.
 
+For complex detector work, implementation is fixture-first: representative
+real fixtures and characterization tests come before product behavior. If the
+required real fixtures are unavailable, the builder returns `NEEDS_HUMAN`
+before implementation.
+
+The orchestrator runs the initial builder as two 40-turn segments and preserves
+complete worktree checkpoints after turn 40 and turn 80. Checkpoints include
+tracked, staged, and untracked files, binary fixtures, a recovery manifest, and
+restore instructions.
+
 ## Codex Principal Review
 
 ### Purpose
@@ -191,6 +201,11 @@ Resolve bounded review findings without broadening the issue.
   automation;
 - stale-SHA and protected-path checks pass;
 - correction-cycle limit is respected.
+
+If a correction cycle fails before publishing, the orchestrator preserves the
+same complete worktree checkpoint class used for builder recovery so partial
+tracked changes, staged state, untracked tests, and binary fixtures remain
+recoverable.
 
 ## Codex Approval
 
@@ -345,6 +360,35 @@ Mark the work as fully complete in both implementation and planning records.
 - no known closure blocker remains.
 
 ## Operating Rules
+
+### Agent checkpoint recovery
+
+The Claude build has at most two 40-turn segments. Checkpoint 40 is always
+uploaded after segment 1. Segment 2 resumes the same session and workspace only
+after verified turn exhaustion; it is skipped for COMPLETE, NEEDS_HUMAN, and
+other failures. Checkpoint 80 is always uploaded after segment 2. No third
+segment exists.
+
+To recover, fetch the repository, create a branch at the checkpoint's recorded
+base SHA, apply `staged.patch` with `git apply --index --binary`, apply
+`unstaged.patch` with `git apply --binary`, extract `untracked-files.tar.gz`,
+verify sizes and SHA-256 values from `untracked-manifest.json`, and inspect
+`git status --short`. Read the builder result and diagnostics, then continue
+without rerunning completed work. The same complete package is produced when a
+correction cycle fails, together with its correction/Codex context when
+available.
+
+Eligible untracked source, test, documentation, script, and binary fixture
+files are preserved. `.git`, ignored files, virtual environments,
+`node_modules`, caches, environment files, authentication stores, and paths
+outside the repository are excluded. Checkpoint text is secret-scanned and
+binary contents are not logged.
+
+For issues that mandate real or official detector fixtures, the builder must
+obtain and document approved fixtures and add minimal loading tests before
+substantive product code. If this cannot be done within approved tools, access,
+and credential boundaries, it returns NEEDS_HUMAN early with the missing
+fixtures, provenance requirements, and acceptable human supply methods.
 
 - The GitHub Issue is the implementation contract after it passes spec gate.
 - `origin/main` is the source of truth for current repository behavior.
