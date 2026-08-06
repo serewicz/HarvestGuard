@@ -1735,7 +1735,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Preserve failure checkpoint
-        if: always() && steps.claude.conclusion == 'failure'
+        if: always()
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           CHECKPOINT_BASE_SHA: ${{ needs.publish.outputs.pr_head_sha }}
@@ -1748,15 +1748,6 @@ jobs:
           python3 scripts/collect_worktree_checkpoint.py \
             "correct_1" 80 "${{ runner.temp }}/failure_checkpoint" \
             "${{ steps.claude.outputs.session_id }}" "${{ steps.claude.conclusion }}"
-
-      - name: Upload failure checkpoint
-        if: always() && steps.claude.conclusion == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: claude-correction-cycle-1-failure-checkpoint
-          path: ${{ runner.temp }}/failure_checkpoint
-          retention-days: 30
-          if-no-files-found: error
 
       - name: Stage and check correction result
         run: |
@@ -1834,6 +1825,19 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"status={status}\n")
           PYEOF
+
+      - name: Mark correction successful
+        id: correction_success
+        run: echo "complete=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload failure checkpoint
+        if: always() && steps.correction_success.outputs.complete != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-correction-cycle-1-failure-checkpoint
+          path: ${{ runner.temp }}/failure_checkpoint
+          retention-days: 30
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------
   # PUBLISH CORRECTION (cycle 1): Claude and Codex never run here. Only reached if
@@ -2613,7 +2617,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Preserve failure checkpoint
-        if: always() && steps.claude.conclusion == 'failure'
+        if: always()
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           CHECKPOINT_BASE_SHA: ${{ needs.publish_correction_1.outputs.correction_sha }}
@@ -2626,15 +2630,6 @@ jobs:
           python3 scripts/collect_worktree_checkpoint.py \
             "correct_2" 80 "${{ runner.temp }}/failure_checkpoint" \
             "${{ steps.claude.outputs.session_id }}" "${{ steps.claude.conclusion }}"
-
-      - name: Upload failure checkpoint
-        if: always() && steps.claude.conclusion == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: claude-correction-cycle-2-failure-checkpoint
-          path: ${{ runner.temp }}/failure_checkpoint
-          retention-days: 30
-          if-no-files-found: error
 
       - name: Stage and check correction result
         run: |
@@ -2712,6 +2707,19 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"status={status}\n")
           PYEOF
+
+      - name: Mark correction successful
+        id: correction_success
+        run: echo "complete=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload failure checkpoint
+        if: always() && steps.correction_success.outputs.complete != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-correction-cycle-2-failure-checkpoint
+          path: ${{ runner.temp }}/failure_checkpoint
+          retention-days: 30
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------
   # PUBLISH CORRECTION (cycle 2): Claude and Codex never run here. Only reached if
@@ -3491,7 +3499,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Preserve failure checkpoint
-        if: always() && steps.claude.conclusion == 'failure'
+        if: always()
         env:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           CHECKPOINT_BASE_SHA: ${{ needs.publish_correction_2.outputs.correction_sha }}
@@ -3504,15 +3512,6 @@ jobs:
           python3 scripts/collect_worktree_checkpoint.py \
             "correct_3" 80 "${{ runner.temp }}/failure_checkpoint" \
             "${{ steps.claude.outputs.session_id }}" "${{ steps.claude.conclusion }}"
-
-      - name: Upload failure checkpoint
-        if: always() && steps.claude.conclusion == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: claude-correction-cycle-3-failure-checkpoint
-          path: ${{ runner.temp }}/failure_checkpoint
-          retention-days: 30
-          if-no-files-found: error
 
       - name: Stage and check correction result
         run: |
@@ -3590,6 +3589,19 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"status={status}\n")
           PYEOF
+
+      - name: Mark correction successful
+        id: correction_success
+        run: echo "complete=true" >> "$GITHUB_OUTPUT"
+
+      - name: Upload failure checkpoint
+        if: always() && steps.correction_success.outputs.complete != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-correction-cycle-3-failure-checkpoint
+          path: ${{ runner.temp }}/failure_checkpoint
+          retention-days: 30
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------
   # PUBLISH CORRECTION (cycle 3): Claude and Codex never run here. Only reached if

@@ -1138,7 +1138,7 @@ def test_correction_failures_upload_complete_recovery_checkpoints(workflow, n):
     names = [s.get("name") for s in job["steps"]]
     preserve = job["steps"][names.index("Preserve failure checkpoint")]
     upload = job["steps"][names.index("Upload failure checkpoint")]
-    assert preserve["if"] == "always() && steps.claude.conclusion == 'failure'"
+    assert preserve["if"] == "always()"
     assert "collect_worktree_checkpoint.py" in preserve["run"]
     assert f'"correct_{n}"' in preserve["run"]
     expected_base = {
@@ -1156,9 +1156,55 @@ def test_correction_failures_upload_complete_recovery_checkpoints(workflow, n):
     assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
         "${{ steps.claude.outputs.execution_file }}"
     )
-    assert upload["if"] == "always() && steps.claude.conclusion == 'failure'"
+    assert upload["if"] == "always() && steps.correction_success.outputs.complete != 'true'"
     assert upload["with"]["name"] == CHECKPOINT_ARTIFACT_NAMES[f"correct_{n}"]
     assert upload["with"]["if-no-files-found"] == "error"
+    marker = job["steps"][names.index("Mark correction successful")]
+    assert marker["id"] == "correction_success"
+    assert 'complete=true' in marker["run"]
+    assert names.index("Preserve failure checkpoint") < names.index(
+        "Stage and check correction result"
+    )
+    assert names.index("Set correction outputs") < names.index("Mark correction successful")
+    assert names.index("Mark correction successful") < names.index("Upload failure checkpoint")
+
+
+CORRECTION_FAILURE_POINTS = (
+    ("action failure", "Run Claude Code correction"),
+    ("FAILED result", "Stage and check correction result"),
+    ("NEEDS_HUMAN result", "Stage and check correction result"),
+    ("missing result", "Stage and check correction result"),
+    ("malformed result", "Stage and check correction result"),
+    ("result-gate failure", "Stage and check correction result"),
+    ("Ruff failure", "Lint with ruff"),
+    ("pytest failure", "Run tests"),
+    ("artifact validation failure", "Create correction artifact"),
+    ("artifact upload failure", "Upload correction artifact"),
+    ("output validation failure", "Set correction outputs"),
+)
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+@pytest.mark.parametrize(("failure_mode", "failing_step"), CORRECTION_FAILURE_POINTS)
+def test_every_correction_failure_point_precedes_success_marker_and_upload(
+    workflow, n, failure_mode, failing_step
+):
+    names = [step.get("name") for step in workflow["jobs"][f"correct_{n}"]["steps"]]
+    assert names.index(failing_step) < names.index("Mark correction successful")
+    if failure_mode == "action failure":
+        assert names.index(failing_step) < names.index("Preserve failure checkpoint")
+    else:
+        assert names.index("Preserve failure checkpoint") < names.index(failing_step)
+    assert names.index("Mark correction successful") < names.index("Upload failure checkpoint")
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_full_correction_success_suppresses_failure_checkpoint_upload(workflow, n):
+    steps = workflow["jobs"][f"correct_{n}"]["steps"]
+    marker = next(step for step in steps if step.get("name") == "Mark correction successful")
+    upload = next(step for step in steps if step.get("name") == "Upload failure checkpoint")
+    assert marker["run"] == 'echo "complete=true" >> "$GITHUB_OUTPUT"'
+    assert upload["if"] == "always() && steps.correction_success.outputs.complete != 'true'"
 
 
 @pytest.mark.parametrize("n", CORRECTION_CYCLES)
@@ -1229,13 +1275,11 @@ def test_failure_diagnostics_steps_precede_the_stage_and_check_step(workflow, jo
         collect_idx = names.index("Preserve failure diagnostics")
         upload_idx = names.index("Upload failure diagnostics")
         checkpoint_idx = names.index("Preserve failure checkpoint")
-        upload_checkpoint_idx = names.index("Upload failure checkpoint")
         assert (
             claude_idx
             < collect_idx
             < upload_idx
             < checkpoint_idx
-            < upload_checkpoint_idx
             < stage_idx
         )
 
