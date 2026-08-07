@@ -109,6 +109,15 @@ def _tlv(tag: int, content: bytes) -> bytes:
     return bytes([tag, 0x80 | octets]) + len(content).to_bytes(octets, "big") + content
 
 
+# PBES2 (1.2.840.113549.1.5.13), used only to give the near-matches below a
+# well-formed OBJECT IDENTIFIER so the malformed part is the nested parameters
+# encoding and nothing else.
+_OID = _tlv(0x06, b"\x2a\x86\x48\x86\xf7\x0d\x01\x05\x0d")
+# An OCTET STRING declaring 0x7f content octets with four present: a child whose
+# declared length runs past the constructed element holding it.
+_TRUNCATED_CHILD = b"\x04\x7f" + b"\x00" * 4
+
+
 def _store_parts(name: str = "trusted_certificate_store.bcfks") -> tuple[bytes, ...]:
     """``(algorithm identifier, encrypted content, MAC algorithm, KDF, MAC)``
     -- the five DER elements a real store is built from, reused below to build
@@ -395,6 +404,61 @@ def _negative_cases() -> list[tuple[str, bytes]]:
             _object_store(
                 _encrypted_store_data(),
                 _integrity_check(kdf=_tlv(0x30, _tlv(0x06, b"\x80\x2a"))),
+            ),
+        ),
+        # Constructed AlgorithmIdentifier parameters holding malformed nested
+        # DER. The parameters element's own header and length are consistent
+        # with the AlgorithmIdentifier around it, so every outer check passes
+        # and only walking inside the parameters rejects the store: a child
+        # declaring more content than the parameters element holds, and one
+        # leaving content unconsumed after the last child. Both are corrupted
+        # encodings, and neither may earn a High-confidence finding.
+        (
+            "encryption-parameters-truncated-nested-der.bcfks",
+            _object_store(
+                _encrypted_store_data(
+                    algorithm=_tlv(0x30, _OID + _tlv(0x30, _TRUNCATED_CHILD))
+                ),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "encryption-parameters-unconsumed-nested-der.bcfks",
+            _object_store(
+                _encrypted_store_data(
+                    algorithm=_tlv(0x30, _OID + _tlv(0x30, _tlv(0x02, b"\x01") + b"\xff"))
+                ),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "mac-algorithm-parameters-truncated-nested-der.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(
+                    mac_algorithm=_tlv(0x30, _OID + _tlv(0x30, _TRUNCATED_CHILD))
+                ),
+            ),
+        ),
+        (
+            "kdf-parameters-truncated-nested-der.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(kdf=_tlv(0x30, _OID + _tlv(0x30, _TRUNCATED_CHILD))),
+            ),
+        ),
+        # The malformed child is one level deeper still, inside a nested
+        # AlgorithmIdentifier of the kind real PBES2 parameters carry.
+        (
+            "kdf-parameters-deeply-nested-truncated-der.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(
+                    kdf=_tlv(
+                        0x30,
+                        _OID + _tlv(0x30, _tlv(0x30, _OID + _tlv(0x30, _TRUNCATED_CHILD))),
+                    )
+                ),
             ),
         ),
         # Other DER and near-match structures.

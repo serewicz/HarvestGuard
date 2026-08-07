@@ -533,6 +533,11 @@ protected), and only when every one of these holds:
   sequence of exactly an `AlgorithmIdentifier` (a sequence whose first element
   is a well-formed, non-empty OBJECT IDENTIFIER, with at most one parameters
   element) and a **non-empty OCTET STRING** of encrypted content.
+- A constructed **parameters element is walked to confirm its nested DER is
+  well formed** — truncated or unconsumed content anywhere inside the
+  encryption, MAC, or key-derivation parameters is a corrupted encoding and
+  produces no finding. The parameter *values* are still never interpreted or
+  reported.
 - The **second element structurally matches `PbkdMacIntegrityCheck`**: a
   sequence of exactly a MAC `AlgorithmIdentifier`, a key-derivation-function
   identifier of the same `AlgorithmIdentifier` shape, and a **non-empty MAC

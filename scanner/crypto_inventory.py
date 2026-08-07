@@ -1149,6 +1149,11 @@ _DER_MAX_LENGTH_OCTETS = 4
 _DER_MAX_HEADER_BYTES = 2 + _DER_MAX_LENGTH_OCTETS
 # An AlgorithmIdentifier is an OID plus at most one parameters field.
 _DER_ALGORITHM_IDENTIFIER_MAX_ELEMENTS = 2
+# How deep the reader walks a constructed parameters field before treating the
+# nesting itself as malformed. Real BCFKS parameters (PBES2/PBKDF2 and scrypt
+# shapes) nest four or five levels; the bound is what keeps a hostile file from
+# choosing this reader's recursion depth.
+_DER_MAX_NESTING_DEPTH = 12
 _BCFKS_ENCRYPTED_STORE_DATA_ELEMENTS = 2
 _BCFKS_INTEGRITY_CHECK_ELEMENTS = 3
 _BCFKS_OBJECT_STORE_ELEMENTS = 2
@@ -1288,14 +1293,43 @@ def _der_is_object_identifier(data: bytes, element: _DerElement) -> bool:
     return at_subidentifier_start
 
 
+def _der_is_well_formed(data: bytes, element: _DerElement, depth: int = 0) -> bool:
+    """Whether ``element`` and everything nested inside it is well-formed DER.
+
+    A primitive element is already proven by ``_der_read``: its header parsed
+    and its content fits inside its parent. A constructed one is not -- its
+    content is itself a sequence of DER elements that ``_der_read`` never
+    looked at, so a SEQUENCE whose own length is consistent while its children
+    are truncated passes the header check and must be rejected here. That gap
+    is what would otherwise let a store carrying malformed DER inside its
+    encryption, MAC, or KDF parameters earn a High-confidence finding.
+
+    Nesting deeper than ``_DER_MAX_NESTING_DEPTH`` is treated as not
+    well-formed rather than walked: nothing in the supported structure needs
+    that depth. Structure only -- no content octet is decoded or retained.
+    """
+    if not element.tag & 0x20:
+        return True
+    if depth >= _DER_MAX_NESTING_DEPTH:
+        return False
+    children = _der_children(data, element)
+    if children is None:
+        return False
+    return all(_der_is_well_formed(data, child, depth + 1) for child in children)
+
+
 def _der_is_algorithm_identifier(data: bytes, element: _DerElement) -> bool:
     """Whether ``element`` is structurally an X.509 ``AlgorithmIdentifier``: a
     SEQUENCE whose first child is a well-formed OBJECT IDENTIFIER, followed by
-    at most one parameters element.
+    at most one parameters element that is itself well-formed DER.
 
     Shape only. The OID's value is never decoded, compared against a table, or
-    reported -- HG-036 claims the container's structure, not which cipher, MAC,
-    or key-derivation function a particular store happened to use.
+    reported, and the parameters field is never interpreted -- HG-036 claims
+    the container's structure, not which cipher, MAC, or key-derivation
+    function a particular store happened to use, nor which salt, iteration
+    count, or IV it carries. But an uninterpreted field still has to be
+    *encoded* correctly: parameters holding truncated or inconsistent nested
+    DER make the file a near-match, not a supported store.
     """
     if element.tag != _DER_TAG_SEQUENCE:
         return False
@@ -1304,7 +1338,9 @@ def _der_is_algorithm_identifier(data: bytes, element: _DerElement) -> bool:
         return False
     if not 1 <= len(children) <= _DER_ALGORITHM_IDENTIFIER_MAX_ELEMENTS:
         return False
-    return _der_is_object_identifier(data, children[0])
+    if not _der_is_object_identifier(data, children[0]):
+        return False
+    return all(_der_is_well_formed(data, parameters) for parameters in children[1:])
 
 
 def _der_is_non_empty_octet_string(element: _DerElement) -> bool:
