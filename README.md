@@ -123,10 +123,16 @@ evidence and must remain traceable back to it.
   cipher roots (config format version 2 only) by their root-level
   `gocryptfs.conf`/`gocryptfs.diriv` pair — one finding per validated root
   directory, never per ciphertext file, and never mounted, unlocked, or
-  decrypted; reverse mode and `PlaintextNames` mode are unsupported. Only
+  decrypted; reverse mode and `PlaintextNames` mode are unsupported. Also
+  recognizes BCFKS keystore containers, **the supported encrypted-object-store
+  outer structure only**, from the file's own DER content rather than its
+  extension — evidence only, never decrypted, with no password prompted for or
+  validated, no entries enumerated, and no truststore-versus-keystore claim;
+  unencrypted `ObjectStoreData` stores, signature-integrity stores, and JCEKS
+  are unsupported. Only
   files matching a candidate gate (recognized extension, crypto header, or one
-  of those encrypted-file/filesystem signatures) are parsed, and broader
-  keystore/crypto-container coverage is not implemented. See
+  of those encrypted-file/filesystem/keystore signatures) are parsed, and
+  broader keystore/crypto-container coverage is not implemented. See
   [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
 - **Unified CLI** — runs local scanners through the normalized finding model
   with summary, JSON, and Markdown report output. `--json` emits an array of

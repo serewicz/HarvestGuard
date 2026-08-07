@@ -56,13 +56,15 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "crypto_inventory"
 
 # Every detector family the crypto-inventory scanner supports, exactly once
 # each. A new entry here means a new detection capability, which is what makes
-# one reviewable: HG-033 (the framework itself) added none, and HG-035 added
-# exactly one -- the native age v1 encrypted-file detector.
+# one reviewable: HG-033 (the framework itself) added none, HG-035 added exactly
+# one (the native age v1 encrypted-file detector), and HG-036 added exactly one
+# (the BCFKS keystore-container detector).
 EXPECTED_DETECTOR_IDS = [
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
     "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
+    "java_keystore:bcfks",
     "java_keystore:jks_magic",
     "pkcs12:container",
     "certificate:der",
@@ -73,12 +75,14 @@ EXPECTED_DETECTOR_IDS = [
 
 # The only rule IDs any crypto-inventory detector may carry. Every other asset
 # type leaves rule_id unset (parsed certificates and keys have no named
-# detection rule); HG-033 introduced none, and HG-035 introduced exactly one.
+# detection rule); HG-033 introduced none, HG-035 introduced exactly one, and
+# HG-036 introduced exactly one.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
     "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
+    "java_keystore:bcfks",
 }
 
 
