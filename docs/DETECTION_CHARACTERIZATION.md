@@ -531,8 +531,8 @@ protected), and only when every one of these holds:
 - The top-level sequence has **exactly two elements**.
 - The **first element structurally matches `EncryptedObjectStoreData`**: a
   sequence of exactly an `AlgorithmIdentifier` (a sequence whose first element
-  is a non-empty OBJECT IDENTIFIER, with at most one parameters element) and a
-  **non-empty OCTET STRING** of encrypted content.
+  is a well-formed, non-empty OBJECT IDENTIFIER, with at most one parameters
+  element) and a **non-empty OCTET STRING** of encrypted content.
 - The **second element structurally matches `PbkdMacIntegrityCheck`**: a
   sequence of exactly a MAC `AlgorithmIdentifier`, a key-derivation-function
   identifier of the same `AlgorithmIdentifier` shape, and a **non-empty MAC
@@ -540,9 +540,12 @@ protected), and only when every one of these holds:
 - Every length is a **well-formed, minimally encoded, definite DER length**, and
   every element's content is consumed exactly by its children.
 
-The algorithm, MAC, and key-derivation OIDs are checked for *shape* only. They
-are never decoded, compared against a table, or reported: HG-036 claims the
-container's structure, not which cipher, MAC, or KDF a particular store used.
+The algorithm, MAC, and key-derivation OIDs are checked for *encoding* only —
+non-empty, every base-128 subidentifier terminated, and none padded with a
+leading `0x80` group, so bytes that merely wear the OID tag are rejected. Their
+*values* are never decoded, compared against a table, or reported: HG-036 claims
+the container's structure, not which cipher, MAC, or KDF a particular store
+used.
 
 **What is not supported** — each of these produces no finding at all, and never
 a lower-confidence partial finding or a "malformed BCFKS" asset type:

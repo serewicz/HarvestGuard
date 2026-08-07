@@ -1262,10 +1262,36 @@ def _der_children(data: bytes, element: _DerElement) -> list[_DerElement] | None
     return children
 
 
+def _der_is_object_identifier(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` is a well-formed, non-empty OBJECT IDENTIFIER.
+
+    The encoding is checked, never the value: which OID a store used is not
+    decoded, compared against a table, or reported. Two encoding rules do the
+    work, and both are what separate a real algorithm identifier from arbitrary
+    bytes wearing the OID tag:
+
+    - every base-128 subidentifier must terminate, so the final content octet
+      must have its continuation bit clear -- a payload ending mid-subidentifier
+      (``0x80`` alone, say) is malformed rather than merely unfamiliar;
+    - no subidentifier may begin with ``0x80``, which is a leading zero group
+      and therefore a non-minimal encoding DER forbids.
+    """
+    if element.tag != _DER_TAG_OBJECT_IDENTIFIER or element.content_length == 0:
+        return False
+    at_subidentifier_start = True
+    for offset in range(element.content_start, element.content_end):
+        octet = data[offset]
+        if at_subidentifier_start and octet == 0x80:
+            return False
+        at_subidentifier_start = not octet & 0x80
+    # True only if the last octet ended its subidentifier.
+    return at_subidentifier_start
+
+
 def _der_is_algorithm_identifier(data: bytes, element: _DerElement) -> bool:
     """Whether ``element`` is structurally an X.509 ``AlgorithmIdentifier``: a
-    SEQUENCE whose first child is a non-empty OBJECT IDENTIFIER, followed by at
-    most one parameters element.
+    SEQUENCE whose first child is a well-formed OBJECT IDENTIFIER, followed by
+    at most one parameters element.
 
     Shape only. The OID's value is never decoded, compared against a table, or
     reported -- HG-036 claims the container's structure, not which cipher, MAC,
@@ -1278,8 +1304,7 @@ def _der_is_algorithm_identifier(data: bytes, element: _DerElement) -> bool:
         return False
     if not 1 <= len(children) <= _DER_ALGORITHM_IDENTIFIER_MAX_ELEMENTS:
         return False
-    oid = children[0]
-    return oid.tag == _DER_TAG_OBJECT_IDENTIFIER and oid.content_length > 0
+    return _der_is_object_identifier(data, children[0])
 
 
 def _der_is_non_empty_octet_string(element: _DerElement) -> bool:

@@ -347,6 +347,56 @@ def _negative_cases() -> list[tuple[str, bytes]]:
                 _tlv(0xA0, _tlv(0x30, mac_algorithm + _tlv(0x03, b"\x00\xab\xcd"))),
             ),
         ),
+        # Malformed OBJECT IDENTIFIER encodings inside an otherwise
+        # correctly-shaped AlgorithmIdentifier. Wearing the OID tag is not
+        # enough: a payload that ends mid-subidentifier (a trailing
+        # continuation bit), one whose subidentifier is padded with a leading
+        # 0x80 group, and an empty one are all malformed DER, so the structure
+        # they sit in is a near-match rather than a supported store.
+        (
+            "encryption-oid-unterminated.bcfks",
+            _object_store(
+                _encrypted_store_data(algorithm=_tlv(0x30, _tlv(0x06, b"\x2a\x86"))),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "encryption-oid-single-continuation-octet.bcfks",
+            _object_store(
+                _encrypted_store_data(algorithm=_tlv(0x30, _tlv(0x06, b"\x80"))),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "encryption-oid-non-minimal-subidentifier.bcfks",
+            _object_store(
+                _encrypted_store_data(
+                    algorithm=_tlv(0x30, _tlv(0x06, b"\x2a\x80\x86\x48"))
+                ),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "encryption-oid-empty.bcfks",
+            _object_store(
+                _encrypted_store_data(algorithm=_tlv(0x30, _tlv(0x06, b""))),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "mac-algorithm-oid-unterminated.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(mac_algorithm=_tlv(0x30, _tlv(0x06, b"\x2a\x86"))),
+            ),
+        ),
+        (
+            "kdf-oid-non-minimal-subidentifier.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(kdf=_tlv(0x30, _tlv(0x06, b"\x80\x2a"))),
+            ),
+        ),
         # Other DER and near-match structures.
         ("generic-der-sequence.bcfks", _tlv(0x30, _tlv(0x02, b"\x01") + _tlv(0x04, b"\x02"))),
         (
