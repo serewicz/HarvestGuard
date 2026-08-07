@@ -43,7 +43,19 @@ Example output shape:
 - OpenSSH private keys
 - OpenSSH public keys
 - PKCS#12 containers (`.p12`, `.pfx`) when no password is required
-- Java Keystore magic-header detection
+- Java Keystore magic-header detection (JKS)
+- BCFKS keystore containers, **the supported encrypted-object-store outer
+  structure only**, identified from the file's own DER content — a two-element
+  Bouncy Castle `ObjectStore` holding an `EncryptedObjectStoreData` and a
+  `PbkdMacIntegrityCheck`, consuming the whole file. Never decrypted, no
+  password is prompted for or validated, entries are not enumerated, and the
+  finding does not prove truststore versus keystore. The extension is not
+  evidence, and the check runs before the JKS, PKCS#12, and DER branches so a
+  store with a misleading extension is still classified from its content.
+  Unencrypted `ObjectStoreData` stores, signature-integrity (`[0]
+  SignatureCheck`) stores, and JCEKS are unsupported and produce no finding.
+  See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#bcfks-keystore-containers-hg-036)
 - OpenSSL `Salted__` encrypted files (leading-byte signature only, not
   decrypted; checked before any extension-based branch above)
 - OpenPGP/GPG encrypted files, binary or ASCII-armored, identified by the
@@ -272,6 +284,14 @@ Recursive scans do not follow symbolic links by default. Use
   unavailable without a passphrase.
 - JKS support is limited to magic-header detection; entry-level parsing is not
   implemented.
+- BCFKS support is limited to the supported encrypted-object-store outer
+  container: entries are not enumerated, the store is never decrypted, no
+  password is prompted for or validated, and no alias, certificate, key,
+  encrypted content, MAC, salt, IV, or KDF parameter is read into a finding —
+  the only metadata emitted is `Format: BCFKS`. Unsupported BCFKS forms
+  (unencrypted `ObjectStoreData`, `[0] SignatureCheck` integrity) and JCEKS
+  produce no finding. Absence of a `java_keystore:bcfks` finding is not proof
+  that no BCFKS store exists in the target.
 - Random binary files are skipped unless their extension or header indicates a
   supported crypto asset.
 - OpenPGP/GPG detection covers specific encrypted-file structures, not the

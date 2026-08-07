@@ -507,6 +507,114 @@ finding is not proof that no gocryptfs cipher root exists in the target — this
 is one narrow, explicitly enumerated detection rule, not general
 encrypted-filesystem or FUSE coverage.
 
+#### BCFKS keystore containers (HG-036)
+
+A file whose content is a **supported Bouncy Castle BCFKS `ObjectStore`** is
+reported as asset type `Java Keystore` (`rule_id: java_keystore:bcfks`,
+confidence `High`, evidence `Observed supported BCFKS keystore structure.`,
+technical metadata `Format: BCFKS` and nothing else), based solely on the outer
+DER container structure described below. Like the `Salted__`, OpenPGP, and age
+checks, it runs ahead of the extension-based branches — before JKS, PKCS#12, and
+DER certificate parsing — so a valid store saved as `truststore.p12`,
+`certs.der`, `keystore.jks`, or with no extension at all is classified from its
+content rather than as a malformed PKCS#12, DER certificate, or JKS keystore.
+One finding is emitted per supported file, and the match is terminal: no later
+detector also reads that file as PEM, DER, PKCS#12, JKS, or SSH content.
+
+**What is supported** — the default encrypted object store the Bouncy Castle
+provider's `engineStore(OutputStream, char[])` path writes (password/MAC
+protected), and only when every one of these holds:
+
+- The file is a **complete DER `SEQUENCE` beginning at byte offset 0** whose
+  declared length consumes the whole file with **no trailing bytes**. Supported
+  bytes embedded at a nonzero offset inside a larger file are not a match.
+- The top-level sequence has **exactly two elements**.
+- The **first element structurally matches `EncryptedObjectStoreData`**: a
+  sequence of exactly an `AlgorithmIdentifier` (a sequence whose first element
+  is a non-empty OBJECT IDENTIFIER, with at most one parameters element) and a
+  **non-empty OCTET STRING** of encrypted content.
+- The **second element structurally matches `PbkdMacIntegrityCheck`**: a
+  sequence of exactly a MAC `AlgorithmIdentifier`, a key-derivation-function
+  identifier of the same `AlgorithmIdentifier` shape, and a **non-empty MAC
+  OCTET STRING**.
+- Every length is a **well-formed, minimally encoded, definite DER length**, and
+  every element's content is consumed exactly by its children.
+
+The algorithm, MAC, and key-derivation OIDs are checked for *shape* only. They
+are never decoded, compared against a table, or reported: HG-036 claims the
+container's structure, not which cipher, MAC, or KDF a particular store used.
+
+**What is not supported** — each of these produces no finding at all, and never
+a lower-confidence partial finding or a "malformed BCFKS" asset type:
+
+- **Unencrypted `ObjectStoreData` stores** (the form written without store
+  encryption), whose first top-level element is a version INTEGER rather than an
+  encryption `AlgorithmIdentifier`.
+- **Signature-integrity stores** using the explicit `[0] SignatureCheck` arm of
+  `ObjectStoreIntegrityCheck` in place of the PBKD MAC.
+- Future or variant BCFKS top-level structures not matching the shape above.
+- A truncated store, a corrupted length octet, an indefinite or non-minimal
+  length encoding, trailing bytes after an otherwise complete store, an empty
+  encrypted-content or MAC octet string, or any near-match ASN.1 structure
+  (including an `EncryptedPrivateKeyInfo`, a CMS/PKCS#7 `ContentInfo`, a DER
+  certificate, a PKCS#12 container, and a JKS keystore) — a genuine BCFKS file
+  truncated on disk therefore produces no finding.
+- Copied ASN.1 documentation text, arbitrary text containing the word `BCFKS`,
+  and plaintext carrying a `.bcfks` extension. **No detection is based on
+  filename, extension, entropy, or file size**; the extension is not evidence
+  and is not consulted at all, so an extension-only `.bcfks` file produces
+  nothing.
+
+**JCEKS is not implemented** by HG-036 and remains unrecognized, as does broader
+Java truststore inventory.
+
+**Residual false positive.** Because the algorithm OIDs are deliberately not
+interpreted, any non-BCFKS DER file that happens to have exactly this outer
+shape — a whole-file two-element sequence of an `AlgorithmIdentifier` plus a
+non-empty `OCTET STRING`, followed by a three-element sequence of two
+`AlgorithmIdentifier`s plus a non-empty `OCTET STRING` — would be reported as a
+BCFKS container. No such format is known to this repository, and the common
+near-matches (X.509 certificates and CRLs, PKCS#12, CMS/PKCS#7 `ContentInfo`,
+`EncryptedPrivateKeyInfo`, JKS) are all excluded by element count, element type,
+or both; the boundary is recorded here because it is a structural match, not an
+identified-format match.
+
+**The finding does not prove truststore versus keystore.** Entry aliases, entry
+types, certificates, and private-key material all live inside the encrypted
+store data, so the outer container cannot distinguish a trusted-certificate
+store from a private-key store, an empty store from a populated one, or one
+entry from many. A BCFKS finding is a container-structure observation, and
+HarvestGuard makes no claim beyond it.
+
+**No decryption, no entries, no key material.** The scanner never decrypts,
+never prompts for or accepts a password, never validates a password, never
+enumerates entries, never inspects contained certificates or keys, and never
+invokes Java, `keytool`, Bouncy Castle, OpenSSL, or any other external tool or
+network service. Aliases, entry counts, entry types, certificate subjects and
+issuers, key identifiers, encrypted content, MAC values, salts, IVs, KDF
+parameters, raw ASN.1 fragments, and parser exception payloads are all absent
+from output — a BCFKS finding carries exactly one metadata value,
+`Format: BCFKS`. It also makes no claim about encryption strength,
+decryptability, or confidentiality. Absence of a `java_keystore:bcfks` finding
+is not proof that no BCFKS store exists in the target — this is one narrow rule
+for one explicitly enumerated container shape, not general keystore detection.
+
+**Scanner ownership.** Crypto inventory owns `java_keystore:bcfks`; the
+filesystem scanner never emits it, recognizes no BCFKS structure of its own, and
+`--type filesystem` is unchanged. There is therefore nothing for `--type all` to
+deduplicate: the crypto-inventory finding simply appears alongside whatever
+unrelated filesystem context and coverage records exist for the same target, and
+HG-036 adds no cross-scanner deduplication pairing. Accounting is unchanged: a
+BCFKS file counts once in `Crypto files inspected`, contributes nothing to
+`Files scanned`, and there is no BCFKS-specific count and no new summary bucket.
+JSON remains a bare normalized-finding array, Markdown remains evidence-only,
+CLI output and DataFrame columns are unchanged, and Streamlit behavior is
+unchanged.
+
+**No relationship output.** HG-036 adds BCFKS detection only; it creates no
+[internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+and emits nothing beyond the single finding described above.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:
@@ -515,8 +623,9 @@ encrypted-filesystem or FUSE coverage.
   properties extracted, or an encrypted PEM/OpenSSH private key block was
   positively identified by its header (algorithm/key-size may still be
   unavailable without a passphrase), or an OpenSSL `Salted__` header, a
-  supported OpenPGP encrypted-session-key packet structure, or a supported
-  native age v1 header structure was directly
+  supported OpenPGP encrypted-session-key packet structure, a supported
+  native age v1 header structure, or a supported BCFKS `ObjectStore` container
+  structure was directly
   observed in the file's content (a signature or structure match, not a
   parse of the protected content — `High` here describes the certainty of the
   byte-level observation, not anything about the encryption's strength or
@@ -535,8 +644,9 @@ encrypted-filesystem or FUSE coverage.
 
 - **The candidate-file gate is a silent pre-filter.** A file is inspected if
   it begins with the OpenSSL `Salted__` signature (HG-030), a supported OpenPGP
-  encrypted-file structure (HG-031), or the native age v1 version line
-  (HG-035), all checked ahead of the gate;
+  encrypted-file structure (HG-031), the native age v1 version line
+  (HG-035), or a supported BCFKS `ObjectStore` container (HG-036), all checked
+  ahead of the gate;
   otherwise `_could_contain_crypto_asset` requires it to have a recognized
   extension (`.cer`, `.crt`, `.der`, `.jks`, `.p12`, `.pfx`), start with an SSH
   public-key prefix, match the JKS magic header, or contain the literal bytes
@@ -545,14 +655,16 @@ encrypted-filesystem or FUSE coverage.
   filesystem scanner, there is no explicit "not inspected" marker for
   gate-excluded files. An empty crypto-inventory result does not distinguish
   "no crypto assets present" from "assets present in a format or extension
-  this gate does not recognize." `Salted__`, the supported OpenPGP shapes, and
-  native age v1 files are now recognized and no longer examples of this gap,
+  this gate does not recognize." `Salted__`, the supported OpenPGP shapes,
+  native age v1 files, and supported BCFKS stores are now recognized and no
+  longer examples of this gap,
   but every other encrypted-container format (LUKS, encrypted
-  ZIP/PDF/Office, armored age files, the OpenPGP and age structures listed as
-  unsupported above, and any signature not listed above)
+  ZIP/PDF/Office, armored age files, JCEKS keystores, the OpenPGP, age, and
+  BCFKS structures listed as unsupported above, and any signature not listed
+  above)
   remains outside this gate for the crypto-inventory scanner specifically —
-  HG-030, HG-031, and HG-035 added exactly three named detection rules, not
-  general encrypted-file detection.
+  HG-030, HG-031, HG-035, and HG-036 added exactly four named detection rules,
+  not general encrypted-file or keystore detection.
 - **Password-protected PKCS#12 containers** are reported as
   `Malformed PKCS#12` (confidence `Low`) because the scanner does not attempt
   passphrases. This is a known, already-documented limitation (see

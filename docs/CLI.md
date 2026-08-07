@@ -275,6 +275,54 @@ Absence of an `encrypted_file:age` finding is not proof that no age-encrypted
 content exists in the target — this is one narrow detection rule for one
 explicitly enumerated on-disk shape, not general encrypted-file detection.
 
+#### BCFKS keystore evidence (HG-036)
+
+A file whose content is a **supported Bouncy Castle BCFKS `ObjectStore`** is
+cryptographic evidence, and the crypto-inventory scanner owns it: a
+`--type crypto` (or `--type all`) scan reports it as asset type
+`Java Keystore`, `rule_id: java_keystore:bcfks`, confidence `High`, with
+evidence text limited to `Observed supported BCFKS keystore structure.` and
+technical metadata limited to `Format: BCFKS`. One finding is emitted per
+supported file, and as with the `Salted__`, OpenPGP, and age checks, content is
+evaluated before any extension-based parsing — so a valid store saved as
+`truststore.p12`, `certs.der`, `keystore.jks`, or with no extension at all is
+reported as `Java Keystore` rather than as a malformed PKCS#12, DER
+certificate, or JKS keystore. Confidence is `High` only because the container
+structure was read directly out of the file.
+
+**Support is narrow and explicit.** Only the default encrypted object store the
+Bouncy Castle provider writes is recognized: a complete DER `SEQUENCE` at byte
+offset 0 consuming the whole file, holding exactly an `EncryptedObjectStoreData`
+(an `AlgorithmIdentifier` plus a non-empty encrypted-content `OCTET STRING`) and
+a `PbkdMacIntegrityCheck` (a MAC `AlgorithmIdentifier`, a key-derivation-function
+identifier, and a non-empty MAC `OCTET STRING`). **Unencrypted `ObjectStoreData`
+stores and signature-integrity (`[0] SignatureCheck`) stores are not supported**,
+nor is JCEKS, nor are truncated, corrupted, embedded, or near-match ASN.1
+structures — each produces no finding rather than a lower-confidence guess, and
+nothing is inferred from a filename, a `.bcfks` extension, entropy, or file
+size. The full supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#bcfks-keystore-containers-hg-036).
+
+**The finding does not prove truststore versus keystore.** Aliases, entry types,
+certificates, and keys live inside the encrypted store data, which is never
+read. The scanner does **not** decrypt, prompt for or validate a password,
+enumerate entries, inspect contained certificates or keys, or shell out to
+Java, `keytool`, Bouncy Castle, or OpenSSL. Aliases, entry counts, certificate
+subjects, key identifiers, encrypted content, MAC values, salts, IVs, KDF
+parameters, and raw ASN.1 fragments never appear in output.
+
+The filesystem scanner recognizes no BCFKS structure, so `--type filesystem` is
+unchanged and there is nothing for `--type all` to deduplicate — the one
+crypto-inventory finding appears alongside whatever unrelated filesystem context
+and coverage records exist for the same target. `Files scanned` and `Crypto
+files inspected` keep exactly the meanings described above: a BCFKS file counts
+once in `Crypto files inspected`, and no BCFKS-specific count or summary bucket
+was added.
+
+Absence of a `java_keystore:bcfks` finding is not proof that no BCFKS store
+exists in the target — this is one narrow detection rule for one explicitly
+enumerated container shape, not general keystore detection.
+
 #### gocryptfs encrypted-filesystem evidence (HG-032)
 
 A directory containing both a supported `gocryptfs.conf` and a root-level

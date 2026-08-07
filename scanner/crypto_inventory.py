@@ -60,19 +60,20 @@ class CryptoInventoryFinding:
     fingerprint: str | None = None
     evidence: str = ""
     confidence: str = "Low"
-    # Unset for every asset type except the Encrypted File findings -- the
-    # OpenSSL Salted__ signature (HG-030), the OpenPGP encrypted-file structure
-    # (HG-031), and the native age v1 encrypted file (HG-035): a rule_id is only
-    # meaningful for a finding backed by a specific, nameable detection rule
-    # rather than a parsed certificate/key, so every other asset type leaves
-    # this None rather than inventing one.
+    # Unset for every asset type except the findings backed by a specific,
+    # nameable detection rule rather than a parsed certificate/key: the OpenSSL
+    # Salted__ signature (HG-030), the OpenPGP encrypted-file structure
+    # (HG-031), the native age v1 encrypted file (HG-035), the gocryptfs cipher
+    # root (HG-032), and the BCFKS keystore container (HG-036). Every other
+    # asset type leaves this None rather than inventing one.
     rule_id: str | None = None
-    # Encrypted-filesystem container metadata (HG-032 gocryptfs; kept generic
-    # rather than gocryptfs-specific field names so a future container format
-    # can reuse them). Unset for every other asset type. Deliberately limited
-    # to what HG-032's privacy contract allows: a format name, the supported
-    # on-disk config version observed, and the supported mode -- never the raw
-    # config, key material, salts, or nonces.
+    # Container metadata (HG-032 gocryptfs, HG-036 BCFKS; kept generic rather
+    # than format-specific field names so each container format can reuse them,
+    # and each detector's own allowlist decides which it may populate). Unset
+    # for every other asset type. Deliberately limited to what those privacy
+    # contracts allow: a format name, the supported on-disk config version
+    # observed, and the supported mode -- never the raw config, key material,
+    # salts, MACs, KDF parameters, or nonces.
     format: str | None = None
     config_version: int | None = None
     mode: str | None = None
@@ -1101,6 +1102,276 @@ def _gocryptfs_root_finding(context: RootContext) -> CryptoInventoryFinding | No
     )
 
 
+# --- BCFKS keystore detection (HG-036) --------------------------------------
+#
+# Structural only, exactly like the OpenSSL, OpenPGP, age, and gocryptfs checks
+# above: the file's outer DER container is walked just far enough to confirm the
+# Bouncy Castle `ObjectStore` shape the BCFKS provider writes, and nothing read
+# here is ever reported. The store is never decrypted, no password is requested
+# or accepted, no entry is enumerated, and Java, `keytool`, Bouncy Castle, and
+# OpenSSL are never invoked.
+#
+# The supported shape, transcribed from the Bouncy Castle ASN.1 sources
+# (`org.bouncycastle.asn1.bc.ObjectStore`, `EncryptedObjectStoreData`,
+# `ObjectStoreIntegrityCheck`, `PbkdMacIntegrityCheck`) and confirmed against
+# real stores written by the provider's `engineStore(OutputStream, char[])`
+# path:
+#
+#   ObjectStore ::= SEQUENCE {
+#       storeData        EncryptedObjectStoreData ::= SEQUENCE {
+#           encryptionAlgorithm  AlgorithmIdentifier,
+#           encryptedContent     OCTET STRING },
+#       integrityCheck   PbkdMacIntegrityCheck ::= SEQUENCE {
+#           macAlgorithm         AlgorithmIdentifier,
+#           pbkdAlgorithm        AlgorithmIdentifier,
+#           mac                  OCTET STRING } }
+#
+# Deliberately narrow. The unencrypted `ObjectStoreData` form and the
+# signature-integrity form (an explicit `[0] SignatureCheck` in place of the
+# PBKD MAC) are out of scope for HG-036 and produce no finding rather than a
+# lower-confidence guess; both are documented as false negatives in
+# docs/DETECTION_CHARACTERIZATION.md.
+#
+# What the outer container does *not* prove is equally load-bearing: entry
+# aliases, entry types, certificates, and private-key material all live inside
+# the encrypted store data, so a BCFKS finding is a container-structure
+# observation and never a truststore-versus-keystore claim.
+
+_DER_TAG_OCTET_STRING = 0x04
+_DER_TAG_OBJECT_IDENTIFIER = 0x06
+_DER_TAG_SEQUENCE = 0x30
+# DER long-form length octets this reader accepts. Four octets addresses any
+# file this scanner could read; a longer count is rejected rather than parsed,
+# so a declared length can never exceed what the file itself can hold.
+_DER_MAX_LENGTH_OCTETS = 4
+# The identifier octet plus the largest length field above: the only prefix the
+# cheap candidate gate needs to read.
+_DER_MAX_HEADER_BYTES = 2 + _DER_MAX_LENGTH_OCTETS
+# An AlgorithmIdentifier is an OID plus at most one parameters field.
+_DER_ALGORITHM_IDENTIFIER_MAX_ELEMENTS = 2
+_BCFKS_ENCRYPTED_STORE_DATA_ELEMENTS = 2
+_BCFKS_INTEGRITY_CHECK_ELEMENTS = 3
+_BCFKS_OBJECT_STORE_ELEMENTS = 2
+
+
+@dataclass(frozen=True)
+class _DerElement:
+    """One DER tag/length/value triple located inside an already-read buffer.
+
+    Offsets only -- the value bytes are never copied out, decoded, or retained,
+    which is what keeps the privacy boundary structural: there is no path from
+    this reader to a finding field that could carry an ASN.1 fragment,
+    ciphertext, MAC, salt, or KDF parameter.
+    """
+
+    tag: int
+    content_start: int
+    content_end: int
+
+    @property
+    def content_length(self) -> int:
+        return self.content_end - self.content_start
+
+
+def _der_header(data: bytes, offset: int, limit: int) -> tuple[int, int, int] | None:
+    """``(tag, content offset, declared content length)`` for the DER element at
+    ``offset``, or None when no well-formed definite-length header fits within
+    ``limit``.
+
+    Length-safe and binary-safe: every octet is bounds-checked before it is
+    read, so a truncated or arbitrary binary file returns None instead of
+    raising. Deliberately strict, because these rejections are what separate a
+    real BCFKS store from a near-match:
+
+    - a multi-byte (high) tag number is rejected -- nothing in the supported
+      structure uses one;
+    - the indefinite form (``0x80``) and the reserved form (``0xFF``) are
+      rejected: neither is legal DER;
+    - a long form declaring more than ``_DER_MAX_LENGTH_OCTETS`` octets is
+      rejected rather than parsed;
+    - the length must use its minimal encoding -- a padded or needlessly long
+      form is a corrupted length, not a valid alternative spelling.
+    """
+    # The buffer's own end is always a limit, whatever the caller passed: the
+    # candidate gate below reads a short prefix rather than the whole file, so
+    # "fits within limit" must never be able to mean "past the end of `data`".
+    limit = min(limit, len(data))
+    if offset + 2 > limit:
+        return None
+    tag = data[offset]
+    if tag & 0x1F == 0x1F:
+        return None
+    length_octet = data[offset + 1]
+    content_start = offset + 2
+    if length_octet < 0x80:
+        return tag, content_start, length_octet
+    count = length_octet & 0x7F
+    if count == 0 or count > _DER_MAX_LENGTH_OCTETS:
+        # 0x80 is the indefinite form and 0xFF is reserved; both are illegal in
+        # DER, and a longer count could only declare a length no file here can
+        # hold.
+        return None
+    content_start += count
+    if content_start > limit:
+        return None
+    length = int.from_bytes(data[offset + 2 : content_start], "big")
+    if data[offset + 2] == 0 or length < 0x80:
+        # Non-minimal: a leading zero octet, or a long form used for a length
+        # the short form encodes.
+        return None
+    return tag, content_start, length
+
+
+def _der_read(data: bytes, offset: int, limit: int) -> _DerElement | None:
+    """The complete DER element at ``offset``, or None when its header is
+    malformed or its declared content runs past ``limit``.
+
+    A declared length that overruns the buffer is what rejects a truncated store
+    and a corrupted length octet alike: the element is not present, so it is not
+    evidence.
+    """
+    limit = min(limit, len(data))
+    header = _der_header(data, offset, limit)
+    if header is None:
+        return None
+    tag, content_start, length = header
+    content_end = content_start + length
+    if content_end > limit:
+        return None
+    return _DerElement(tag, content_start, content_end)
+
+
+def _der_children(data: bytes, element: _DerElement) -> list[_DerElement] | None:
+    """The immediate children of a constructed ``element``, or None when its
+    content is not an exact sequence of well-formed DER elements.
+
+    Exact consumption is required: content left over after the last child, or a
+    child whose declared length runs past the parent's own end, means the
+    encoding is inconsistent rather than merely unfamiliar. Only one level is
+    read per call, so validation walks the fixed, shallow BCFKS structure below
+    and never recurses into the encrypted content.
+    """
+    children: list[_DerElement] = []
+    offset = element.content_start
+    while offset < element.content_end:
+        child = _der_read(data, offset, element.content_end)
+        if child is None:
+            return None
+        children.append(child)
+        offset = child.content_end
+    return children
+
+
+def _der_is_algorithm_identifier(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` is structurally an X.509 ``AlgorithmIdentifier``: a
+    SEQUENCE whose first child is a non-empty OBJECT IDENTIFIER, followed by at
+    most one parameters element.
+
+    Shape only. The OID's value is never decoded, compared against a table, or
+    reported -- HG-036 claims the container's structure, not which cipher, MAC,
+    or key-derivation function a particular store happened to use.
+    """
+    if element.tag != _DER_TAG_SEQUENCE:
+        return False
+    children = _der_children(data, element)
+    if children is None:
+        return False
+    if not 1 <= len(children) <= _DER_ALGORITHM_IDENTIFIER_MAX_ELEMENTS:
+        return False
+    oid = children[0]
+    return oid.tag == _DER_TAG_OBJECT_IDENTIFIER and oid.content_length > 0
+
+
+def _der_is_non_empty_octet_string(element: _DerElement) -> bool:
+    """Whether ``element`` is a non-empty OCTET STRING. The octets themselves
+    are never read: an empty encrypted-content or MAC field is a malformed
+    store, and a populated one is only ever measured."""
+    return element.tag == _DER_TAG_OCTET_STRING and element.content_length > 0
+
+
+def _is_bcfks_encrypted_object_store_data(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` matches Bouncy Castle's ``EncryptedObjectStoreData``:
+    a SEQUENCE of exactly an ``AlgorithmIdentifier`` and a non-empty
+    OCTET STRING of encrypted content.
+
+    Requiring the first child to itself be an AlgorithmIdentifier is what
+    separates this from the same two-element shape an
+    ``EncryptedPrivateKeyInfo`` has, and requiring exactly two children is what
+    rejects the unsupported unencrypted ``ObjectStoreData`` form, whose first
+    child is a version INTEGER.
+    """
+    if element.tag != _DER_TAG_SEQUENCE:
+        return False
+    children = _der_children(data, element)
+    if children is None or len(children) != _BCFKS_ENCRYPTED_STORE_DATA_ELEMENTS:
+        return False
+    return _der_is_algorithm_identifier(data, children[0]) and _der_is_non_empty_octet_string(
+        children[1]
+    )
+
+
+def _is_bcfks_pbkd_mac_integrity_check(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` matches Bouncy Castle's ``PbkdMacIntegrityCheck``: a
+    SEQUENCE of exactly a MAC ``AlgorithmIdentifier``, a key-derivation-function
+    identifier (itself AlgorithmIdentifier-shaped), and a non-empty MAC
+    OCTET STRING.
+
+    The alternative ``ObjectStoreIntegrityCheck`` arm -- an explicit ``[0]``
+    context tag holding a ``SignatureCheck`` -- fails the SEQUENCE requirement
+    here, which is exactly how the unsupported signature-integrity form produces
+    no finding.
+    """
+    if element.tag != _DER_TAG_SEQUENCE:
+        return False
+    children = _der_children(data, element)
+    if children is None or len(children) != _BCFKS_INTEGRITY_CHECK_ELEMENTS:
+        return False
+    return (
+        _der_is_algorithm_identifier(data, children[0])
+        and _der_is_algorithm_identifier(data, children[1])
+        and _der_is_non_empty_octet_string(children[2])
+    )
+
+
+def _looks_like_bcfks_object_store(data: bytes) -> bool:
+    """Whether ``data`` is a supported BCFKS ``ObjectStore``: a complete DER
+    SEQUENCE beginning at byte offset 0, consuming the whole file with no
+    trailing bytes, holding exactly an ``EncryptedObjectStoreData`` and a
+    ``PbkdMacIntegrityCheck``.
+
+    Content only -- never the filename, the extension, entropy, or file size.
+    Offset 0 and full consumption are both required, so supported BCFKS bytes
+    embedded at a nonzero offset in some larger file are not a match: the format
+    puts the store's own SEQUENCE header first and nothing after its end.
+
+    Length-safe and binary-safe throughout, so an empty, truncated, or arbitrary
+    binary file returns False instead of raising.
+    """
+    store = _der_read(data, 0, len(data))
+    if store is None or store.tag != _DER_TAG_SEQUENCE:
+        return False
+    if store.content_end != len(data):
+        return False
+    elements = _der_children(data, store)
+    if elements is None or len(elements) != _BCFKS_OBJECT_STORE_ELEMENTS:
+        return False
+    store_data, integrity_check = elements
+    return _is_bcfks_encrypted_object_store_data(
+        data, store_data
+    ) and _is_bcfks_pbkd_mac_integrity_check(data, integrity_check)
+
+
+def _bcfks_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Java Keystore",
+        location=str(file_path),
+        evidence="Observed supported BCFKS keystore structure.",
+        confidence="High",
+        rule_id="java_keystore:bcfks",
+        format="BCFKS",
+    )
+
+
 # --- Detector registry (HG-033) --------------------------------------------
 #
 # The static, explicit registry of every crypto-inventory detector family. It
@@ -1127,6 +1398,11 @@ def _gocryptfs_root_finding(context: RootContext) -> CryptoInventoryFinding | No
 #      same reason -- gocryptfs.conf is plain JSON -- and terminal for its
 #      marker file either way, so a rejected marker never falls through into
 #      PEM/DER/PKCS#12 parsing (HG-032).
+#   35 BCFKS ahead of JKS, PKCS#12, and DER, and ahead of the shared gate: a
+#      BCFKS store is structurally identified from its own bytes, so a valid
+#      store saved as truststore.p12 or certs.der must be classified as the
+#      keystore it is rather than as a malformed PKCS#12 or DER certificate
+#      (HG-036).
 #   40-60 JKS, PKCS#12, and DER: mutually exclusive in practice, but each
 #      terminal for the file it claims, which is what keeps a keystore or
 #      container from also being read as PEM text.
@@ -1199,6 +1475,36 @@ def _detect_gocryptfs_root(context: RootContext) -> DetectionResult:
         # PEM/DER/PKCS#12 detectors.
         return DetectionResult.claim()
     return DetectionResult.match([finding])
+
+
+def _bcfks_candidate(context: FileContext) -> bool:
+    """The cheap binary gate for the BCFKS detector: the file begins with a
+    well-formed definite-length DER SEQUENCE header whose declared content ends
+    exactly at the end of the file.
+
+    That is the one condition ``_looks_like_bcfks_object_store`` requires before
+    it can return True, so a file failing it could only ever produce a non-match
+    -- which is what keeps every ordinary file (text, an archive, an image, a
+    PEM bundle) out of the ASN.1 path below after reading at most six bytes and
+    comparing one length. Content only: the extension is not consulted at all,
+    here or in the detector, so it is never evidence and a ``.bcfks`` name alone
+    cannot produce a finding.
+    """
+    prefix = context.leading_bytes(_DER_MAX_HEADER_BYTES)
+    header = _der_header(prefix, 0, len(prefix))
+    if header is None:
+        return False
+    tag, content_start, length = header
+    return tag == _DER_TAG_SEQUENCE and content_start + length == len(context.data)
+
+
+def _detect_bcfks(context: FileContext) -> DetectionResult:
+    # The full bytes are required, not a prefix: the structure runs to the end of
+    # the file, and the "no trailing bytes" requirement is only meaningful
+    # against the whole file.
+    if not _looks_like_bcfks_object_store(context.data):
+        return DetectionResult.no_match()
+    return DetectionResult.match([_bcfks_finding(context.path)])
 
 
 def _jks_candidate(context: FileContext) -> bool:
@@ -1344,6 +1650,25 @@ CRYPTO_DETECTORS = build_registry(
                 "regular files, plus the config's stable version and feature "
                 "flags; never mounted, unlocked, or decrypted, and no key "
                 "material, salt, or KDF parameter is read into the finding."
+            ),
+        ),
+        FileDetector(
+            detector_id="java_keystore:bcfks",
+            priority=35,
+            candidate=_bcfks_candidate,
+            detect=_detect_bcfks,
+            evidence="Observed supported BCFKS keystore structure.",
+            confidence="High",
+            terminal=True,
+            rule_id="java_keystore:bcfks",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "Exact structural match on the Bouncy Castle ObjectStore outer "
+                "container -- an EncryptedObjectStoreData and a "
+                "PbkdMacIntegrityCheck, consuming the whole file -- read from "
+                "the file's own bytes; the store is never decrypted, no "
+                "password is accepted, and no entry, alias, or certificate "
+                "inside it is read."
             ),
         ),
         FileDetector(
