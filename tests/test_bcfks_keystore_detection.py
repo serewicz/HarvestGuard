@@ -461,6 +461,115 @@ def _negative_cases() -> list[tuple[str, bytes]]:
                 ),
             ),
         ),
+        # Primitive AlgorithmIdentifier parameters whose content is illegal for
+        # the tag that carries it. Each element's own header and declared length
+        # are consistent with the AlgorithmIdentifier around it, so the outer
+        # structure looks exactly like a supported store and only checking the
+        # primitive's content against its universal tag rejects it. All of these
+        # are invalid DER, not merely unfamiliar parameter values.
+        (
+            "encryption-parameters-nonempty-null.bcfks",
+            _object_store(
+                _encrypted_store_data(algorithm=_tlv(0x30, _OID + _tlv(0x05, b"\x00"))),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "encryption-parameters-invalid-boolean-value.bcfks",
+            _object_store(
+                _encrypted_store_data(algorithm=_tlv(0x30, _OID + _tlv(0x01, b"\x01"))),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "encryption-parameters-overlong-boolean.bcfks",
+            _object_store(
+                _encrypted_store_data(algorithm=_tlv(0x30, _OID + _tlv(0x01, b"\xff\xff"))),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "mac-algorithm-parameters-empty-integer.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(mac_algorithm=_tlv(0x30, _OID + _tlv(0x02, b""))),
+            ),
+        ),
+        (
+            "mac-algorithm-parameters-padded-integer.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(mac_algorithm=_tlv(0x30, _OID + _tlv(0x02, b"\x00\x01"))),
+            ),
+        ),
+        (
+            "kdf-parameters-bit-string-overlarge-unused-bits.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(kdf=_tlv(0x30, _OID + _tlv(0x03, b"\x08\xff"))),
+            ),
+        ),
+        (
+            "kdf-parameters-bit-string-unused-bits-set.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(kdf=_tlv(0x30, _OID + _tlv(0x03, b"\x04\xff"))),
+            ),
+        ),
+        (
+            "kdf-parameters-empty-bit-string.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(kdf=_tlv(0x30, _OID + _tlv(0x03, b""))),
+            ),
+        ),
+        # Universal tags used in the wrong form: DER fixes which universal types
+        # are constructed and which are primitive, and neither end-of-contents
+        # nor the reserved number is an element at all.
+        (
+            "encryption-parameters-constructed-octet-string.bcfks",
+            _object_store(
+                _encrypted_store_data(
+                    algorithm=_tlv(0x30, _OID + _tlv(0x24, _tlv(0x04, b"\x00")))
+                ),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "encryption-parameters-primitive-sequence.bcfks",
+            _object_store(
+                _encrypted_store_data(algorithm=_tlv(0x30, _OID + _tlv(0x10, b""))),
+                _integrity_check(),
+            ),
+        ),
+        (
+            "kdf-parameters-end-of-contents-tag.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(kdf=_tlv(0x30, _OID + _tlv(0x00, b""))),
+            ),
+        ),
+        (
+            "kdf-parameters-reserved-universal-tag.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(kdf=_tlv(0x30, _OID + _tlv(0x0F, b"\x00"))),
+            ),
+        ),
+        # The invalid primitive is one level deeper, inside a nested
+        # AlgorithmIdentifier of the kind real PBES2 parameters carry.
+        (
+            "kdf-parameters-deeply-nested-nonempty-null.bcfks",
+            _object_store(
+                _encrypted_store_data(),
+                _integrity_check(
+                    kdf=_tlv(
+                        0x30,
+                        _OID + _tlv(0x30, _tlv(0x30, _OID + _tlv(0x05, b"\x00"))),
+                    )
+                ),
+            ),
+        ),
         # Other DER and near-match structures.
         ("generic-der-sequence.bcfks", _tlv(0x30, _tlv(0x02, b"\x01") + _tlv(0x04, b"\x02"))),
         (

@@ -1140,6 +1140,35 @@ def _gocryptfs_root_finding(context: RootContext) -> CryptoInventoryFinding | No
 _DER_TAG_OCTET_STRING = 0x04
 _DER_TAG_OBJECT_IDENTIFIER = 0x06
 _DER_TAG_SEQUENCE = 0x30
+# Identifier-octet fields: the two class bits, the constructed bit, and the low
+# five bits holding the tag number (0x1F, the high-tag-number form, is rejected
+# outright by the header reader below).
+_DER_TAG_CLASS_MASK = 0xC0
+_DER_TAG_CLASS_UNIVERSAL = 0x00
+_DER_TAG_CONSTRUCTED = 0x20
+_DER_TAG_NUMBER_MASK = 0x1F
+# Universal tag numbers whose content encoding X.690 constrains, and which the
+# primitive check below therefore validates. Numbers absent from this list --
+# OCTET STRING, the string types, the time types -- carry content this reader
+# deliberately does not interpret.
+_DER_UNIVERSAL_END_OF_CONTENTS = 0x00
+_DER_UNIVERSAL_BOOLEAN = 0x01
+_DER_UNIVERSAL_INTEGER = 0x02
+_DER_UNIVERSAL_BIT_STRING = 0x03
+_DER_UNIVERSAL_NULL = 0x05
+_DER_UNIVERSAL_OBJECT_IDENTIFIER = 0x06
+_DER_UNIVERSAL_ENUMERATED = 0x0A
+_DER_UNIVERSAL_RELATIVE_OID = 0x0D
+_DER_UNIVERSAL_RESERVED = 0x0F
+# The universal types X.690 encodes as constructed: EXTERNAL, EMBEDDED PDV,
+# SEQUENCE, SET, and CHARACTER STRING. DER requires every other universal type,
+# the string and time types included, to use the primitive form.
+_DER_UNIVERSAL_CONSTRUCTED_TAG_NUMBERS = frozenset({0x08, 0x0B, 0x10, 0x11, 0x1D})
+# DER admits exactly two BOOLEAN encodings, in one content octet.
+_DER_BOOLEAN_CONTENT_LENGTH = 1
+_DER_BOOLEAN_VALUES = frozenset({0x00, 0xFF})
+# A BIT STRING's leading octet counts the unused bits in its final octet.
+_DER_MAX_UNUSED_BITS = 7
 # DER long-form length octets this reader accepts. Four octets addresses any
 # file this scanner could read; a longer count is rejected rather than parsed,
 # so a declared length can never exceed what the file itself can hold.
@@ -1267,22 +1296,23 @@ def _der_children(data: bytes, element: _DerElement) -> list[_DerElement] | None
     return children
 
 
-def _der_is_object_identifier(data: bytes, element: _DerElement) -> bool:
-    """Whether ``element`` is a well-formed, non-empty OBJECT IDENTIFIER.
+def _der_has_valid_subidentifiers(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element``'s content is a sequence of complete, minimally
+    encoded base-128 subidentifiers -- the encoding rule shared by
+    OBJECT IDENTIFIER and RELATIVE-OID.
 
-    The encoding is checked, never the value: which OID a store used is not
-    decoded, compared against a table, or reported. Two encoding rules do the
-    work, and both are what separate a real algorithm identifier from arbitrary
-    bytes wearing the OID tag:
+    Two rules do the work, and both are what separate a real identifier from
+    arbitrary bytes wearing the tag:
 
-    - every base-128 subidentifier must terminate, so the final content octet
-      must have its continuation bit clear -- a payload ending mid-subidentifier
-      (``0x80`` alone, say) is malformed rather than merely unfamiliar;
+    - every subidentifier must terminate, so the final content octet must have
+      its continuation bit clear -- a payload ending mid-subidentifier (``0x80``
+      alone, say) is malformed rather than merely unfamiliar;
     - no subidentifier may begin with ``0x80``, which is a leading zero group
       and therefore a non-minimal encoding DER forbids.
+
+    The encoding is checked, never the value: which OID a store used is not
+    decoded, compared against a table, or reported.
     """
-    if element.tag != _DER_TAG_OBJECT_IDENTIFIER or element.content_length == 0:
-        return False
     at_subidentifier_start = True
     for offset in range(element.content_start, element.content_end):
         octet = data[offset]
@@ -1293,23 +1323,124 @@ def _der_is_object_identifier(data: bytes, element: _DerElement) -> bool:
     return at_subidentifier_start
 
 
+def _der_is_object_identifier(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` is a well-formed, non-empty OBJECT IDENTIFIER."""
+    if element.tag != _DER_TAG_OBJECT_IDENTIFIER or element.content_length == 0:
+        return False
+    return _der_has_valid_subidentifiers(data, element)
+
+
+def _der_is_minimal_integer(data: bytes, element: _DerElement) -> bool:
+    """Whether an INTEGER or ENUMERATED element uses DER's minimal two's
+    complement encoding: at least one content octet, and no redundant leading
+    padding octet.
+
+    A leading ``0x00`` is legal only to clear a high bit that would otherwise
+    make the value negative, and a leading ``0xFF`` only to set one. Any other
+    leading octet is padding, which DER forbids -- the magnitude itself is
+    never decoded or reported.
+    """
+    if element.content_length == 0:
+        return False
+    if element.content_length == 1:
+        return True
+    first = data[element.content_start]
+    second = data[element.content_start + 1]
+    return not (first == 0x00 and not second & 0x80) and not (first == 0xFF and second & 0x80)
+
+
+def _der_is_bit_string(data: bytes, element: _DerElement) -> bool:
+    """Whether a BIT STRING element is encoded as DER requires: a leading
+    unused-bit count of at most seven, zero when the string is empty, and unused
+    trailing bits actually set to zero. The bits themselves are never read as a
+    value."""
+    if element.content_length == 0:
+        return False
+    unused = data[element.content_start]
+    if unused > _DER_MAX_UNUSED_BITS:
+        return False
+    if element.content_length == 1:
+        return unused == 0
+    return not data[element.content_end - 1] & ((1 << unused) - 1)
+
+
+def _der_has_valid_tag_form(element: _DerElement) -> bool:
+    """Whether ``element``'s identifier octet uses the form its tag permits.
+
+    Only the universal class is constrained: a context, application, or private
+    tag means whatever the enclosing specification says it means, and HG-036
+    interprets no parameters field. Within the universal class, DER fixes which
+    types are constructed and which are primitive, so a constructed OCTET STRING
+    or a primitive SEQUENCE is a corrupted encoding. End-of-contents and the
+    reserved number never appear as elements at all.
+    """
+    if element.tag & _DER_TAG_CLASS_MASK != _DER_TAG_CLASS_UNIVERSAL:
+        return True
+    number = element.tag & _DER_TAG_NUMBER_MASK
+    if number in (_DER_UNIVERSAL_END_OF_CONTENTS, _DER_UNIVERSAL_RESERVED):
+        return False
+    constructed = bool(element.tag & _DER_TAG_CONSTRUCTED)
+    return constructed == (number in _DER_UNIVERSAL_CONSTRUCTED_TAG_NUMBERS)
+
+
+def _der_is_valid_primitive(data: bytes, element: _DerElement) -> bool:
+    """Whether a primitive ``element`` carries content its universal tag allows.
+
+    ``_der_read`` proves only that a primitive's header parsed and its declared
+    content fits inside its parent -- it says nothing about whether the content
+    is legal for that tag. A NULL with content octets, a two-octet BOOLEAN, a
+    BOOLEAN holding ``0x01``, a zero-length INTEGER, and a padded one are all
+    length-consistent and all invalid DER, and none of them may help a
+    near-match earn a High-confidence BCFKS finding.
+
+    Bounded: each check reads at most the element's own content octets, and no
+    content octet is decoded into a value or retained. Tags outside the
+    universal class, and universal types whose content DER does not constrain
+    (OCTET STRING, the string and time types), are accepted on their length
+    alone -- this reader interprets no parameters field.
+    """
+    if element.tag & _DER_TAG_CLASS_MASK != _DER_TAG_CLASS_UNIVERSAL:
+        return True
+    number = element.tag & _DER_TAG_NUMBER_MASK
+    if number == _DER_UNIVERSAL_BOOLEAN:
+        return (
+            element.content_length == _DER_BOOLEAN_CONTENT_LENGTH
+            and data[element.content_start] in _DER_BOOLEAN_VALUES
+        )
+    if number in (_DER_UNIVERSAL_INTEGER, _DER_UNIVERSAL_ENUMERATED):
+        return _der_is_minimal_integer(data, element)
+    if number == _DER_UNIVERSAL_BIT_STRING:
+        return _der_is_bit_string(data, element)
+    if number == _DER_UNIVERSAL_NULL:
+        return element.content_length == 0
+    if number in (_DER_UNIVERSAL_OBJECT_IDENTIFIER, _DER_UNIVERSAL_RELATIVE_OID):
+        return element.content_length > 0 and _der_has_valid_subidentifiers(data, element)
+    return True
+
+
 def _der_is_well_formed(data: bytes, element: _DerElement, depth: int = 0) -> bool:
     """Whether ``element`` and everything nested inside it is well-formed DER.
 
-    A primitive element is already proven by ``_der_read``: its header parsed
-    and its content fits inside its parent. A constructed one is not -- its
-    content is itself a sequence of DER elements that ``_der_read`` never
-    looked at, so a SEQUENCE whose own length is consistent while its children
-    are truncated passes the header check and must be rejected here. That gap
-    is what would otherwise let a store carrying malformed DER inside its
-    encryption, MAC, or KDF parameters earn a High-confidence finding.
+    Two gaps ``_der_read`` leaves open, both of which would otherwise let a
+    store carrying malformed DER inside its encryption, MAC, or KDF parameters
+    earn a High-confidence finding:
+
+    - a constructed element's content is itself a sequence of DER elements that
+      ``_der_read`` never looked at, so a SEQUENCE whose own length is
+      consistent while its children are truncated passes the header check and
+      must be rejected here;
+    - a primitive element's content is never checked against what its tag
+      permits, so a nonempty NULL or an invalid BOOLEAN is equally
+      length-consistent and equally malformed.
 
     Nesting deeper than ``_DER_MAX_NESTING_DEPTH`` is treated as not
     well-formed rather than walked: nothing in the supported structure needs
     that depth. Structure only -- no content octet is decoded or retained.
     """
-    if not element.tag & 0x20:
-        return True
+    if not _der_has_valid_tag_form(element):
+        return False
+    if not element.tag & _DER_TAG_CONSTRUCTED:
+        return _der_is_valid_primitive(data, element)
     if depth >= _DER_MAX_NESTING_DEPTH:
         return False
     children = _der_children(data, element)

@@ -533,11 +533,19 @@ protected), and only when every one of these holds:
   sequence of exactly an `AlgorithmIdentifier` (a sequence whose first element
   is a well-formed, non-empty OBJECT IDENTIFIER, with at most one parameters
   element) and a **non-empty OCTET STRING** of encrypted content.
-- A constructed **parameters element is walked to confirm its nested DER is
-  well formed** — truncated or unconsumed content anywhere inside the
-  encryption, MAC, or key-derivation parameters is a corrupted encoding and
-  produces no finding. The parameter *values* are still never interpreted or
-  reported.
+- A **parameters element is walked to confirm its nested DER is well formed** —
+  truncated or unconsumed content anywhere inside the encryption, MAC, or
+  key-derivation parameters is a corrupted encoding and produces no finding.
+- A **primitive parameters element must also carry content its universal tag
+  permits**: a NULL is empty, a BOOLEAN is one octet holding `0x00` or `0xFF`,
+  an INTEGER or ENUMERATED is non-empty and free of a redundant leading padding
+  octet, a BIT STRING declares at most seven unused bits and leaves them zero,
+  and an OBJECT IDENTIFIER or RELATIVE-OID follows the subidentifier rules
+  below. Universal tags in the wrong form — a constructed OCTET STRING, a
+  primitive SEQUENCE, end-of-contents, the reserved number — are rejected on the
+  same grounds. Each of these is length-consistent but invalid DER, so none of
+  them may earn a High-confidence finding. The parameter *values* are still
+  never interpreted or reported.
 - The **second element structurally matches `PbkdMacIntegrityCheck`**: a
   sequence of exactly a MAC `AlgorithmIdentifier`, a key-derivation-function
   identifier of the same `AlgorithmIdentifier` shape, and a **non-empty MAC
