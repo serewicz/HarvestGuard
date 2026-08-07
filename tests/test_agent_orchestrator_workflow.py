@@ -215,7 +215,9 @@ def test_publish_job_rechecks_protected_paths_after_applying_patch(publish_job):
 
 
 def test_settings_deny_protected_governance_paths(build_job):
-    builder_step = next(s for s in build_job["steps"] if s.get("name") == "Run Claude Code builder")
+    builder_step = next(
+        s for s in build_job["steps"] if s.get("name") == "Run Claude Code builder (segment 1)"
+    )
     settings = json.loads(builder_step["with"]["settings"])
     deny = settings["permissions"]["deny"]
 
@@ -229,7 +231,9 @@ def test_settings_deny_protected_governance_paths(build_job):
 
 
 def test_settings_deny_git_mutation_and_gh_via_bash(build_job):
-    builder_step = next(s for s in build_job["steps"] if s.get("name") == "Run Claude Code builder")
+    builder_step = next(
+        s for s in build_job["steps"] if s.get("name") == "Run Claude Code builder (segment 1)"
+    )
     settings = json.loads(builder_step["with"]["settings"])
     deny = settings["permissions"]["deny"]
 
@@ -444,10 +448,10 @@ def test_the_job_graph_is_exactly_the_twelve_known_jobs(workflow):
     }
 
 
-def test_exactly_four_codex_and_four_claude_invocations_exist(workflow):
+def test_exactly_four_codex_and_five_claude_invocations_exist(workflow):
     all_uses = [u for job in workflow["jobs"].values() for u in _all_uses(job)]
     assert sum("codex-action" in u for u in all_uses) == 4
-    assert sum("claude-code-action" in u for u in all_uses) == 4
+    assert sum("claude-code-action" in u for u in all_uses) == 5
 
 
 def test_nothing_depends_on_review_3_so_no_cycle_4_can_exist(workflow):
@@ -941,32 +945,29 @@ def test_cycle_n_consumers_read_exactly_what_the_prior_cycle_uploaded(workflow, 
 # --- Claude turn limit --------------------------------------------------------
 
 
-def test_every_claude_invocation_uses_exactly_eighty_max_turns(workflow):
-    # Raised 40 -> 60 after the live Issue #16 run hit the cap mid-task,
-    # then 60 -> 80 after Issue #17 hit the 60-turn cap a second time (this
-    # time with work-budget discipline already in effect and diagnostics
-    # showing real forward progress, not thrashing) -- the final planned
-    # tuning for HG-005. A pure cost/loop bound inside the Claude Code
-    # action -- asserted for every invocation so a future copied job can't
-    # silently diverge, and so workflow config and diagnostics metadata
-    # can never disagree about the configured ceiling.
+def test_claude_turn_limits_are_segmented_for_build_and_unchanged_for_corrections(workflow):
+    # Build is now two 40-turn segments with complete checkpoints after
+    # each segment. Correction invocations keep their existing 80-turn
+    # ceiling but now upload complete failure checkpoints too.
+    expected = {
+        "Run Claude Code builder (segment 1)": "--max-turns 40",
+        "Run Claude Code builder (segment 2)": "--max-turns 40",
+        "Run Claude Code correction": "--max-turns 80",
+    }
     claude_steps = [
         step
         for job in workflow["jobs"].values()
         for step in job["steps"]
         if "claude-code-action" in step.get("uses", "")
     ]
-    assert len(claude_steps) == 4  # build + three correction cycles
+    assert len(claude_steps) == 5
     for step in claude_steps:
-        # Line-exact, not substring: "--max-turns 80" is also a substring
-        # of a wrong value like "--max-turns 800", which a bare `in` check
-        # would miss.
         arg_lines = step["with"]["claude_args"].splitlines()
-        assert "--max-turns 80" in arg_lines
+        assert expected[step["name"]] in arg_lines
         other_turn_lines = [
             line
             for line in arg_lines
-            if line.startswith("--max-turns") and line != "--max-turns 80"
+            if line.startswith("--max-turns") and line != expected[step["name"]]
         ]
         assert other_turn_lines == []
 
@@ -1002,6 +1003,11 @@ WORK_BUDGET_PHRASES = [
     "acceptance criteria, protected paths, and the product/security",
     'report "NEEDS_HUMAN" with what remains rather',
     "than broadening scope or continuing to search indefinitely",
+    "When the issue requires real or official format fixtures, work fixture-first",
+    "official tooling, official upstream test data, or existing provenance-documented",
+    "source/tool, version, safe generation command or upstream path, size, SHA-256",
+    "return NEEDS_HUMAN early, before most product code",
+    "missing fixtures, required provenance, and acceptable ways a human can supply them",
 ]
 
 
@@ -1010,50 +1016,55 @@ def _claude_prompt_text(job: dict) -> str:
     return " ".join(step["with"]["prompt"].split())
 
 
+def _claude_steps(job: dict) -> list[dict]:
+    return [s for s in job["steps"] if "claude-code-action" in s.get("uses", "")]
+
+
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
 @pytest.mark.parametrize("phrase", WORK_BUDGET_PHRASES)
 def test_every_claude_prompt_contains_work_budget_guidance(workflow, job_id, phrase):
-    assert phrase in _claude_prompt_text(workflow["jobs"][job_id])
+    for step in _claude_steps(workflow["jobs"][job_id]):
+        assert phrase in " ".join(step["with"]["prompt"].split())
 
 
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
 def test_work_budget_guidance_still_requires_full_validation(workflow, job_id):
-    prompt = _claude_prompt_text(workflow["jobs"][job_id])
-    # The efficiency guidance must not read as permission to skip required
-    # validation -- the prompt states this explicitly, and the structured
-    # result schema still demands a real ruff/pytest verdict.
-    assert (
-        'a "COMPLETE" result must still reflect full `ruff check .` and full '
-        "`pytest -v` passing" in prompt
-    )
-    validation_schema = (
-        '"validation": {"ruff": "pass"|"fail"|"not_run", '
-        '"pytest": "pass"|"fail"|"not_run"}'
-    )
-    assert validation_schema in prompt
+    for step in _claude_steps(workflow["jobs"][job_id]):
+        prompt = " ".join(step["with"]["prompt"].split())
+        # The efficiency guidance must not read as permission to skip required
+        # validation -- the prompt states this explicitly, and the structured
+        # result schema still demands a real ruff/pytest verdict.
+        assert (
+            'a "COMPLETE" result must still reflect full `ruff check .` and full '
+            "`pytest -v` passing" in prompt
+        )
+        validation_schema = (
+            '"validation": {"ruff": "pass"|"fail"|"not_run", '
+            '"pytest": "pass"|"fail"|"not_run"}'
+        )
+        assert validation_schema in prompt
 
 
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
 def test_no_claude_prompt_tells_claude_to_skip_tests(workflow, job_id):
-    prompt = _claude_prompt_text(workflow["jobs"][job_id])
-    lowered = prompt.lower()
-    forbidden_phrases = (
-        "skip tests",
-        "skip pytest",
-        "skip validation",
-        "no need to test",
-        "don't run tests",
-    )
-    for forbidden in forbidden_phrases:
-        assert forbidden not in lowered
+    for step in _claude_steps(workflow["jobs"][job_id]):
+        lowered = step["with"]["prompt"].lower()
+        forbidden_phrases = (
+            "skip tests",
+            "skip pytest",
+            "skip validation",
+            "no need to test",
+            "don't run tests",
+        )
+        for forbidden in forbidden_phrases:
+            assert forbidden not in lowered
 
 
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
 def test_work_budget_guidance_precedes_ground_rules(workflow, job_id):
-    prompt = workflow["jobs"][job_id]["steps"]
-    step = next(s for s in prompt if "claude-code-action" in s.get("uses", ""))
-    raw = step["with"]["prompt"]
-    assert raw.index("Work-budget discipline") < raw.index("Ground rules")
+    for step in _claude_steps(workflow["jobs"][job_id]):
+        raw = step["with"]["prompt"]
+        assert raw.index("Work-budget discipline") < raw.index("Ground rules")
 
 
 # --- Failure diagnostics -----------------------------------------------------
@@ -1065,22 +1076,159 @@ def test_work_budget_guidance_precedes_ground_rules(workflow, job_id):
 # tests/test_collect_failure_diagnostics.py; these pin the workflow wiring.
 
 DIAGNOSTICS_ARTIFACT_NAMES = {
-    "build": "claude-build-failure-diagnostics",
     "correct_1": "claude-correction-cycle-1-failure-diagnostics",
     "correct_2": "claude-correction-cycle-2-failure-diagnostics",
     "correct_3": "claude-correction-cycle-3-failure-diagnostics",
 }
 
+CHECKPOINT_ARTIFACT_NAMES = {
+    "correct_1": "claude-correction-cycle-1-failure-checkpoint",
+    "correct_2": "claude-correction-cycle-2-failure-checkpoint",
+    "correct_3": "claude-correction-cycle-3-failure-checkpoint",
+}
+
+
+def test_build_runs_two_forty_turn_claude_segments_and_uploads_complete_checkpoints(build_job):
+    steps = build_job["steps"]
+    names = [s.get("name") for s in steps]
+    first = steps[names.index("Run Claude Code builder (segment 1)")]
+    second = steps[names.index("Run Claude Code builder (segment 2)")]
+    assert first["id"] == "claude_1"
+    assert first["continue-on-error"] is True
+    assert second["id"] == "claude"
+    assert second["if"] == "steps.segment_1.outputs.run_segment_2 == 'true'"
+    assert second["continue-on-error"] is True
+    assert "--max-turns 40" in first["with"]["claude_args"].splitlines()
+    assert "--max-turns 40" in second["with"]["claude_args"].splitlines()
+    assert "--resume ${{ steps.claude_1.outputs.session_id }}" in second["with"]["claude_args"]
+    assert len(_claude_steps(build_job)) == 2
+
+    for turn in (40, 80):
+        preserve = steps[names.index(f"Preserve turn-{turn} checkpoint")]
+        upload = steps[names.index(f"Upload turn-{turn} checkpoint")]
+        assert "collect_worktree_checkpoint.py" in preserve["run"]
+        assert f'"build" {turn}' in preserve["run"]
+        if turn == 40:
+            assert "steps.claude_1.outcome" in preserve["run"]
+            assert preserve["if"] == "always() && steps.claude_1.outcome != 'skipped'"
+            assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
+                "${{ steps.claude_1.outputs.execution_file }}"
+            )
+        else:
+            assert preserve["if"] == "always() && steps.segment_1.outputs.run_segment_2 == 'true'"
+            assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
+                "${{ steps.claude.outputs.execution_file }}"
+            )
+        assert preserve["env"]["CHECKPOINT_BASE_SHA"] == "${{ github.sha }}"
+        assert preserve["env"]["CHECKPOINT_BRANCH"] == "${{ steps.branch.outputs.branch }}"
+        assert upload["with"]["name"] == f"claude-build-turn-{turn}-checkpoint"
+        assert upload["with"]["if-no-files-found"] == "error"
+
+    classify = steps[names.index("Classify segment-1 outcome")]
+    assert "classify_builder_segment.py" in classify["run"]
+    assert names.index("Preserve turn-40 checkpoint") < names.index("Classify segment-1 outcome")
+    assert names.index("Classify segment-1 outcome") < names.index(
+        "Run Claude Code builder (segment 2)"
+    )
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_correction_failures_upload_complete_recovery_checkpoints(workflow, n):
+    job = workflow["jobs"][f"correct_{n}"]
+    names = [s.get("name") for s in job["steps"]]
+    preserve = job["steps"][names.index("Preserve failure checkpoint")]
+    upload = job["steps"][names.index("Upload failure checkpoint")]
+    assert preserve["if"] == "always()"
+    assert "collect_worktree_checkpoint.py" in preserve["run"]
+    assert f'"correct_{n}"' in preserve["run"]
+    expected_base = {
+        1: "${{ needs.publish.outputs.pr_head_sha }}",
+        2: "${{ needs.publish_correction_1.outputs.correction_sha }}",
+        3: "${{ needs.publish_correction_2.outputs.correction_sha }}",
+    }[n]
+    assert preserve["env"]["CHECKPOINT_BASE_SHA"] == expected_base
+    assert preserve["env"]["CHECKPOINT_CORRECTION_PROMPT"] == (
+        "${{ runner.temp }}/correction_prompt.txt"
+    )
+    assert preserve["env"]["CHECKPOINT_CODEX_BLOCKERS"] == (
+        "${{ runner.temp }}/correction_context.json"
+    )
+    assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
+        "${{ steps.claude.outputs.execution_file }}"
+    )
+    assert upload["if"] == "always() && steps.correction_success.outputs.complete != 'true'"
+    assert upload["with"]["name"] == CHECKPOINT_ARTIFACT_NAMES[f"correct_{n}"]
+    assert upload["with"]["if-no-files-found"] == "error"
+    marker = job["steps"][names.index("Mark correction successful")]
+    assert marker["id"] == "correction_success"
+    assert 'complete=true' in marker["run"]
+    assert names.index("Preserve failure checkpoint") < names.index(
+        "Stage and check correction result"
+    )
+    assert names.index("Set correction outputs") < names.index("Mark correction successful")
+    assert names.index("Mark correction successful") < names.index("Upload failure checkpoint")
+
+
+CORRECTION_FAILURE_POINTS = (
+    ("action failure", "Run Claude Code correction"),
+    ("FAILED result", "Stage and check correction result"),
+    ("NEEDS_HUMAN result", "Stage and check correction result"),
+    ("missing result", "Stage and check correction result"),
+    ("malformed result", "Stage and check correction result"),
+    ("result-gate failure", "Stage and check correction result"),
+    ("Ruff failure", "Lint with ruff"),
+    ("pytest failure", "Run tests"),
+    ("artifact validation failure", "Create correction artifact"),
+    ("artifact upload failure", "Upload correction artifact"),
+    ("output validation failure", "Set correction outputs"),
+)
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+@pytest.mark.parametrize(("failure_mode", "failing_step"), CORRECTION_FAILURE_POINTS)
+def test_every_correction_failure_point_precedes_success_marker_and_upload(
+    workflow, n, failure_mode, failing_step
+):
+    names = [step.get("name") for step in workflow["jobs"][f"correct_{n}"]["steps"]]
+    assert names.index(failing_step) < names.index("Mark correction successful")
+    if failure_mode == "action failure":
+        assert names.index(failing_step) < names.index("Preserve failure checkpoint")
+    else:
+        assert names.index("Preserve failure checkpoint") < names.index(failing_step)
+    assert names.index("Mark correction successful") < names.index("Upload failure checkpoint")
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_full_correction_success_suppresses_failure_checkpoint_upload(workflow, n):
+    steps = workflow["jobs"][f"correct_{n}"]["steps"]
+    marker = next(step for step in steps if step.get("name") == "Mark correction successful")
+    upload = next(step for step in steps if step.get("name") == "Upload failure checkpoint")
+    assert marker["run"] == 'echo "complete=true" >> "$GITHUB_OUTPUT"'
+    assert upload["if"] == "always() && steps.correction_success.outputs.complete != 'true'"
+
+
+@pytest.mark.parametrize("n", CORRECTION_CYCLES)
+def test_rendered_correction_prompt_is_exact_action_prompt(workflow, n):
+    from scripts.render_correction_prompt import render
+
+    job = workflow["jobs"][f"correct_{n}"]
+    names = [step.get("name") for step in job["steps"]]
+    render_step = job["steps"][names.index("Render exact correction prompt")]
+    assert f"render_correction_prompt.py {n}" in render_step["run"]
+    assert names.index("Render exact correction prompt") < names.index("Run Claude Code correction")
+    action = job["steps"][names.index("Run Claude Code correction")]
+    context_path = "${{ runner.temp }}/correction_context.json"
+    assert render(n, context_path) == action["with"]["prompt"]
+
 
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
 def test_claude_step_has_an_id_for_diagnostics_to_reference(workflow, job_id):
-    step = next(
-        s for s in workflow["jobs"][job_id]["steps"] if "claude-code-action" in s.get("uses", "")
-    )
-    assert step["id"] == "claude"
+    ids = [step["id"] for step in _claude_steps(workflow["jobs"][job_id])]
+    expected = ["claude_1", "claude"] if job_id == "build" else ["claude"]
+    assert ids == expected
 
 
-@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+@pytest.mark.parametrize("job_id", CORRECT_IDS)
 def test_failure_diagnostics_step_exists_and_runs_only_on_claude_failure(workflow, job_id):
     step = next(
         s
@@ -1093,7 +1241,7 @@ def test_failure_diagnostics_step_exists_and_runs_only_on_claude_failure(workflo
     assert "steps.claude.outputs.session_id" in step["run"]
 
 
-@pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
+@pytest.mark.parametrize("job_id", CORRECT_IDS)
 def test_failure_diagnostics_upload_step_is_correctly_scoped_and_named(workflow, job_id):
     step = next(
         s
@@ -1110,18 +1258,30 @@ def test_failure_diagnostics_upload_step_is_correctly_scoped_and_named(workflow,
 def test_failure_diagnostics_steps_precede_the_stage_and_check_step(workflow, job_id):
     steps = workflow["jobs"][job_id]["steps"]
     names = [s.get("name") for s in steps]
-    claude_idx = names.index(
-        "Run Claude Code builder" if job_id == "build" else "Run Claude Code correction"
-    )
-    collect_idx = names.index("Preserve failure diagnostics")
-    upload_idx = names.index("Upload failure diagnostics")
     stage_name = (
         "Stage and check builder result"
         if job_id == "build"
         else "Stage and check correction result"
     )
     stage_idx = names.index(stage_name)
-    assert claude_idx < collect_idx < upload_idx < stage_idx
+    if job_id == "build":
+        first_idx = names.index("Run Claude Code builder (segment 1)")
+        checkpoint_40_idx = names.index("Preserve turn-40 checkpoint")
+        second_idx = names.index("Run Claude Code builder (segment 2)")
+        checkpoint_80_idx = names.index("Preserve turn-80 checkpoint")
+        assert first_idx < checkpoint_40_idx < second_idx < checkpoint_80_idx < stage_idx
+    else:
+        claude_idx = names.index("Run Claude Code correction")
+        collect_idx = names.index("Preserve failure diagnostics")
+        upload_idx = names.index("Upload failure diagnostics")
+        checkpoint_idx = names.index("Preserve failure checkpoint")
+        assert (
+            claude_idx
+            < collect_idx
+            < upload_idx
+            < checkpoint_idx
+            < stage_idx
+        )
 
 
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
@@ -1163,14 +1323,14 @@ def test_normal_successful_artifact_behavior_is_unchanged(build_job):
 
 
 def test_failure_diagnostics_configured_max_turns_matches_workflow(workflow):
-    # The diagnostics script's own constant must never disagree with what
-    # the workflow actually configures -- checked here from the workflow
-    # side; the value itself is asserted from the script side in
-    # tests/test_collect_failure_diagnostics.py.
+    # Failure diagnostics are used only by correction jobs now; build
+    # recovery is handled by complete turn-40/turn-80 checkpoints.
     import scripts.collect_failure_diagnostics as diag
 
     claude_step = next(
-        s for s in workflow["jobs"]["build"]["steps"] if "claude-code-action" in s.get("uses", "")
+        s
+        for s in workflow["jobs"]["correct_1"]["steps"]
+        if "claude-code-action" in s.get("uses", "")
     )
     workflow_max_turns = next(
         line.removeprefix("--max-turns ")
