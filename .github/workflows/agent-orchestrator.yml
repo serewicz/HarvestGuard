@@ -174,6 +174,19 @@ name: Agent Orchestrator
 #   diagnostics. Complex detector work is fixture-first: if the real
 #   fixtures required to characterize a format are unavailable, Claude must
 #   return NEEDS_HUMAN before implementing product behavior.
+# - This revision fixes a segment-1 -> segment-2 resume failure observed in
+#   run 31514961738 (issue #100): claude-code-action's own `session_id`
+#   output was empty after segment 1 hit error_max_turns, even though the
+#   action's execution result recorded a real session id, so segment 2's
+#   `--resume ${{ steps.claude_1.outputs.session_id }}` ran with an empty
+#   value and the Claude CLI failed immediately. "Resolve segment-1/2
+#   session ID" (scripts/resolve_session_id.py) now prefers the action's own
+#   output and falls back to extracting the session id from the terminal
+#   `result` event in execution_file -- the same sanitized event
+#   scripts/classify_builder_segment.py already parses. "Guard segment-2
+#   resume" fails the job closed, before segment 2 runs, if no valid session
+#   id could be resolved at all. Both checkpoints now record the resolved
+#   id rather than the possibly-empty action output.
 on:
   workflow_dispatch:
     inputs:
@@ -557,6 +570,27 @@ jobs:
               }
             }
 
+      # claude-code-action's own `session_id` output has been observed
+      # empty/null after a segment ends with error_max_turns (issue #100,
+      # run 31514961738), even though the action's own execution result
+      # records a real session id. Resolving it here -- once, immediately
+      # after segment 1 -- means both the turn-40 checkpoint and segment 2's
+      # `--resume` read the same validated value instead of each
+      # independently trusting the possibly-empty action output. See
+      # scripts/resolve_session_id.py for the exact fallback and validation
+      # rules; this step never fails the job by itself; an unresolvable
+      # session id is dealt with by "Guard segment-2 resume" below, only
+      # if segment 2 turns out to be needed.
+      - name: Resolve segment-1 session ID
+        id: session_1
+        if: always() && steps.claude_1.outcome != 'skipped'
+        run: |
+          set -euo pipefail
+          SESSION_ID="$(python3 scripts/resolve_session_id.py \
+            "${{ steps.claude_1.outputs.session_id }}" \
+            "${{ steps.claude_1.outputs.execution_file }}")"
+          echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+
       - name: Preserve turn-40 checkpoint
         if: always() && steps.claude_1.outcome != 'skipped'
         env:
@@ -568,7 +602,7 @@ jobs:
         run: |
           python3 scripts/collect_worktree_checkpoint.py \
             "build" 40 "${{ runner.temp }}/checkpoint_turn40" \
-            "${{ steps.claude_1.outputs.session_id }}" "${{ steps.claude_1.outcome }}"
+            "${{ steps.session_1.outputs.session_id }}" "${{ steps.claude_1.outcome }}"
 
       - name: Upload turn-40 checkpoint
         if: always() && steps.claude_1.outcome != 'skipped'
@@ -588,6 +622,19 @@ jobs:
             "${{ runner.temp }}/agent_result.json" \
             "${{ steps.claude_1.outputs.execution_file }}")"
           echo "run_segment_2=$decision" >> "$GITHUB_OUTPUT"
+
+      # Fails the job closed, before segment 2 ever runs, if segment 2 is
+      # required to continue but no valid session id could be resolved from
+      # either the action's own output or the sanitized execution result.
+      # Without this gate, segment 2's `--resume` step below would receive
+      # an empty value and the Claude CLI would fail immediately with
+      # "--resume requires a valid session ID or session title when used
+      # with --print" -- exactly what happened in run 31514961738.
+      - name: Guard segment-2 resume
+        if: always() && steps.segment_1.outputs.run_segment_2 == 'true' && steps.session_1.outputs.session_id == ''
+        run: |
+          echo "::error::Segment 2 is required to continue this build, but no valid Claude session ID could be resolved from either the claude-code-action session_id output or the sanitized execution result. Refusing to invoke --resume with an empty value."
+          exit 1
 
       - name: Run Claude Code builder (segment 2)
         id: claude
@@ -682,7 +729,7 @@ jobs:
           claude_args: |
             --allowedTools Read,Edit,Write,Glob,Grep,Bash
             --max-turns 40
-            --resume ${{ steps.claude_1.outputs.session_id }}
+            --resume ${{ steps.session_1.outputs.session_id }}
           settings: |
             {
               "permissions": {
@@ -726,6 +773,20 @@ jobs:
               }
             }
 
+      # Same fallback as "Resolve segment-1 session ID" above, applied to
+      # segment 2's own action output for the turn-80 checkpoint. Segment 2
+      # is terminal (no segment 3 exists), so there is no further --resume
+      # to guard here -- only the checkpoint metadata benefits.
+      - name: Resolve segment-2 session ID
+        id: session_2
+        if: always() && steps.segment_1.outputs.run_segment_2 == 'true'
+        run: |
+          set -euo pipefail
+          SESSION_ID="$(python3 scripts/resolve_session_id.py \
+            "${{ steps.claude.outputs.session_id }}" \
+            "${{ steps.claude.outputs.execution_file }}")"
+          echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"
+
       - name: Preserve turn-80 checkpoint
         if: always() && steps.segment_1.outputs.run_segment_2 == 'true'
         env:
@@ -737,7 +798,7 @@ jobs:
         run: |
           python3 scripts/collect_worktree_checkpoint.py \
             "build" 80 "${{ runner.temp }}/checkpoint_turn80" \
-            "${{ steps.claude.outputs.session_id }}" "${{ steps.claude.outcome }}"
+            "${{ steps.session_2.outputs.session_id }}" "${{ steps.claude.outcome }}"
 
       - name: Upload turn-80 checkpoint
         if: always() && steps.segment_1.outputs.run_segment_2 == 'true'

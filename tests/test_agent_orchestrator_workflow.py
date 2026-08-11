@@ -1100,7 +1100,7 @@ def test_build_runs_two_forty_turn_claude_segments_and_uploads_complete_checkpoi
     assert second["continue-on-error"] is True
     assert "--max-turns 40" in first["with"]["claude_args"].splitlines()
     assert "--max-turns 40" in second["with"]["claude_args"].splitlines()
-    assert "--resume ${{ steps.claude_1.outputs.session_id }}" in second["with"]["claude_args"]
+    assert "--resume ${{ steps.session_1.outputs.session_id }}" in second["with"]["claude_args"]
     assert len(_claude_steps(build_job)) == 2
 
     for turn in (40, 80):
@@ -1110,11 +1110,13 @@ def test_build_runs_two_forty_turn_claude_segments_and_uploads_complete_checkpoi
         assert f'"build" {turn}' in preserve["run"]
         if turn == 40:
             assert "steps.claude_1.outcome" in preserve["run"]
+            assert '"${{ steps.session_1.outputs.session_id }}"' in preserve["run"]
             assert preserve["if"] == "always() && steps.claude_1.outcome != 'skipped'"
             assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
                 "${{ steps.claude_1.outputs.execution_file }}"
             )
         else:
+            assert '"${{ steps.session_2.outputs.session_id }}"' in preserve["run"]
             assert preserve["if"] == "always() && steps.segment_1.outputs.run_segment_2 == 'true'"
             assert preserve["env"]["CHECKPOINT_EXECUTION_FILE"] == (
                 "${{ steps.claude.outputs.execution_file }}"
@@ -1130,6 +1132,47 @@ def test_build_runs_two_forty_turn_claude_segments_and_uploads_complete_checkpoi
     assert names.index("Classify segment-1 outcome") < names.index(
         "Run Claude Code builder (segment 2)"
     )
+
+
+def test_segment_session_id_is_resolved_with_fallback_and_guarded(build_job):
+    steps = build_job["steps"]
+    names = [s.get("name") for s in steps]
+
+    resolve_1 = steps[names.index("Resolve segment-1 session ID")]
+    assert resolve_1["id"] == "session_1"
+    assert resolve_1["if"] == "always() && steps.claude_1.outcome != 'skipped'"
+    assert "resolve_session_id.py" in resolve_1["run"]
+    assert "${{ steps.claude_1.outputs.session_id }}" in resolve_1["run"]
+    assert "${{ steps.claude_1.outputs.execution_file }}" in resolve_1["run"]
+    assert 'echo "session_id=$SESSION_ID" >> "$GITHUB_OUTPUT"' in resolve_1["run"]
+
+    resolve_2 = steps[names.index("Resolve segment-2 session ID")]
+    assert resolve_2["id"] == "session_2"
+    assert resolve_2["if"] == "always() && steps.segment_1.outputs.run_segment_2 == 'true'"
+    assert "resolve_session_id.py" in resolve_2["run"]
+    assert "${{ steps.claude.outputs.session_id }}" in resolve_2["run"]
+    assert "${{ steps.claude.outputs.execution_file }}" in resolve_2["run"]
+
+    guard = steps[names.index("Guard segment-2 resume")]
+    assert guard["if"] == (
+        "always() && steps.segment_1.outputs.run_segment_2 == 'true' "
+        "&& steps.session_1.outputs.session_id == ''"
+    )
+    assert "exit 1" in guard["run"]
+
+    # Ordering: session 1 resolves before it is consumed by the turn-40
+    # checkpoint or the guard; the guard runs before segment 2 could ever
+    # receive an empty --resume value; session 2 resolves only after
+    # segment 2 finishes, before the turn-80 checkpoint consumes it.
+    assert names.index("Resolve segment-1 session ID") < names.index("Preserve turn-40 checkpoint")
+    assert names.index("Classify segment-1 outcome") < names.index("Guard segment-2 resume")
+    assert names.index("Guard segment-2 resume") < names.index(
+        "Run Claude Code builder (segment 2)"
+    )
+    assert names.index("Run Claude Code builder (segment 2)") < names.index(
+        "Resolve segment-2 session ID"
+    )
+    assert names.index("Resolve segment-2 session ID") < names.index("Preserve turn-80 checkpoint")
 
 
 @pytest.mark.parametrize("n", CORRECTION_CYCLES)
