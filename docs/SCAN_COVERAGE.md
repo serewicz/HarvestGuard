@@ -218,6 +218,27 @@ Given findings A and B were collected before a later failure:
   See [CLI.md § Reading coverage from an artifact](CLI.md#reading-coverage-from-an-artifact)
   for the full complete/limited/partial/failed reading.
 
+## Stored runs preserve partial and limited context
+
+A scan persisted with `--evidence-db` (see
+[CLI.md § Local Evidence Store](CLI.md#local-evidence-store)) stores the
+coverage context, not a cleaned-up summary of it. The stored run keeps the
+scanner errors, the configured scope constraints and exclusions, the scanner
+versions of every scanner that was invoked — including one that produced
+nothing or failed before producing anything — the crypto-file accounting, and
+every retained finding's own `limitations`, `unknowns`, and `errors`.
+
+Two consequences follow. A partial scan is a valid, complete *record*: the
+findings a scanner collected before it failed are stored together with the
+error that stopped it, in the same transaction. And a zero-finding run is
+stored too — `harvestguard evidence list` is how it is found, since its
+bare-array JSON is empty and carries no finding-level scan ID.
+
+Because that context survives, a stored run exported later reproduces the same
+`Coverage` row, coverage statement, and scope section the live scan produced.
+Coverage is never re-derived from current code or from the findings alone, so a
+run that was not complete cannot later read as though it had been.
+
 ## Validation
 
 `tests/test_end_to_end_validation.py` (roadmap HG-008) exercises these

@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import datetime, timezone
 from pathlib import Path
 from types import MappingProxyType
@@ -224,6 +224,32 @@ class Provenance:
 
 def findings_to_dicts(findings: list[NormalizedFinding]) -> list[dict[str, Any]]:
     return [finding.to_dict() for finding in findings]
+
+
+# Every constructor field of NormalizedFinding. `to_dict()` also emits a nested
+# `provenance` object, which is a read-only view over flat fields that are
+# already present in the same payload -- it is deliberately excluded here so the
+# flat fields stay the single source of truth on the way back in.
+_FINDING_FIELD_NAMES = frozenset(f.name for f in fields(NormalizedFinding))
+
+
+def finding_from_dict(payload: dict[str, Any]) -> NormalizedFinding:
+    """Rebuild a NormalizedFinding from a previously serialized ``to_dict()``.
+
+    The inverse of `to_dict()`, for callers reading a stored finding snapshot
+    back (see `evidence_store`). Unknown keys are ignored so a payload written
+    by a newer schema version does not fail to load, and the nested
+    `provenance` object is skipped in favour of the authoritative flat fields.
+
+    A stored `finding_id` is preserved as-is rather than recomputed, so a
+    historical observation keeps the identity it was recorded with even if the
+    identity algorithm in current code would derive a different one.
+    """
+    if not isinstance(payload, dict):
+        raise TypeError(f"finding payload must be a dict, got {type(payload).__name__}")
+    return NormalizedFinding(
+        **{key: value for key, value in payload.items() if key in _FINDING_FIELD_NAMES}
+    )
 
 
 def _normalize_timestamp(value: str | datetime | None) -> str:

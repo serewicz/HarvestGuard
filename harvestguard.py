@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import fnmatch
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 from classifier.scanner import scan_filesystem_for_sensitive_data_findings
 from code_analysis.scanner import scan_source_for_crypto_usage_findings
+from evidence_store import EvidenceStoreError, list_scan_runs, load_scan_run, store_scan_run
 from finding_adapters import (
     AZURE_BLOB_SCANNER,
     CODE_ANALYSIS_SCANNER,
@@ -77,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "scan":
         return run_scan_command(args)
+    if args.command == "evidence":
+        return run_evidence_command(args, parser)
 
     parser.print_help(sys.stderr)
     return EXIT_USAGE
@@ -180,7 +185,95 @@ def build_parser() -> argparse.ArgumentParser:
             "--no-fail-on-error to exit 0 even if a scanner reports an error."
         ),
     )
+    # Opt-in only, and with no default path: HarvestGuard must never quietly
+    # retain paths, object names, certificate metadata, or ownership signals on
+    # a workstation. Without this flag the scan stays ephemeral.
+    scan.add_argument(
+        "--evidence-db",
+        dest="evidence_db",
+        metavar="PATH",
+        help=(
+            "Store this scan run in a local SQLite evidence database, creating "
+            "it if needed. Omitted by default: the database retains normalized "
+            "finding evidence and is a sensitive artifact."
+        ),
+    )
+
+    _add_evidence_parser(subparsers)
     return parser
+
+
+def _add_evidence_parser(subparsers: argparse._SubParsersAction) -> None:
+    """`harvestguard evidence` -- read back runs stored with --evidence-db.
+
+    Deliberately bounded to list/verify/export: the store is append-only at the
+    app layer, so there is no update, delete, or purge command.
+    """
+    evidence = subparsers.add_parser(
+        "evidence",
+        help="Inspect scan runs stored in a local evidence database",
+        description=(
+            "List, verify, and export scan runs previously stored with "
+            "'harvestguard scan --evidence-db'. Export reuses the same JSON, "
+            "Markdown, and summary formatters as a live scan, so a stored run "
+            "can be reported on again without rescanning the target."
+        ),
+    )
+    evidence_commands = evidence.add_subparsers(dest="evidence_command")
+
+    def _with_db(name: str, help_text: str) -> argparse.ArgumentParser:
+        subparser = evidence_commands.add_parser(name, help=help_text, description=help_text)
+        subparser.add_argument(
+            "--evidence-db",
+            dest="evidence_db",
+            required=True,
+            metavar="PATH",
+            help="Path to an existing local SQLite evidence database",
+        )
+        return subparser
+
+    _with_db(
+        "list",
+        (
+            "List stored scan runs, including zero-finding runs that carry no "
+            "finding-level scan ID."
+        ),
+    )
+    verify = _with_db(
+        "verify",
+        (
+            "Recompute a stored run's integrity digest. Detects corruption or "
+            "internal inconsistency; it is not a signature check."
+        ),
+    )
+    verify.add_argument("scan_id", metavar="SCAN-ID", help="Scan ID of the stored run")
+    export = _with_db(
+        "export", "Re-emit a stored run through HarvestGuard's existing report formatters."
+    )
+    export.add_argument("scan_id", metavar="SCAN-ID", help="Scan ID of the stored run")
+    export_output = export.add_mutually_exclusive_group(required=True)
+    export_output.add_argument(
+        "--json",
+        nargs="?",
+        const="-",
+        metavar="PATH",
+        help="Emit the stored findings as JSON to stdout or an optional file",
+    )
+    export_output.add_argument(
+        "--markdown",
+        nargs="?",
+        const="-",
+        metavar="PATH",
+        help="Emit a Markdown report for the stored run to stdout or an optional file",
+    )
+    export_output.add_argument(
+        "--summary", action="store_true", help="Emit a human-readable summary of the stored run"
+    )
+    export.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress messages; the requested output is still emitted",
+    )
 
 
 def run_scan_command(args: argparse.Namespace) -> int:
@@ -211,6 +304,10 @@ def run_scan_command(args: argparse.Namespace) -> int:
             return EXIT_USAGE
         target_repr = args.target
 
+    # One run identity for the whole scan, generated before any scanner runs so
+    # every finding this execution emits carries the same scan ID -- including
+    # findings a scanner collected before failing.
+    scan_id = str(uuid.uuid4())
     started_at = datetime.now(timezone.utc)
     started_perf = time.perf_counter()
     findings = _run_scanners(specs, quiet=args.quiet, scanner_errors=scanner_errors)
@@ -218,6 +315,10 @@ def run_scan_command(args: argparse.Namespace) -> int:
     findings = [
         finding for finding in findings if not _is_excluded(finding.location, args.exclude)
     ]
+    # After deduplication and exclusion, so exactly the retained findings are
+    # stamped. finding_id is excluded from scan_id by design, so this does not
+    # change any existing stable finding identity.
+    findings = _assign_scan_id(findings, scan_id)
     duration_seconds = time.perf_counter() - started_perf
     context = make_report_context(
         target_path=target_repr,
@@ -230,7 +331,26 @@ def run_scan_command(args: argparse.Namespace) -> int:
         scope_constraints=_scope_constraints(args, specs),
         scanner_versions=_scanner_versions(specs),
         crypto_files_inspected=crypto_stats.get("files_inspected"),
+        scan_id=scan_id,
     )
+
+    # Persist before emitting output: a stored run is the durable record, and a
+    # later failure to write a requested report file must not cost the evidence.
+    persistence_failed = False
+    if args.evidence_db is not None:
+        try:
+            store_scan_run(args.evidence_db, scan_id=scan_id, context=context, findings=findings)
+        except EvidenceStoreError as exc:
+            # stderr only: JSON on stdout must stay parseable even when
+            # persistence failed, and the run must not be reported as stored.
+            print(f"Error: could not store scan evidence: {exc}", file=sys.stderr)
+            persistence_failed = True
+        else:
+            if not args.quiet:
+                print(
+                    f"Stored scan {scan_id} in evidence database: {args.evidence_db}",
+                    file=sys.stderr,
+                )
 
     if args.json is not None:
         # An output write failure is an execution error, not invalid CLI input:
@@ -245,9 +365,117 @@ def run_scan_command(args: argparse.Namespace) -> int:
     else:
         print(format_console_summary(findings, context))
 
+    if persistence_failed:
+        return EXIT_SCAN_ERROR
     if scanner_errors and args.fail_on_error:
         return EXIT_SCAN_ERROR
     return EXIT_OK
+
+
+def _assign_scan_id(findings: list[NormalizedFinding], scan_id: str) -> list[NormalizedFinding]:
+    """Stamp the run identity onto every retained finding.
+
+    NormalizedFinding is frozen, so this is an immutable copy rather than a
+    mutation. `scan_id` does not participate in `finding_id` generation, and
+    each finding already has its ID by this point, so the copy keeps the exact
+    identity the scanner produced.
+    """
+    return [
+        finding if finding.scan_id == scan_id else dataclasses.replace(finding, scan_id=scan_id)
+        for finding in findings
+    ]
+
+
+def run_evidence_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    if args.evidence_command == "list":
+        return _run_evidence_list(args)
+    if args.evidence_command == "verify":
+        return _run_evidence_verify(args)
+    if args.evidence_command == "export":
+        return _run_evidence_export(args)
+
+    parser.print_help(sys.stderr)
+    return EXIT_USAGE
+
+
+def _run_evidence_list(args: argparse.Namespace) -> int:
+    try:
+        runs = list_scan_runs(args.evidence_db)
+    except EvidenceStoreError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_SCAN_ERROR
+
+    if not runs:
+        print("No scan runs stored.")
+        return EXIT_OK
+
+    header = ("SCAN ID", "SCAN TIME", "TYPE", "TARGET", "FINDINGS", "SCANNER ERRORS")
+    rows = [
+        (
+            run.scan_id,
+            run.scan_time,
+            run.scan_type or "unknown",
+            run.target_path,
+            str(run.finding_count),
+            "yes" if run.has_scanner_errors else "no",
+        )
+        for run in runs
+    ]
+    widths = [max(len(row[column]) for row in (header, *rows)) for column in range(len(header))]
+    for row in (header, *rows):
+        print("  ".join(value.ljust(width) for value, width in zip(row, widths)).rstrip())
+    return EXIT_OK
+
+
+def _run_evidence_verify(args: argparse.Namespace) -> int:
+    stored = _load_stored_run(args)
+    if stored is None:
+        return EXIT_SCAN_ERROR
+    print(
+        f"Scan {stored.scan_id} is internally consistent: recomputed SHA-256 digest "
+        f"{stored.evidence_digest} matches the stored digest over "
+        f"{len(stored.findings)} finding snapshot(s)."
+    )
+    # Deliberately not "authentic", "signed", or "untampered": the digest
+    # detects corruption and inconsistency only (see evidence_store).
+    print(
+        "This detects corruption or internal inconsistency only. It is not a "
+        "signature, attestation, or chain-of-custody proof."
+    )
+    return EXIT_OK
+
+
+def _run_evidence_export(args: argparse.Namespace) -> int:
+    stored = _load_stored_run(args)
+    if stored is None:
+        return EXIT_SCAN_ERROR
+
+    # The same formatters a live scan uses -- never a parallel stored-run
+    # report implementation that could drift from them.
+    if args.json is not None:
+        content = findings_json(stored.findings)
+        if not _emit_output(content, args.json, "stored JSON findings", args.quiet):
+            return EXIT_SCAN_ERROR
+    elif args.markdown is not None:
+        report = format_markdown_report(stored.findings, stored.context)
+        if not _emit_output(report, args.markdown, "stored Markdown report", args.quiet):
+            return EXIT_SCAN_ERROR
+    else:
+        print(format_console_summary(stored.findings, stored.context))
+    return EXIT_OK
+
+
+def _load_stored_run(args: argparse.Namespace):
+    """Load and verify one stored run, or report the failure on stderr.
+
+    Returns None on any evidence-store failure, so no caller can emit an
+    unverified or inconsistent stored payload as valid evidence.
+    """
+    try:
+        return load_scan_run(args.evidence_db, args.scan_id)
+    except EvidenceStoreError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return None
 
 
 def _local_scanner_specs(
