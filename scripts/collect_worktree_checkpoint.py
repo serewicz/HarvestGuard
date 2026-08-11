@@ -39,7 +39,22 @@ EXCLUDED_NAME_PATTERNS = (
 )
 SECRET_PATTERNS = (
     re.compile(rb"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),
-    re.compile(rb"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
+    # Requires a real base64-shaped body of meaningful length after the PEM
+    # header, not just the header text alone. Every other pattern in this
+    # tuple already requires a genuine random-looking suffix (16-36+ chars)
+    # before it counts as credential-shaped; the bare header alone does
+    # not, and this repository's own established test convention (see
+    # tests/test_classifier.py's PRIVATE_KEY_RE fixture, which quotes the
+    # same header with only a short truncated "MIIBOgIBAAJBAK..." example
+    # body) legitimately writes that header without real key material to
+    # test HarvestGuard's own secret-detection logic. A real PEM key always
+    # has a substantial base64-encoded body -- even the shortest common key
+    # type comfortably exceeds 40 characters -- so this keeps genuine key
+    # material excluded while no longer flagging a bare header mention.
+    re.compile(
+        rb"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"
+        rb"\s*(?:[A-Za-z0-9+/=]\s*){40,}"
+    ),
     re.compile(rb"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
     re.compile(rb"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
     re.compile(rb"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"),

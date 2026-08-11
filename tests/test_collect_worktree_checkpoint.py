@@ -211,6 +211,51 @@ def test_credential_shaped_content_outside_fixture_is_excluded(tmp_path, monkeyp
     assert report == [{"path": "opaque.bin", "reason": "credential-shaped content"}]
 
 
+def test_private_key_header_only_test_fixture_is_recoverable(tmp_path, monkeypatch):
+    """Same convention as this repo's own tests/test_classifier.py:18 -- a
+    header-only, truncated PEM example used to test secret-detection logic,
+    not real key material. Investigated after workflow run 31514961738
+    (issue #100) excluded tests/test_evidence_store.py as "credential-shaped
+    content"; this reproduces the most likely cause: PRIVATE_KEY_RE alone,
+    unlike every other pattern in SECRET_PATTERNS, previously required no
+    random-looking suffix, so a bare header mention was enough to exclude an
+    otherwise-legitimate new test file."""
+    root = repo(tmp_path)
+    fixture_test = root / "tests" / "test_new_feature.py"
+    fixture_test.parent.mkdir(parents=True, exist_ok=True)
+    fixture_test.write_text(
+        "def test_private_key_header_detected():\n"
+        '    text = "-----BEGIN RSA PRIVATE KEY-----\\n'
+        'MIIBOgIBAAJBAK...\\n-----END RSA PRIVATE KEY-----"\n'
+        '    assert classify(text) == ["Private Key"]\n'
+    )
+    monkeypatch.chdir(root)
+    out = tmp_path / "recoverable"
+    checkpoint.collect("build", 40, out)
+    report = json.loads((out / "excluded-untracked.json").read_text())["excluded"]
+    assert report == []
+    with tarfile.open(out / "untracked-files.tar.gz") as bundle:
+        assert bundle.getnames() == ["tests/test_new_feature.py"]
+
+
+def test_real_private_key_shaped_content_remains_excluded(tmp_path, monkeypatch):
+    """The narrowed pattern still requires a real base64-shaped body, but a
+    real PEM key always has one -- this must keep failing closed."""
+    root = repo(tmp_path)
+    body = "\n".join(
+        "MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQC7VJTUt9Us8cKj"
+        for _ in range(6)
+    )
+    (root / "id_rsa_leaked.txt").write_text(
+        f"-----BEGIN RSA PRIVATE KEY-----\n{body}\n-----END RSA PRIVATE KEY-----\n"
+    )
+    monkeypatch.chdir(root)
+    out = tmp_path / "still-excluded"
+    checkpoint.collect("build", 40, out)
+    report = json.loads((out / "excluded-untracked.json").read_text())["excluded"]
+    assert report == [{"path": "id_rsa_leaked.txt", "reason": "credential-shaped content"}]
+
+
 def test_path_traversal_from_git_is_rejected(tmp_path, monkeypatch):
     root = repo(tmp_path)
     monkeypatch.chdir(root)
