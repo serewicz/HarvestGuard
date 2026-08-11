@@ -775,9 +775,12 @@ today's code. For the same HarvestGuard release, an immediate stored JSON
 export of a run persisted with `--evidence-db` is byte-identical to that run's
 live JSON output aside from the trailing newline. Across releases, note that
 the `HarvestGuard Version` a stored run recorded is the release that *executed*
-the scan, which may differ from the release performing a later export; a future
-report-format change may alter the Markdown while the stored evidence is
-unchanged.
+the scan, which may differ from the release performing a later export. A stored
+Markdown export reports the executing release in that row and, when the
+exporting release differs, adds an `Exported By` row naming the release that
+rendered the document; the separate `Report Generator` row remains the report
+format's own identity. A future report-format change may alter the Markdown
+while the stored evidence is unchanged.
 
 The store is append-only: there is no update, delete, or purge command, and
 storing a scan ID that already exists fails instead of replacing prior

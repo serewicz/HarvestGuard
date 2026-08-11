@@ -457,7 +457,11 @@ def _run_evidence_export(args: argparse.Namespace) -> int:
         if not _emit_output(content, args.json, "stored JSON findings", args.quiet):
             return EXIT_SCAN_ERROR
     elif args.markdown is not None:
-        report = format_markdown_report(stored.findings, stored.context)
+        # The stored run names the release that executed the scan; a later
+        # release exporting it must not claim to have produced that evidence.
+        report = format_markdown_report(
+            stored.findings, stored.context, stored.harvestguard_version
+        )
         if not _emit_output(report, args.markdown, "stored Markdown report", args.quiet):
             return EXIT_SCAN_ERROR
     else:

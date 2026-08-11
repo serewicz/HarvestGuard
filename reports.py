@@ -263,8 +263,18 @@ def format_console_summary(
 
 
 def format_markdown_report(
-    findings: list[NormalizedFinding], context: ScanReportContext
+    findings: list[NormalizedFinding],
+    context: ScanReportContext,
+    produced_by_version: str | None = None,
 ) -> str:
+    """Render the Markdown evidence report.
+
+    ``produced_by_version`` names the HarvestGuard release that *executed* the
+    scan. A live scan leaves it unset, so it defaults to this release. A stored
+    run re-exported from an evidence store passes the version recorded with
+    that run, which may predate the release running the export -- the two are
+    reported as separate rows rather than collapsed into one.
+    """
     counts = summarize_findings(findings)
     ordered = sort_findings(findings)
     by_type = _group_by_type(ordered)
@@ -294,12 +304,20 @@ def format_markdown_report(
         # if the scan was persisted with `--evidence-db`. Omitted rather than
         # shown blank for a library caller that supplied no run identity.
         lines.append(f"| Scan ID | {_md(context.scan_id)} |")
+    scan_version = produced_by_version or HARVESTGUARD_VERSION
     lines.extend([
         # A shared artifact must name the release that produced it; the JSON
         # output deliberately stays a bare finding array (docs/RELEASE.md,
         # "Identifying the version that produced an artifact"), so this row is
         # where a reviewer reads tool identity off the evidence itself.
-        f"| HarvestGuard Version | {_md(HARVESTGUARD_VERSION)} |",
+        f"| HarvestGuard Version | {_md(scan_version)} |",
+    ])
+    if scan_version != HARVESTGUARD_VERSION:
+        # A stored run exported by a later release: the row above stays the
+        # release that observed the evidence, and this additive row names the
+        # release that rendered this document, so the two are never conflated.
+        lines.append(f"| Exported By | HarvestGuard {_md(HARVESTGUARD_VERSION)} |")
+    lines.extend([
         f"| Report Generator | {REPORT_GENERATOR} {REPORT_VERSION} |",
         f"| Target Path | {_md(context.target_path)} |",
         f"| Duration | {_duration(context.duration_seconds)} |",

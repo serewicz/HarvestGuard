@@ -598,6 +598,45 @@ def test_stored_markdown_preserves_the_original_scan_context(tmp_path, capsys):
     assert "| test | 0.1.0 | 1 |" in output
 
 
+def test_stored_markdown_export_names_the_release_that_executed_the_scan(tmp_path, capsys):
+    # A run stored by an older release and exported by a newer one: the report
+    # must not reattribute the evidence to the release doing the export.
+    db = tmp_path / "evidence.db"
+    store_scan_run(
+        db,
+        scan_id="run-1",
+        context=_context(),
+        findings=[_finding("/a/cert.pem")],
+        harvestguard_version="0.0.9-earlier",
+    )
+
+    exit_code = harvestguard.main(
+        ["evidence", "export", "run-1", "--evidence-db", str(db), "--markdown", "--quiet"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert "| HarvestGuard Version | 0.0.9-earlier |" in output
+    # The exporting release is reported separately, not merged into the row
+    # above and not silently dropped.
+    assert f"| Exported By | HarvestGuard {HARVESTGUARD_VERSION} |" in output
+    assert "| Report Generator | harvestguard-report" in output
+
+
+def test_same_version_stored_markdown_export_adds_no_exported_by_row(tmp_path, capsys):
+    db = tmp_path / "evidence.db"
+    store_scan_run(db, scan_id="run-1", context=_context(), findings=[_finding("/a/cert.pem")])
+
+    exit_code = harvestguard.main(
+        ["evidence", "export", "run-1", "--evidence-db", str(db), "--markdown", "--quiet"]
+    )
+
+    output = capsys.readouterr().out
+    assert exit_code == 0
+    assert f"| HarvestGuard Version | {HARVESTGUARD_VERSION} |" in output
+    assert "Exported By" not in output
+
+
 def test_stored_summary_export_uses_the_console_formatter(tmp_path, capsys):
     db = tmp_path / "evidence.db"
     store_scan_run(
