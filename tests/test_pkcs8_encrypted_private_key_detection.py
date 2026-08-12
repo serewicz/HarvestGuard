@@ -237,6 +237,76 @@ def test_pem_block_surrounded_by_unrelated_text_is_still_detected(tmp_path):
     assert _only_finding(tmp_path).rule_id == RULE_ID
 
 
+# --- PEM boundary lines must be exact, not a substring match ---------------
+#
+# Codex Principal Review (PR #104) found that the boundary check was a raw
+# `str.find` substring search, so `prefix-----BEGIN ...-----` or
+# `-----END ...-----suffix` was accepted as a real boundary. Issue #83
+# requires exact opening and closing labels and a complete PEM block.
+
+
+def test_prefix_text_on_begin_line_is_rejected(tmp_path):
+    mutated = _real("rsa_encrypted_pkcs8.pem").decode("ascii").replace(
+        PEM_BEGIN, f"not-a-boundary{PEM_BEGIN}", 1
+    )
+    _write(tmp_path, "key.pem", mutated.encode("ascii"))
+
+    assert _pkcs8_findings(tmp_path) == []
+
+
+def test_suffix_text_on_begin_line_is_rejected(tmp_path):
+    mutated = _real("rsa_encrypted_pkcs8.pem").decode("ascii").replace(
+        PEM_BEGIN, f"{PEM_BEGIN}not-a-boundary", 1
+    )
+    _write(tmp_path, "key.pem", mutated.encode("ascii"))
+
+    assert _pkcs8_findings(tmp_path) == []
+
+
+def test_prefix_text_on_end_line_is_rejected(tmp_path):
+    mutated = _real("rsa_encrypted_pkcs8.pem").decode("ascii").replace(
+        PEM_END, f"not-a-boundary{PEM_END}", 1
+    )
+    _write(tmp_path, "key.pem", mutated.encode("ascii"))
+
+    assert _pkcs8_findings(tmp_path) == []
+
+
+def test_suffix_text_on_end_line_is_rejected(tmp_path):
+    mutated = _real("rsa_encrypted_pkcs8.pem").decode("ascii").replace(
+        PEM_END, f"{PEM_END}not-a-boundary", 1
+    )
+    _write(tmp_path, "key.pem", mutated.encode("ascii"))
+
+    assert _pkcs8_findings(tmp_path) == []
+
+
+def test_valid_lf_pem_still_passes(tmp_path):
+    real_pem = _real("rsa_encrypted_pkcs8.pem")
+    assert b"\r\n" not in real_pem  # sanity: the committed fixture is LF already
+    _write(tmp_path, "key.pem", real_pem)
+
+    assert _only_finding(tmp_path).rule_id == RULE_ID
+
+
+def test_valid_crlf_pem_passes(tmp_path):
+    crlf_pem = _real("rsa_encrypted_pkcs8.pem").replace(b"\n", b"\r\n")
+    _write(tmp_path, "key.pem", crlf_pem)
+
+    assert _only_finding(tmp_path).rule_id == RULE_ID
+
+
+def test_separate_line_surrounding_text_still_passes(tmp_path):
+    body = _real("ec_encrypted_pkcs8.pem").decode("ascii")
+    _write(
+        tmp_path,
+        "notes.pem",
+        f"unrelated line before\n{body}\nunrelated line after\n".encode("ascii"),
+    )
+
+    assert _only_finding(tmp_path).rule_id == RULE_ID
+
+
 def test_the_key_is_read_once_through_the_shared_context(tmp_path, monkeypatch):
     # Adding a detector must not add a read: every view it takes comes from the
     # one cached read the scanner already performed for the file.

@@ -1730,30 +1730,43 @@ def _pkcs8_encrypted_pem_bodies(text: str) -> list[bytes]:
     """The decoded DER body of every complete, well-formed
     ``ENCRYPTED PRIVATE KEY`` PEM block in ``text``.
 
-    A block counts only when both exact labels are present in order and the
-    base64 between them decodes under strict validation -- a header with no
-    footer, a truncated block, or an invalid base64 body yields nothing, so a
-    malformed PEM cannot reach the structural check and cannot earn a
-    High-confidence finding. ``text`` is the scanner's existing bounded text
-    view (see ``decode_text``), so this adds no new size boundary.
+    A block counts only when both labels appear as **exact boundary lines** --
+    the line, with only leading/trailing whitespace stripped, equals the label
+    exactly, so ``prefix-----BEGIN ENCRYPTED PRIVATE KEY-----`` or
+    ``-----END ENCRYPTED PRIVATE KEY-----suffix`` is not a boundary and cannot
+    start or close a block. ``str.splitlines()`` recognizes LF, CRLF, and bare
+    CR line endings alike, so this is not tied to one line-ending convention.
+    Unrelated text on its own lines before, between, or after a block is still
+    fine -- it is simply never a boundary line.
+
+    A block also counts only when the base64 between the boundaries decodes
+    under strict validation -- a header with no footer, a truncated block, or
+    an invalid base64 body yields nothing, so a malformed PEM cannot reach the
+    structural check and cannot earn a High-confidence finding. ``text`` is the
+    scanner's existing bounded text view (see ``decode_text``), so this adds no
+    new size boundary.
 
     The decoded bytes are returned for structural validation only; they are
     never retained in a finding.
     """
+    lines = text.splitlines()
     bodies: list[bytes] = []
-    start = 0
-    while True:
-        begin_index = text.find(_PKCS8_ENCRYPTED_PEM_BEGIN, start)
-        if begin_index == -1:
-            return bodies
-        body_start = begin_index + len(_PKCS8_ENCRYPTED_PEM_BEGIN)
-        end_index = text.find(_PKCS8_ENCRYPTED_PEM_END, body_start)
-        if end_index == -1:
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != _PKCS8_ENCRYPTED_PEM_BEGIN:
+            index += 1
+            continue
+        end_index = None
+        for candidate in range(index + 1, len(lines)):
+            if lines[candidate].strip() == _PKCS8_ENCRYPTED_PEM_END:
+                end_index = candidate
+                break
+        if end_index is None:
             # A header with no matching footer is an incomplete block, not an
             # encrypted private key.
             return bodies
-        start = end_index + len(_PKCS8_ENCRYPTED_PEM_END)
-        body = "".join(text[body_start:end_index].split())
+        body = "".join("".join(lines[index + 1 : end_index]).split())
+        index = end_index + 1
         if not body:
             continue
         try:
@@ -1761,6 +1774,7 @@ def _pkcs8_encrypted_pem_bodies(text: str) -> list[bytes]:
         except (ValueError, binascii.Error):
             # Invalid base64 is a malformed block, which produces no finding.
             continue
+    return bodies
 
 
 def _pkcs8_encrypted_finding(file_path: Path) -> CryptoInventoryFinding:
