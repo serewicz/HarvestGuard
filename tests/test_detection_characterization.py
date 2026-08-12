@@ -205,7 +205,7 @@ def test_crypto_inventory_malformed_certificate_is_low_confidence_with_error():
     assert malformed.errors
 
 
-def test_crypto_inventory_encrypted_key_is_high_confidence_with_passphrase_note():
+def test_crypto_inventory_encrypted_key_is_high_confidence_without_decrypting_it():
     findings = {
         Path(f.location).name: f
         for f in scan_crypto_inventory_findings(str(FIXTURE_DIR))
@@ -213,7 +213,13 @@ def test_crypto_inventory_encrypted_key_is_high_confidence_with_passphrase_note(
 
     encrypted = findings["encrypted_key.pem"]
     assert encrypted.confidence == "High"
-    assert any("passphrase" in err for err in encrypted.errors)
+    # Since HG-038 this fixture's High confidence rests on the validated
+    # EncryptedPrivateKeyInfo structure rather than on a passwordless load
+    # failing, so it no longer carries a passphrase-required error: the
+    # structure was read, nothing was attempted and refused.
+    assert encrypted.asset_type == "Encrypted PKCS#8 Private Key"
+    assert encrypted.technical_metadata["Format"] == "PKCS#8"
+    assert not encrypted.errors
 
 
 def test_crypto_inventory_jks_is_header_only_with_documented_limitation():

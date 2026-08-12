@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import binascii
 import fnmatch
 import json
 import math
@@ -1661,6 +1662,132 @@ def _jceks_finding(file_path: Path) -> CryptoInventoryFinding:
     )
 
 
+# --- Encrypted PKCS#8 private-key detection (HG-038) ------------------------
+#
+# PKCS#8 `EncryptedPrivateKeyInfo` (RFC 5958) is exactly two fields:
+#
+#     EncryptedPrivateKeyInfo ::= SEQUENCE {
+#         encryptionAlgorithm  AlgorithmIdentifier,
+#         encryptedData        OCTET STRING
+#     }
+#
+# The claim HG-038 makes is that this outer structure is present, and nothing
+# more. The encrypted bytes are opaque: they are never decrypted, and never
+# read as anything but a length. No password is requested, accepted, read from
+# the environment, guessed, or derived; `serialization.load_pem_private_key` and
+# every other key-loading API is deliberately not consulted, so a failed load's
+# exception is never the detection signal; and `openssl`, `java`, `keytool`, and
+# every other external process are never invoked.
+#
+# The outer AlgorithmIdentifier describes the cipher, KDF, salt, IV, and
+# iteration count the writer chose. It is validated as DER and then discarded --
+# none of those values, and no OID, reaches a finding. The only format-specific
+# metadata the detector emits is `Format: PKCS#8`.
+#
+# The DER reader is the one BCFKS already uses (`_der_read`, `_der_children`,
+# `_der_is_algorithm_identifier`, `_der_is_non_empty_octet_string`), unchanged:
+# bounded nesting, definite and minimally encoded lengths only, no high-tag-
+# number expansion, no unbounded allocation, and no recursion into the encrypted
+# OCTET STRING. Malformed or truncated input returns False rather than raising.
+
+_PKCS8_ENCRYPTED_PEM_LABEL = "ENCRYPTED PRIVATE KEY"
+_PKCS8_ENCRYPTED_PEM_BEGIN = f"-----BEGIN {_PKCS8_ENCRYPTED_PEM_LABEL}-----"
+_PKCS8_ENCRYPTED_PEM_END = f"-----END {_PKCS8_ENCRYPTED_PEM_LABEL}-----"
+_PKCS8_ENCRYPTED_ELEMENTS = 2
+
+
+def _looks_like_encrypted_pkcs8(data: bytes) -> bool:
+    """Whether ``data`` is a complete DER ``EncryptedPrivateKeyInfo``: a
+    SEQUENCE beginning at byte offset 0, consuming the whole buffer with no
+    trailing bytes, holding exactly an ``AlgorithmIdentifier`` and a non-empty
+    primitive OCTET STRING.
+
+    Content only -- never the filename, the extension, entropy, or file size.
+    Offset 0 and full consumption are both required, so encrypted PKCS#8 bytes
+    embedded at a nonzero offset inside some larger file are not a match.
+
+    Length-safe and binary-safe throughout, so an empty, truncated, or arbitrary
+    binary buffer returns False instead of raising. The constructed OCTET STRING
+    form is rejected by ``_der_is_non_empty_octet_string``, which compares the
+    full identifier octet, and the indefinite and non-minimal length forms are
+    rejected by ``_der_header``.
+    """
+    outer = _der_read(data, 0, len(data))
+    if outer is None or outer.tag != _DER_TAG_SEQUENCE:
+        return False
+    if outer.content_end != len(data):
+        return False
+    elements = _der_children(data, outer)
+    if elements is None or len(elements) != _PKCS8_ENCRYPTED_ELEMENTS:
+        return False
+    algorithm, encrypted_data = elements
+    return _der_is_algorithm_identifier(data, algorithm) and _der_is_non_empty_octet_string(
+        encrypted_data
+    )
+
+
+def _pkcs8_encrypted_pem_bodies(text: str) -> list[bytes]:
+    """The decoded DER body of every complete, well-formed
+    ``ENCRYPTED PRIVATE KEY`` PEM block in ``text``.
+
+    A block counts only when both labels appear as **exact boundary lines** --
+    the line, with only leading/trailing whitespace stripped, equals the label
+    exactly, so ``prefix-----BEGIN ENCRYPTED PRIVATE KEY-----`` or
+    ``-----END ENCRYPTED PRIVATE KEY-----suffix`` is not a boundary and cannot
+    start or close a block. ``str.splitlines()`` recognizes LF, CRLF, and bare
+    CR line endings alike, so this is not tied to one line-ending convention.
+    Unrelated text on its own lines before, between, or after a block is still
+    fine -- it is simply never a boundary line.
+
+    A block also counts only when the base64 between the boundaries decodes
+    under strict validation -- a header with no footer, a truncated block, or
+    an invalid base64 body yields nothing, so a malformed PEM cannot reach the
+    structural check and cannot earn a High-confidence finding. ``text`` is the
+    scanner's existing bounded text view (see ``decode_text``), so this adds no
+    new size boundary.
+
+    The decoded bytes are returned for structural validation only; they are
+    never retained in a finding.
+    """
+    lines = text.splitlines()
+    bodies: list[bytes] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].strip() != _PKCS8_ENCRYPTED_PEM_BEGIN:
+            index += 1
+            continue
+        end_index = None
+        for candidate in range(index + 1, len(lines)):
+            if lines[candidate].strip() == _PKCS8_ENCRYPTED_PEM_END:
+                end_index = candidate
+                break
+        if end_index is None:
+            # A header with no matching footer is an incomplete block, not an
+            # encrypted private key.
+            return bodies
+        body = "".join("".join(lines[index + 1 : end_index]).split())
+        index = end_index + 1
+        if not body:
+            continue
+        try:
+            bodies.append(base64.b64decode(body, validate=True))
+        except (ValueError, binascii.Error):
+            # Invalid base64 is a malformed block, which produces no finding.
+            continue
+    return bodies
+
+
+def _pkcs8_encrypted_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Encrypted PKCS#8 Private Key",
+        location=str(file_path),
+        evidence="Encrypted PKCS#8 private-key structure detected",
+        confidence="High",
+        rule_id="private_key:pkcs8_encrypted",
+        format="PKCS#8",
+    )
+
+
 # --- Detector registry (HG-033) --------------------------------------------
 #
 # The static, explicit registry of every crypto-inventory detector family. It
@@ -1699,9 +1826,22 @@ def _jceks_finding(file_path: Path) -> CryptoInventoryFinding:
 #      missed by the extension gate or reported as a malformed PKCS#12 or DER
 #      certificate. Distinct from JKS at 40, which is a different format with a
 #      different magic and keeps its own detector and rule id (HG-037).
-#   40-60 JKS, PKCS#12, and DER: mutually exclusive in practice, but each
-#      terminal for the file it claims, which is what keeps a keystore or
-#      container from also being read as PEM text.
+#   45 Encrypted PKCS#8 ahead of PKCS#12 and DER, and ahead of the shared gate,
+#      for the same reason again: an EncryptedPrivateKeyInfo is identified from
+#      its own structure, so a valid encrypted key named `key`, `key.bin`,
+#      `key.p8`, `key.der`, `key.crt`, or `key.p12` must be classified from its
+#      content rather than missed by the extension gate or reported as a
+#      malformed DER certificate or PKCS#12. The issue that added it (HG-038)
+#      suggested 55, between PKCS#12 and DER; 45 is the narrow adjustment the
+#      registry mechanics require, because `pkcs12:container` claims a `.p12` or
+#      `.pfx` file terminally on its *extension* alone, and the required
+#      misleading-extension coverage includes exactly those two names. No real
+#      PKCS#12 file is taken from it: a PFX's first element is a version
+#      INTEGER, which can never satisfy the AlgorithmIdentifier requirement
+#      here, and this detector reads no extension at all (HG-038).
+#   40-60 JKS, encrypted PKCS#8, PKCS#12, and DER: mutually exclusive in
+#      practice, but each terminal for the file it claims, which is what keeps a
+#      keystore or container from also being read as PEM text.
 #   70-90 The text detectors, deliberately non-terminal: one PEM file may
 #      legitimately hold a certificate, a private key, and an SSH public key,
 #      and all three are reported.
@@ -1825,6 +1965,48 @@ def _detect_jceks(context: FileContext) -> DetectionResult:
     if not _looks_like_jceks_keystore(context.data):
         return DetectionResult.no_match()
     return DetectionResult.match([_jceks_finding(context.path)])
+
+
+def _pkcs8_encrypted_candidate(context: FileContext) -> bool:
+    """The cheap gate for the encrypted-PKCS#8 detector: either the file begins
+    with a definite-length DER SEQUENCE header whose declared content ends
+    exactly at the end of the file (the DER form), or its text view contains the
+    exact ``ENCRYPTED PRIVATE KEY`` opening label (the PEM form).
+
+    Those are the only two shapes ``_detect_pkcs8_encrypted`` can match, so a
+    file failing both could only ever produce a non-match. Content only: the
+    extension is not consulted here or in the detector, so a ``.p8``, ``.pk8``,
+    ``.key``, ``.der``, or ``.pem`` name alone can never produce a finding, and
+    a valid key named ``key`` or ``key.bin`` is still classified from its bytes.
+    Deliberately not behind ``_passes_candidate_gate``, which admits files by
+    extension and would drop exactly those unextensioned DER keys.
+    """
+    prefix = context.leading_bytes(_DER_MAX_HEADER_BYTES)
+    header = _der_header(prefix, 0, len(prefix))
+    if header is not None:
+        tag, content_start, length = header
+        if tag == _DER_TAG_SEQUENCE and content_start + length == len(context.data):
+            return True
+    text = context.text
+    return text is not None and _PKCS8_ENCRYPTED_PEM_BEGIN in text
+
+
+def _detect_pkcs8_encrypted(context: FileContext) -> DetectionResult:
+    # The full bytes are required, not a prefix: the structure runs to the end of
+    # the file and the "no trailing bytes" requirement is only meaningful against
+    # the whole file. The bytes are already in the shared context, so this is not
+    # an extra read.
+    if _looks_like_encrypted_pkcs8(context.data):
+        return DetectionResult.match([_pkcs8_encrypted_finding(context.path)])
+    text = context.text
+    if text is not None and any(
+        _looks_like_encrypted_pkcs8(body) for body in _pkcs8_encrypted_pem_bodies(text)
+    ):
+        # One finding per file, not per block: several encrypted PKCS#8 blocks in
+        # one file are one encrypted-private-key container asset at one location,
+        # and the finding carries no per-block detail that could distinguish them.
+        return DetectionResult.match([_pkcs8_encrypted_finding(context.path)])
+    return DetectionResult.no_match()
 
 
 def _jks_candidate(context: FileContext) -> bool:
@@ -2022,6 +2204,27 @@ CRYPTO_DETECTORS = build_registry(
             verification_rationale="Magic header only; entries are not parsed.",
         ),
         FileDetector(
+            detector_id="private_key:pkcs8_encrypted",
+            priority=45,
+            candidate=_pkcs8_encrypted_candidate,
+            detect=_detect_pkcs8_encrypted,
+            evidence="Encrypted PKCS#8 private-key structure detected",
+            confidence="High",
+            terminal=True,
+            rule_id="private_key:pkcs8_encrypted",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "Complete PKCS#8 EncryptedPrivateKeyInfo structure read from the "
+                "file's own bytes -- a DER SEQUENCE at offset 0 consuming the "
+                "whole file, exactly an AlgorithmIdentifier and a non-empty "
+                "primitive OCTET STRING, decoded from a complete PEM block when "
+                "PEM-encoded; no password is requested or accepted, nothing is "
+                "decrypted, no key-loading API is consulted, and the encryption "
+                "algorithm, KDF, salt, IV, iteration count, and encrypted bytes "
+                "are never reported."
+            ),
+        ),
+        FileDetector(
             detector_id="pkcs12:container",
             priority=50,
             candidate=_pkcs12_candidate,
@@ -2142,7 +2345,23 @@ def _parse_pem_private_keys(
 ) -> list[CryptoInventoryFinding]:
     findings = []
     for label, asset_type in _PEM_BLOCK_MARKERS.items():
-        if label in {"CERTIFICATE", "OPENSSH PRIVATE KEY", "PUBLIC KEY"}:
+        # CERTIFICATE, OPENSSH PRIVATE KEY, and PUBLIC KEY are owned by other
+        # detectors. ENCRYPTED PRIVATE KEY joined them in HG-038: the dedicated
+        # `private_key:pkcs8_encrypted` detector validates that structure
+        # directly and terminally, so a supported block never reaches this
+        # function and cannot be reported twice. A block that detector rejected
+        # is a malformed PKCS#8 candidate, and the exception a passwordless load
+        # raises for it is not evidence of anything -- that exception-driven
+        # classification is precisely what HG-038 replaced -- so it is left
+        # unreported rather than turned into a High-confidence encrypted-key
+        # claim here. Every other private-key label below is unchanged,
+        # including the legacy `Proc-Type: 4,ENCRYPTED` form.
+        if label in {
+            "CERTIFICATE",
+            "OPENSSH PRIVATE KEY",
+            "PUBLIC KEY",
+            _PKCS8_ENCRYPTED_PEM_LABEL,
+        }:
             continue
         for block in _extract_pem_blocks(text, label):
             encrypted = "ENCRYPTED" in label or "Proc-Type: 4,ENCRYPTED" in block

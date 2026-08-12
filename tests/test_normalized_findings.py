@@ -129,9 +129,12 @@ def test_crypto_inventory_scanner_can_return_normalized_findings():
     assert len(findings) == 1
     payload = findings[0].to_dict()
     assert payload["source_type"] == "crypto_inventory"
-    assert payload["asset_type"] == "Encrypted PEM Private Key"
+    # An encrypted PKCS#8 key since HG-038: the container type is evidence, the
+    # key inside it is not, so no algorithm or key size is claimed.
+    assert payload["asset_type"] == "Encrypted PKCS#8 Private Key"
     assert payload["technical_metadata"]["Key Size"] is None
-    assert any("requires a passphrase" in error for error in payload["errors"])
+    assert payload["technical_metadata"]["Format"] == "PKCS#8"
+    assert payload["errors"] == []
 
 
 def test_sensitive_data_classifier_can_return_normalized_findings(tmp_path):
