@@ -217,6 +217,30 @@ harvestguard scan my-bucket --type s3 --json --quiet
 
 See [docs/CLI.md](docs/CLI.md) for all scan types, options, and exit codes.
 
+### Keeping a local evidence record
+
+Every scan is given a UUID scan ID that all of its findings carry. Scans are
+ephemeral by default; `--evidence-db` opts in to storing the run — its scan
+context and one immutable snapshot per finding — in a local SQLite database, so
+it can be verified and re-reported later without rescanning the target:
+
+```bash
+harvestguard scan ./project --type crypto --evidence-db ./evidence.db
+harvestguard evidence list --evidence-db ./evidence.db
+harvestguard evidence verify <scan-id> --evidence-db ./evidence.db
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --markdown report.md
+```
+
+Stored runs are append-only and carry a SHA-256 digest that detects corruption
+or internal inconsistency; it is deliberately not a signature, not tamper-proof,
+and not a chain of custody, since anyone who can write the file can change both
+the data and the digest.
+
+The database is a sensitive evidence artifact — it retains paths, object names,
+certificate subjects and issuers, and technical ownership signals — and it is
+not encrypted at rest. Protect it as carefully as the reports it can
+regenerate. See [docs/CLI.md](docs/CLI.md#local-evidence-store).
+
 ### Running the dashboard
 
 The Streamlit dashboard is a separate operating path: it runs from the

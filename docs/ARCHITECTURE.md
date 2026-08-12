@@ -222,13 +222,43 @@ normalized findings, immutable raw details, and separate assessment records.
 The store must support local-first operation, repeat scans, report generation,
 and future drift comparison without requiring a server or external database.
 
+**Implemented today** (`evidence_store.py`, standard-library `sqlite3` only, no
+new runtime dependency): the scan-run and normalized-finding halves of that
+store. A CLI scan is given a UUID scan ID before the scanners run, and
+`harvestguard scan --evidence-db PATH` writes, in one transaction, one
+immutable scan-run record plus one immutable serialized snapshot of every
+retained finding, in canonical report order. Snapshots are keyed by
+`(scan_id, ordinal)`, never by `finding_id`: the same logical finding observed
+on two runs is two distinct records, and a stored finding is never updated in
+place. The store API is append-only — no update, delete, or purge — and
+reusing a scan ID fails rather than replacing prior evidence. Persistence is
+opt-in with no default path, because the database retains the same
+confidential paths, object names, certificate metadata, and technical
+ownership signals that reports do; it is a sensitive evidence artifact and is
+not encrypted at rest.
+
+Each stored run carries a SHA-256 digest over its canonical context and ordered
+snapshots. Verification recomputes it and fails closed, so an inconsistent run
+is never emitted as evidence. This detects corruption, not tampering: it is not
+a signature and not a chain of custody, since write access to the file confers
+write access to both the payload and the digest. Signing, attestation, and
+external timestamping remain future work.
+
+Stored runs are read back through `harvestguard evidence list | verify |
+export`, and export routes through the existing JSON, Markdown, and console
+formatters rather than a parallel stored-run report path. Assessment records,
+scan-history UI, and drift comparison between runs remain future work; they are
+expected to consume this durable record rather than introduce a second
+persistence model.
+
 ### CLI and Service Layer
 
 The CLI is the first stable user interface for scanner execution and export.
 The service layer should let the CLI, dashboard, and reports reuse the same
 scan and persistence paths. The current CLI is documented in [CLI.md](CLI.md)
-and runs local scanners through normalized findings without adding storage,
-dashboard behavior, or assessment models.
+and runs local scanners through normalized findings, with optional local
+evidence persistence and stored-run export as described above, and without
+adding dashboard behavior or assessment models.
 
 ### Built-in Dashboard and Reports
 

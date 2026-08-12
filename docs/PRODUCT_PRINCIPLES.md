@@ -108,7 +108,13 @@ an organization is quantum-ready.
 20. **Grafana remains optional.** The built-in CLI, local store, reports, and
     dashboard remain the default experience.
 21. **Raw findings remain immutable.** New interpretation or workflow state
-    must not rewrite the original evidence.
+    must not rewrite the original evidence. This is an application-layer
+    guarantee: HarvestGuard stores a per-scan finding snapshot and offers no
+    update, delete, or purge path, and it verifies a stored run's SHA-256
+    digest to detect corruption. It is not tamper-proof storage — anyone with
+    write access to the local database file can alter both the evidence and the
+    digest — so immutability must never be described as attestation, signing,
+    or chain of custody.
 22. **Assessment, ownership notes, priority, and remediation status must remain
     separate from raw evidence.** These records may help users manage work, but
     they are not the same thing as source-collected evidence.

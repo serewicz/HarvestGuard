@@ -68,6 +68,7 @@ PACKAGED_MODULES = (
     "findings.py",
     "finding_adapters.py",
     "reports.py",
+    "evidence_store.py",
 )
 PACKAGED_PACKAGES = ("analyzer", "classifier", "code_analysis", "scanner")
 FIRST_PARTY_NAMES = {
@@ -76,6 +77,7 @@ FIRST_PARTY_NAMES = {
     "findings",
     "finding_adapters",
     "reports",
+    "evidence_store",
     "analyzer",
     "classifier",
     "code_analysis",

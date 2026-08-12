@@ -102,7 +102,12 @@ output, see [Validating an install end to end](#validating-an-install-end-to-end
 harvestguard [--version]
 harvestguard scan <target> [--type <type>] [--max-depth N] [--prefix <prefix>] \
     [--summary] [--json [PATH]] [--markdown [PATH]] [--quiet] \
-    [--exclude <pattern>] [--fail-on-error | --no-fail-on-error]
+    [--exclude <pattern>] [--fail-on-error | --no-fail-on-error] \
+    [--evidence-db PATH]
+harvestguard evidence list --evidence-db PATH
+harvestguard evidence verify <scan-id> --evidence-db PATH
+harvestguard evidence export <scan-id> --evidence-db PATH \
+    (--json [PATH] | --markdown [PATH] | --summary) [--quiet]
 ```
 
 `<target>` is a local file or directory path for local scan types, a bucket
@@ -717,6 +722,100 @@ messages, and each finding's `limitations` and `errors` arrays; scan-level
 scanner errors are deliberately not part of the JSON array (see
 [JSON output shape](#json-output-shape)).
 
+## Local Evidence Store
+
+Every `harvestguard scan` generates one UUID **scan ID** before the scanners
+run. Every normalized finding that run emits carries it, and a Markdown report
+records it in the *Scan Information* table as `Scan ID`. The scan ID does not
+participate in `finding_id` generation, so stable finding identity is
+unchanged; JSON output stays a bare finding array with the run identity in each
+element's existing `scan_id` field.
+
+By default the scan is otherwise ephemeral: when the process exits, nothing is
+retained. `--evidence-db PATH` opts in to storing the run in a local SQLite
+database, creating it if it does not exist:
+
+```bash
+harvestguard scan ./project --type crypto --json report.json \
+    --evidence-db ./evidence.db
+```
+
+The record is written in one transaction before any report output is emitted,
+and contains the scan context (target, scan time, duration, scan type, selected
+scanners, scanner versions, exclusions, scope constraints, scanner errors,
+crypto-file accounting, and the HarvestGuard version that executed the scan)
+plus one immutable serialized snapshot of every retained finding. A run that
+failed partway through is still a valid record: its partial findings and its
+scanner errors are stored together.
+
+There is no default database path and no retention policy — HarvestGuard never
+stores evidence unless you pass `--evidence-db`.
+
+### Reading stored runs back
+
+```bash
+harvestguard evidence list --evidence-db ./evidence.db
+harvestguard evidence verify <scan-id> --evidence-db ./evidence.db
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --json report.json
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --markdown report.md
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --summary
+```
+
+`evidence list` prints one row per stored run — scan ID, scan time, scan type,
+target, finding count, and whether scanner errors were recorded. It is the way
+to find a **zero-finding run**: such a run is a complete, meaningful evidence
+record, but its bare-array JSON is empty and therefore carries no finding-level
+scan ID to look it up by.
+
+`evidence export` re-emits a stored run through the same JSON, Markdown, and
+console-summary formatters a live scan uses, without rescanning the target. The
+original scan context, scanner errors, scope constraints, scanner versions, and
+finding snapshots are the ones that were stored, not values recomputed from
+today's code. For the same HarvestGuard release, an immediate stored JSON
+export of a run persisted with `--evidence-db` is byte-identical to that run's
+live JSON output aside from the trailing newline. Across releases, note that
+the `HarvestGuard Version` a stored run recorded is the release that *executed*
+the scan, which may differ from the release performing a later export. A stored
+Markdown export reports the executing release in that row and, when the
+exporting release differs, adds an `Exported By` row naming the release that
+rendered the document; the separate `Report Generator` row remains the report
+format's own identity. A future report-format change may alter the Markdown
+while the stored evidence is unchanged.
+
+The store is append-only: there is no update, delete, or purge command, and
+storing a scan ID that already exists fails instead of replacing prior
+evidence. To remove stored evidence, delete the database file yourself.
+
+### Integrity verification
+
+Each stored run carries a SHA-256 digest over its canonical scan context and
+its ordered finding snapshots. `evidence verify` recomputes that digest, and
+every `evidence export` verifies before emitting anything. A mismatch is
+reported on stderr and exits `1`; the inconsistent payload is never printed as
+though it had been verified.
+
+**What this does and does not mean.** The digest detects corruption or internal
+inconsistency — a truncated write, a damaged file, an edited row. It is not a
+signature, not an attestation, not tamper-proof, and not a chain of custody:
+anyone who can write to the SQLite file can change the stored data and the
+stored digest together. Signing and external timestamping are deliberately out
+of scope.
+
+### The database is a sensitive evidence artifact
+
+The database retains exactly what HarvestGuard already reports — and that is
+confidential: file paths, cloud object names, certificate subjects and issuers,
+technical ownership signals such as uid/gid/mode, scanner error text, and the
+scan target. It never stores raw matched sensitive-data values, plaintext, file
+contents, key material, ciphertext, passphrases, cloud credentials or tokens,
+environment variables, or raw provider exception objects — the same redaction
+rules that govern reporting govern storage.
+
+The database is **not encrypted at rest**. Treat the file with the same care as
+a Markdown or JSON evidence artifact: store it where the underlying scan
+results themselves would be allowed to live, and apply your own filesystem
+permissions, volume encryption, or secure deletion as your engagement requires.
+
 ## Exit Codes
 
 - `0`: scan completed without scanner-level failures.
@@ -724,6 +823,20 @@ scanner errors are deliberately not part of the JSON array (see
   returned. Suppress with `--no-fail-on-error` to exit `0` in this case.
 - `2`: invalid CLI usage, such as an unknown `--type`, a negative `--max-depth`,
   a malformed Azure target, or a local path that does not exist.
+
+Evidence-store failures use the same `1`/`2` split. A failure to write the
+store, an unreadable or unsupported database, an unknown scan ID, and a failed
+integrity check are all execution failures (`1`), reported on stderr; a missing
+`--evidence-db` or an unknown subcommand is invalid usage (`2`).
+
+Two ordering guarantees follow from persisting before emitting output:
+
+- if persistence fails, the requested in-memory output is still emitted, the
+  error goes to stderr only (so `--json` stdout stays parseable), the run is
+  never reported as stored, and the command exits `1`;
+- if persistence succeeds but writing a `--json PATH` / `--markdown PATH` file
+  then fails, the command still exits `1`, but the stored run remains complete
+  and retrievable with `harvestguard evidence export`.
 
 Exit code `2` always means invalid input, and `1` always means a scan
 execution failure, so automation can branch on the difference.

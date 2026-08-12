@@ -85,8 +85,16 @@ deliberately excluded from the raw finding are defined in
 
 ## Optional Fields
 
-- `scan_id`: caller-supplied scan identifier. HG-003 does not add persistence,
-  so this is optional until a later scan history layer exists.
+- `scan_id`: the identifier of the one scan run that produced this observation.
+  The CLI generates a UUID for every scan before the scanners run and assigns
+  it to every finding that run emits, so a finding from `harvestguard scan`
+  always carries one. It remains optional for direct scanner or library callers
+  that run a scan without a run identity, and it is excluded from `finding_id`
+  generation: stable finding identity is unchanged by which run observed it.
+  The same logical `finding_id` observed on two runs is two distinct
+  observations, which is why the local evidence store keeps a per-scan snapshot
+  rather than one mutable row per `finding_id` (see
+  [CLI.md](CLI.md#local-evidence-store)).
 - `collection_method`, `collection_source`, `rule_id`, `repeatable`,
   `verification_rationale`: provenance for how a specific observation was
   collected, so it can be independently verified. `rule_id` identifies which
