@@ -52,10 +52,24 @@ Example output shape:
   finding does not prove truststore versus keystore. The extension is not
   evidence, and the check runs before the JKS, PKCS#12, and DER branches so a
   store with a misleading extension is still classified from its content.
-  Unencrypted `ObjectStoreData` stores, signature-integrity (`[0]
-  SignatureCheck`) stores, and JCEKS are unsupported and produce no finding.
+  Unencrypted `ObjectStoreData` stores and signature-integrity (`[0]
+  SignatureCheck`) stores are unsupported and produce no finding.
   See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#bcfks-keystore-containers-hg-036)
+- JCEKS keystore containers (`rule_id: java_keystore:jceks`, confidence
+  `Medium`), identified from the **top-level header only** — the magic
+  `ce ce ce ce` at offset 0, a supported format version (1 or 2), a nonnegative
+  entry count, and a file large enough for the fixed header plus the trailing
+  integrity material. A separate format and detector from both BCFKS and JKS.
+  Never opened or decrypted, no password is requested or accepted, the keyed
+  digest is neither verified nor reported, entries are not parsed, no Java
+  object is deserialized, and the finding does not prove truststore versus
+  keystore. The extension is not evidence, and the check runs before the JKS,
+  PKCS#12, and DER branches — and ahead of the candidate gate — so a store with
+  a misleading extension or none at all is still classified from its content.
+  Confidence is `Medium` because the container header was identified but the
+  store was not authenticated or fully parsed. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#jceks-keystore-containers-hg-037)
 - OpenSSL `Salted__` encrypted files (leading-byte signature only, not
   decrypted; checked before any extension-based branch above)
 - OpenPGP/GPG encrypted files, binary or ASCII-armored, identified by the
@@ -289,9 +303,19 @@ Recursive scans do not follow symbolic links by default. Use
   password is prompted for or validated, and no alias, certificate, key,
   encrypted content, MAC, salt, IV, or KDF parameter is read into a finding —
   the only metadata emitted is `Format: BCFKS`. Unsupported BCFKS forms
-  (unencrypted `ObjectStoreData`, `[0] SignatureCheck` integrity) and JCEKS
+  (unencrypted `ObjectStoreData`, `[0] SignatureCheck` integrity)
   produce no finding. Absence of a `java_keystore:bcfks` finding is not proof
   that no BCFKS store exists in the target.
+- JCEKS support is limited to the top-level container header: the store is never
+  opened, no password is requested or accepted, the keyed integrity digest is
+  never verified, recomputed, or reported, entry records are not parsed, no Java
+  serialized object is deserialized, and the only metadata emitted is
+  `Format: JCEKS`. Because entries are not parsed and the digest is not
+  authenticated, a crafted binary reproducing a valid JCEKS header and plausible
+  length — or a genuine store truncated above the structural minimum — would be
+  reported as JCEKS; this is why confidence is `Medium`. Absence of a
+  `java_keystore:jceks` finding is not proof that no JCEKS store exists in the
+  target.
 - Random binary files are skipped unless their extension or header indicates a
   supported crypto asset.
 - OpenPGP/GPG detection covers specific encrypted-file structures, not the

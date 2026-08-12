@@ -128,8 +128,13 @@ evidence and must remain traceable back to it.
   outer structure only**, from the file's own DER content rather than its
   extension — evidence only, never decrypted, with no password prompted for or
   validated, no entries enumerated, and no truststore-versus-keystore claim;
-  unencrypted `ObjectStoreData` stores, signature-integrity stores, and JCEKS
-  are unsupported. Only
+  unencrypted `ObjectStoreData` stores and signature-integrity stores are
+  unsupported. Also recognizes JCEKS keystore containers from their **top-level
+  header only** (magic, supported version, nonnegative entry count, and a
+  plausible container length) — evidence only, at `Medium` confidence because
+  the store is never opened, no password is requested or accepted, the keyed
+  digest is never verified, entries are not parsed, and no Java serialized object
+  is deserialized. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See

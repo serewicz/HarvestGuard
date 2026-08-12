@@ -302,7 +302,7 @@ offset 0 consuming the whole file, holding exactly an `EncryptedObjectStoreData`
 a `PbkdMacIntegrityCheck` (a MAC `AlgorithmIdentifier`, a key-derivation-function
 identifier, and a non-empty MAC `OCTET STRING`). **Unencrypted `ObjectStoreData`
 stores and signature-integrity (`[0] SignatureCheck`) stores are not supported**,
-nor is JCEKS, nor are truncated, corrupted, embedded, or near-match ASN.1
+nor are truncated, corrupted, embedded, or near-match ASN.1
 structures — each produces no finding rather than a lower-confidence guess, and
 nothing is inferred from a filename, a `.bcfks` extension, entropy, or file
 size. The full supported/unsupported enumeration is in
@@ -327,6 +327,46 @@ was added.
 Absence of a `java_keystore:bcfks` finding is not proof that no BCFKS store
 exists in the target — this is one narrow detection rule for one explicitly
 enumerated container shape, not general keystore detection.
+
+JCEKS is a **separate detector with its own identity** (see below), not part of
+this rule.
+
+#### JCEKS keystore evidence (HG-037)
+
+A file carrying the **JCEKS top-level header** is cryptographic evidence, and the
+crypto-inventory scanner owns it: a `--type crypto` (or `--type all`) scan
+reports it as asset type `Java Keystore`, `rule_id: java_keystore:jceks`,
+confidence `Medium`, with evidence text limited to
+`JCEKS keystore header detected` and technical metadata limited to
+`Format: JCEKS`. One finding is emitted per file, and as with the `Salted__`,
+OpenPGP, age, and BCFKS checks, content is evaluated before any extension-based
+parsing — so a valid store saved as `store`, `store.bin`, `truststore.p12`,
+`certs.der`, or `keystore.jks` is reported as `Java Keystore` rather than being
+missed or reported as a malformed PKCS#12 or DER certificate.
+
+**Support is narrow and explicit.** Recognized from the header OpenJDK's
+`JceKeyStore` writes: the big-endian magic `ce ce ce ce` at offset 0, a format
+version of 1 or 2, a nonnegative entry count, and a file at least large enough
+for that 12-byte header plus the 20-byte trailing keyed digest. A missing,
+truncated, near-match, or offset magic, an unsupported version, a negative entry
+count, and a file below the structural minimum each produce no finding, and
+nothing is inferred from a filename, a `.jceks` extension, entropy, or file size.
+
+**Confidence is `Medium`, not `High`,** because the header and plausible
+top-level structure were observed but the store was not authenticated and its
+entries were not parsed: no password is requested or accepted, the keyed digest
+is neither verified nor reported, no alias, certificate, private key, or secret
+key is read, no Java serialized object is deserialized, and `java`, `keytool`,
+and every other external process are never invoked. A JCEKS finding therefore
+makes no truststore-versus-keystore claim, and absence of a
+`java_keystore:jceks` finding is not proof that no JCEKS store exists in the
+target. The full supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#jceks-keystore-containers-hg-037).
+
+The filesystem scanner recognizes no JCEKS structure, so `--type filesystem` is
+unchanged and there is nothing for `--type all` to deduplicate. A JCEKS file
+counts once in `Crypto files inspected`, and no JCEKS-specific count or summary
+bucket was added.
 
 #### gocryptfs encrypted-filesystem evidence (HG-032)
 

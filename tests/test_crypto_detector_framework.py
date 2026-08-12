@@ -57,14 +57,17 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "crypto_inventory"
 # Every detector family the crypto-inventory scanner supports, exactly once
 # each. A new entry here means a new detection capability, which is what makes
 # one reviewable: HG-033 (the framework itself) added none, HG-035 added exactly
-# one (the native age v1 encrypted-file detector), and HG-036 added exactly one
-# (the BCFKS keystore-container detector).
+# one (the native age v1 encrypted-file detector), HG-036 added exactly one
+# (the BCFKS keystore-container detector), and HG-037 added exactly one (the
+# JCEKS keystore-container detector, a separate format and identity from the
+# existing JKS detector below it).
 EXPECTED_DETECTOR_IDS = [
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
     "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
     "java_keystore:bcfks",
+    "java_keystore:jceks",
     "java_keystore:jks_magic",
     "pkcs12:container",
     "certificate:der",
@@ -75,14 +78,16 @@ EXPECTED_DETECTOR_IDS = [
 
 # The only rule IDs any crypto-inventory detector may carry. Every other asset
 # type leaves rule_id unset (parsed certificates and keys have no named
-# detection rule); HG-033 introduced none, HG-035 introduced exactly one, and
-# HG-036 introduced exactly one.
+# detection rule); HG-033 introduced none, HG-035 introduced exactly one,
+# HG-036 introduced exactly one, and HG-037 introduced exactly one. The JKS
+# detector deliberately remains without one, unchanged by HG-037.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
     "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
     "java_keystore:bcfks",
+    "java_keystore:jceks",
 }
 
 
@@ -231,6 +236,20 @@ def test_intentional_precedence_is_declared_in_the_registry():
     assert _priority("encrypted_filesystem:gocryptfs") < _priority("pkcs12:container")
     assert _priority("encrypted_filesystem:gocryptfs") < _priority("certificate:pem")
 
+    # Both Java keystore container detectors ahead of the extension-based
+    # branches, so a valid store with a misleading .p12/.der/.jks name (or no
+    # extension at all) is classified from its content rather than as a
+    # malformed container (HG-036, HG-037). JCEKS sits between BCFKS and JKS:
+    # three distinct formats, three distinct detector identities.
+    for keystore in ("java_keystore:bcfks", "java_keystore:jceks"):
+        for extension_based in ("pkcs12:container", "certificate:der", "certificate:pem"):
+            assert _priority(keystore) < _priority(extension_based)
+    assert (
+        _priority("java_keystore:bcfks")
+        < _priority("java_keystore:jceks")
+        < _priority("java_keystore:jks_magic")
+    )
+
     # Certificate/key precedence within the text detectors.
     assert _priority("certificate:der") < _priority("certificate:pem")
     assert _priority("certificate:pem") < _priority("private_key:pem")
@@ -242,6 +261,8 @@ def test_terminal_declarations_match_current_dispatch_behavior():
     for terminal_id in (
         "encrypted_file:openssl",
         "encrypted_file:openpgp",
+        "java_keystore:bcfks",
+        "java_keystore:jceks",
         "java_keystore:jks_magic",
         "pkcs12:container",
         "certificate:der",
