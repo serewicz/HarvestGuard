@@ -64,10 +64,11 @@ class CryptoInventoryFinding:
     # nameable detection rule rather than a parsed certificate/key: the OpenSSL
     # Salted__ signature (HG-030), the OpenPGP encrypted-file structure
     # (HG-031), the native age v1 encrypted file (HG-035), the gocryptfs cipher
-    # root (HG-032), and the BCFKS keystore container (HG-036). Every other
-    # asset type leaves this None rather than inventing one.
+    # root (HG-032), the BCFKS keystore container (HG-036), and the JCEKS
+    # keystore container (HG-037). Every other asset type leaves this None
+    # rather than inventing one.
     rule_id: str | None = None
-    # Container metadata (HG-032 gocryptfs, HG-036 BCFKS; kept generic rather
+    # Container metadata (HG-032 gocryptfs, HG-036 BCFKS, HG-037 JCEKS; generic rather
     # than format-specific field names so each container format can reuse them,
     # and each detector's own allowlist decides which it may populate). Unset
     # for every other asset type. Deliberately limited to what those privacy
@@ -1564,6 +1565,102 @@ def _bcfks_finding(file_path: Path) -> CryptoInventoryFinding:
     )
 
 
+# --- JCEKS keystore detection (HG-037) --------------------------------------
+#
+# Header-structure only, and deliberately smaller than the BCFKS reader above:
+# the file's fixed 12-byte top-level header is read, its declared version and
+# entry count are range-checked, and the file's own length is checked against
+# the minimum a JCEKS store can occupy. Nothing read here is ever reported. No
+# password is requested or accepted, the keyed SHA-1 digest is neither
+# recomputed nor verified nor reported, no entry record is parsed, no Java
+# object is instantiated or deserialized, and `java`, `keytool`, and every other
+# external process are never invoked.
+#
+# The supported shape, transcribed from OpenJDK's `JceKeyStore`
+# (`com.sun.crypto.provider.JceKeyStore`, `engineLoad`/`engineStore`/
+# `engineProbe`):
+#
+#   magic        uint32be = 0xCECECECE   (JKS, by contrast, uses 0xFEEDFEED)
+#   version      int32be  in {1, 2}
+#   entry count  int32be  >= 0
+#   ... entry records ...
+#   digest       20-byte keyed SHA-1 over the store
+#
+# OpenJDK's own `engineProbe()` identifies a JCEKS stream from the magic value
+# alone. HG-037 adds the version, count, and length checks on top of that so a
+# near-match is rejected, and stops there: `engineLoad()` goes on to deserialize
+# `SealedObject` data for secret-key entries, and reproducing that merely to
+# name the container would be both unnecessary and unsafe.
+#
+# What the header does *not* prove is why confidence is Medium rather than High:
+# aliases, entry types, certificates, secret keys, and private-key material all
+# live in the entry records this detector does not read, so a JCEKS finding is a
+# container-header observation and never a keystore-versus-truststore claim, an
+# entry claim, or an authenticated-store claim.
+
+_JCEKS_MAGIC = b"\xce\xce\xce\xce"
+_JCEKS_SUPPORTED_VERSIONS = frozenset({1, 2})
+# magic + version + entry count, the fixed prefix every JCEKS store begins with.
+_JCEKS_HEADER_BYTES = 12
+# The trailing keyed SHA-1 digest `engineStore` appends. Its length is the only
+# thing used here -- the digest itself is never read, recomputed, verified, or
+# reported, all of which would require the store password.
+_JCEKS_DIGEST_BYTES = 20
+# The smallest a JCEKS store can be: the fixed header plus that digest, which is
+# exactly the size of an empty store written by keytool.
+_JCEKS_MIN_BYTES = _JCEKS_HEADER_BYTES + _JCEKS_DIGEST_BYTES
+
+
+def _looks_like_jceks_keystore(data: bytes) -> bool:
+    """Whether ``data`` has the JCEKS top-level header and a plausible container
+    length.
+
+    Content only -- the filename and extension are not consulted, so a
+    ``.jceks`` name is never evidence and misleading ``.p12``/``.der``/``.jks``
+    bytes are classified by what they are. Length-safe and binary-safe: an
+    empty, truncated, or arbitrary binary file returns False instead of raising.
+
+    Five conditions, each of which is what rejects one class of near-match:
+
+    1. enough bytes for the fixed top-level header;
+    2. the big-endian JCEKS magic at offset 0, which is what separates JCEKS
+       from JKS (``0xFEEDFEED``) and from a binary that merely resembles it;
+    3. a supported format version, 1 or 2;
+    4. a nonnegative signed 32-bit entry count;
+    5. a file large enough to hold the header and the trailing integrity
+       material, which rejects an obviously truncated container.
+
+    Deliberately not checked: the digest is not verified (that needs the store
+    password), and no entry record is parsed. Both are out of scope, and the
+    residual false-positive room they leave is why the finding is Medium
+    confidence.
+    """
+    if len(data) < _JCEKS_HEADER_BYTES:
+        return False
+    if data[:4] != _JCEKS_MAGIC:
+        return False
+    version = int.from_bytes(data[4:8], "big", signed=True)
+    if version not in _JCEKS_SUPPORTED_VERSIONS:
+        return False
+    # Signed, exactly as `DataInputStream.readInt()` reads it: a top bit set is a
+    # negative count, which no store `engineStore` wrote can have.
+    entry_count = int.from_bytes(data[8:12], "big", signed=True)
+    if entry_count < 0:
+        return False
+    return len(data) >= _JCEKS_MIN_BYTES
+
+
+def _jceks_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Java Keystore",
+        location=str(file_path),
+        evidence="JCEKS keystore header detected",
+        confidence="Medium",
+        rule_id="java_keystore:jceks",
+        format="JCEKS",
+    )
+
+
 # --- Detector registry (HG-033) --------------------------------------------
 #
 # The static, explicit registry of every crypto-inventory detector family. It
@@ -1595,6 +1692,13 @@ def _bcfks_finding(file_path: Path) -> CryptoInventoryFinding:
 #      store saved as truststore.p12 or certs.der must be classified as the
 #      keystore it is rather than as a malformed PKCS#12 or DER certificate
 #      (HG-036).
+#   37 JCEKS ahead of JKS, PKCS#12, and DER, and ahead of the shared gate, for
+#      the same reason as BCFKS: a JCEKS store is identified from its own
+#      header, so a valid store named `store`, `store.bin`, `truststore.p12`,
+#      or `certs.der` must be classified as the keystore it is rather than
+#      missed by the extension gate or reported as a malformed PKCS#12 or DER
+#      certificate. Distinct from JKS at 40, which is a different format with a
+#      different magic and keeps its own detector and rule id (HG-037).
 #   40-60 JKS, PKCS#12, and DER: mutually exclusive in practice, but each
 #      terminal for the file it claims, which is what keeps a keystore or
 #      container from also being read as PEM text.
@@ -1697,6 +1801,30 @@ def _detect_bcfks(context: FileContext) -> DetectionResult:
     if not _looks_like_bcfks_object_store(context.data):
         return DetectionResult.no_match()
     return DetectionResult.match([_bcfks_finding(context.path)])
+
+
+def _jceks_candidate(context: FileContext) -> bool:
+    """The cheap leading-byte gate for the JCEKS detector: the JCEKS magic at
+    offset 0.
+
+    That is the one condition ``_looks_like_jceks_keystore`` requires before it
+    can return True, so a file failing it could only ever produce a non-match --
+    and it costs four bytes. Content only, and deliberately not behind
+    ``_passes_candidate_gate``: that gate admits files by extension, so a valid
+    store named ``store`` or ``store.bin`` would never reach this detector.
+    Neither this predicate nor the detector consults the extension at all, so a
+    ``.jceks`` name alone cannot produce a finding.
+    """
+    return context.leading_bytes(len(_JCEKS_MAGIC)) == _JCEKS_MAGIC
+
+
+def _detect_jceks(context: FileContext) -> DetectionResult:
+    # The full bytes are required, not a prefix: the minimum-size check is a
+    # statement about the whole file. The bytes are already in the shared
+    # context, so this is not an extra read.
+    if not _looks_like_jceks_keystore(context.data):
+        return DetectionResult.no_match()
+    return DetectionResult.match([_jceks_finding(context.path)])
 
 
 def _jks_candidate(context: FileContext) -> bool:
@@ -1860,6 +1988,26 @@ CRYPTO_DETECTORS = build_registry(
                 "PbkdMacIntegrityCheck, consuming the whole file -- read from "
                 "the file's own bytes; the store is never decrypted, no "
                 "password is accepted, and no entry, alias, or certificate "
+                "inside it is read."
+            ),
+        ),
+        FileDetector(
+            detector_id="java_keystore:jceks",
+            priority=37,
+            candidate=_jceks_candidate,
+            detect=_detect_jceks,
+            evidence="JCEKS keystore header detected",
+            confidence="Medium",
+            terminal=True,
+            rule_id="java_keystore:jceks",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "JCEKS magic at offset 0 plus the format's own top-level header "
+                "fields -- a supported version and a nonnegative entry count -- "
+                "and a file large enough for the header and trailing integrity "
+                "material; the store is never opened or decrypted, no password "
+                "is accepted, the keyed digest is neither verified nor reported, "
+                "and no entry, alias, certificate, or serialized Java object "
                 "inside it is read."
             ),
         ),

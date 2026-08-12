@@ -581,8 +581,9 @@ a lower-confidence partial finding or a "malformed BCFKS" asset type:
   and is not consulted at all, so an extension-only `.bcfks` file produces
   nothing.
 
-**JCEKS is not implemented** by HG-036 and remains unrecognized, as does broader
-Java truststore inventory.
+**JCEKS is a separate detector**, added by HG-037 and described below; HG-036
+recognizes the Bouncy Castle container only. Broader Java truststore inventory
+remains unimplemented.
 
 **Residual false positive.** Because the algorithm OIDs are deliberately not
 interpreted, any non-BCFKS DER file that happens to have exactly this outer
@@ -631,6 +632,105 @@ unchanged.
 [internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
 and emits nothing beyond the single finding described above.
 
+#### JCEKS keystore containers (HG-037)
+
+A file carrying the **JCEKS top-level header** is reported as asset type
+`Java Keystore` (`rule_id: java_keystore:jceks`, confidence `Medium`, evidence
+`JCEKS keystore header detected`, technical metadata `Format: JCEKS` and nothing
+else). Like the `Salted__`, OpenPGP, age, and BCFKS checks, it runs ahead of the
+extension-based branches — before JKS, PKCS#12, and DER certificate parsing, and
+ahead of the shared candidate gate — so a valid store saved as `store`,
+`store.bin`, `truststore.p12`, `certs.der`, or `keystore.jks` is classified from
+its content rather than missed by the gate or reported as a malformed PKCS#12 or
+DER certificate. One finding is emitted per file, and the match is terminal: no
+later detector also reads that file as PEM, DER, PKCS#12, JKS, or SSH content.
+
+**What is detected** — the top-level header OpenJDK's `JceKeyStore`
+(`com.sun.crypto.provider.JceKeyStore`) writes, and only when every one of these
+holds:
+
+- The file has **enough bytes for the fixed 12-byte top-level header**.
+- Bytes 0-3 are the **big-endian JCEKS magic `ce ce ce ce`** at offset 0. This is
+  what separates JCEKS from JKS, whose magic is `fe ed fe ed`; the JKS detector
+  and its `java_keystore:jks_magic` identity are untouched by HG-037. Magic bytes
+  at a nonzero offset are not a match.
+- The **format version is 1 or 2**, the versions `JceKeyStore` supports.
+- The **entry count is a nonnegative signed 32-bit value**, as
+  `DataInputStream.readInt()` reads it.
+- The file is **large enough to be structurally possible**: at least the 12-byte
+  header plus the 20-byte trailing keyed SHA-1 digest. An empty store written by
+  `keytool` is exactly those 32 bytes.
+
+**Why confidence is `Medium`, not `High`.** HarvestGuard has identified the
+container header and a plausible top-level structure; it has **not**
+authenticated the store or parsed its contents. `JceKeyStore.engineLoad()` goes
+on to read the entry records and, for secret-key entries, to deserialize Java
+`SealedObject` data. HarvestGuard deliberately does none of that — deserializing
+untrusted Java objects to name a file would be both unnecessary and unsafe — and
+the keyed digest is not verified because verification requires the store
+password. The evidence claim is therefore *"this file has the identifying header
+and plausible top-level structure of a JCEKS keystore,"* never *"this JCEKS
+keystore has been completely parsed and cryptographically authenticated."*
+
+**Known false-positive boundary.** Because entry records are not parsed and the
+digest is not authenticated, a **deliberately crafted binary reproducing a valid
+JCEKS top-level header and a plausible container length would be classified as
+JCEKS**. So would a genuine JCEKS store truncated on disk *above* the 32-byte
+minimum, whose header is intact but whose entry records are incomplete. Both are
+accepted consequences of stopping short of Java deserialization and digest
+verification, and both are why the finding is `Medium` rather than `High`.
+
+**Known false negatives** — each of these produces no finding at all, and never
+a lower-confidence partial finding or a "malformed JCEKS" asset type:
+
+- A file whose **magic is absent, truncated, or a near-match** (`ce ce ce cf`,
+  `cd ce ce ce`), or whose JCEKS magic appears at a nonzero offset.
+- A **version outside 1 and 2**, including deliberately unsupported historical
+  or nonstandard variants and any future format version.
+- A **truncated header** — missing or partial version or entry-count field — or a
+  file shorter than the 32-byte structural minimum.
+- A **negative entry count**.
+- Neighbouring formats: **JKS, BCFKS, PKCS#12, and DER** files, each of which
+  keeps its own classification.
+- A file **named `.jceks` without JCEKS content**. **No detection is based on
+  filename, extension, entropy, or file size**; the extension is not evidence and
+  is not consulted at all.
+
+**The finding does not prove what the store holds.** Aliases, entry types,
+certificates, private keys, and secret keys all live in the entry records this
+detector does not read, so the header cannot distinguish a truststore from a
+private-key store, a secret-key store from either, or an empty store from a
+populated one. A JCEKS finding is a container-header observation, and
+HarvestGuard makes no claim beyond it.
+
+**No password, no deserialization, no key material.** The scanner never requests
+or accepts a password, never decrypts, never guesses a password, never extracts
+aliases, certificates, private keys, or secret keys, never instantiates a Java
+object or reads a Java serialization stream, never validates or recomputes the
+keyed integrity digest, and never invokes `java`, `keytool`, or any other
+external process or network service. Aliases, entry counts, entry types,
+certificate subjects and issuers, the integrity digest, serialized Java content,
+raw keystore bytes, and parser exception payloads are all absent from output — a
+JCEKS finding carries exactly one metadata value, `Format: JCEKS`. It makes no
+claim about encryption strength, decryptability, operational use, configuration
+correctness, or quantum exposure. Absence of a `java_keystore:jceks` finding is
+not proof that no JCEKS store exists in the target — this is one narrow rule for
+one explicitly enumerated container header, not general keystore detection.
+
+**Scanner ownership.** Crypto inventory owns `java_keystore:jceks`; the
+filesystem scanner never emits it, recognizes no JCEKS structure of its own, and
+`--type filesystem` is unchanged. There is therefore nothing for `--type all` to
+deduplicate, and HG-037 adds no cross-scanner deduplication pairing. Accounting
+is unchanged: a JCEKS file counts once in `Crypto files inspected`, contributes
+nothing to `Files scanned`, and there is no JCEKS-specific count and no new
+summary bucket. JSON remains a bare normalized-finding array, Markdown remains
+evidence-only, CLI output and DataFrame columns are unchanged, and Streamlit
+behavior is unchanged.
+
+**No relationship output.** HG-037 adds JCEKS detection only; it creates no
+[internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+and emits nothing beyond the single finding described above.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:
@@ -647,7 +747,10 @@ and emits nothing beyond the single finding described above.
   byte-level observation, not anything about the encryption's strength or
   recoverability). An `Encrypted File` finding is never emitted at any other
   confidence level: if the observation is not direct, there is no finding.
-- `Medium` — a JKS magic header matched, or an OpenSSH private key's block
+- `Medium` — a JKS magic header matched, or a JCEKS top-level header matched
+  (HG-037: the container header and a plausible top-level structure were
+  observed, but the store was not authenticated and its entries were not
+  parsed), or an OpenSSH private key's block
   was found but could not be loaded (an inconsistency with the PEM path,
   where an encrypted PEM key is `High`; both are documented, unvalidated
   differences in this MVP scanner, not a claim that Medium is more or less
@@ -661,8 +764,8 @@ and emits nothing beyond the single finding described above.
 - **The candidate-file gate is a silent pre-filter.** A file is inspected if
   it begins with the OpenSSL `Salted__` signature (HG-030), a supported OpenPGP
   encrypted-file structure (HG-031), the native age v1 version line
-  (HG-035), or a supported BCFKS `ObjectStore` container (HG-036), all checked
-  ahead of the gate;
+  (HG-035), a supported BCFKS `ObjectStore` container (HG-036), or the JCEKS
+  top-level header (HG-037), all checked ahead of the gate;
   otherwise `_could_contain_crypto_asset` requires it to have a recognized
   extension (`.cer`, `.crt`, `.der`, `.jks`, `.p12`, `.pfx`), start with an SSH
   public-key prefix, match the JKS magic header, or contain the literal bytes
@@ -672,15 +775,15 @@ and emits nothing beyond the single finding described above.
   gate-excluded files. An empty crypto-inventory result does not distinguish
   "no crypto assets present" from "assets present in a format or extension
   this gate does not recognize." `Salted__`, the supported OpenPGP shapes,
-  native age v1 files, and supported BCFKS stores are now recognized and no
-  longer examples of this gap,
+  native age v1 files, supported BCFKS stores, and JCEKS stores are now
+  recognized and no longer examples of this gap,
   but every other encrypted-container format (LUKS, encrypted
-  ZIP/PDF/Office, armored age files, JCEKS keystores, the OpenPGP, age, and
-  BCFKS structures listed as unsupported above, and any signature not listed
+  ZIP/PDF/Office, armored age files, the OpenPGP, age, BCFKS, and JCEKS
+  structures listed as unsupported above, and any signature not listed
   above)
   remains outside this gate for the crypto-inventory scanner specifically —
-  HG-030, HG-031, HG-035, and HG-036 added exactly four named detection rules,
-  not general encrypted-file or keystore detection.
+  HG-030, HG-031, HG-035, HG-036, and HG-037 added exactly five named detection
+  rules, not general encrypted-file or keystore detection.
 - **Password-protected PKCS#12 containers** are reported as
   `Malformed PKCS#12` (confidence `Low`) because the scanner does not attempt
   passphrases. This is a known, already-documented limitation (see
