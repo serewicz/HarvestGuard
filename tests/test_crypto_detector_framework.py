@@ -69,6 +69,7 @@ EXPECTED_DETECTOR_IDS = [
     "java_keystore:bcfks",
     "java_keystore:jceks",
     "java_keystore:jks_magic",
+    "private_key:pkcs8_encrypted",
     "pkcs12:container",
     "certificate:der",
     "certificate:pem",
@@ -79,8 +80,9 @@ EXPECTED_DETECTOR_IDS = [
 # The only rule IDs any crypto-inventory detector may carry. Every other asset
 # type leaves rule_id unset (parsed certificates and keys have no named
 # detection rule); HG-033 introduced none, HG-035 introduced exactly one,
-# HG-036 introduced exactly one, and HG-037 introduced exactly one. The JKS
-# detector deliberately remains without one, unchanged by HG-037.
+# HG-036 introduced exactly one, HG-037 introduced exactly one, and HG-038
+# introduced exactly one. The JKS detector deliberately remains without one,
+# unchanged by HG-037 and HG-038.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
@@ -88,6 +90,7 @@ EXPECTED_RULE_IDS = {
     "encrypted_filesystem:gocryptfs",
     "java_keystore:bcfks",
     "java_keystore:jceks",
+    "private_key:pkcs8_encrypted",
 }
 
 
@@ -250,6 +253,24 @@ def test_intentional_precedence_is_declared_in_the_registry():
         < _priority("java_keystore:jks_magic")
     )
 
+    # Encrypted PKCS#8 ahead of the extension-based container and certificate
+    # branches, so a valid encrypted key with no extension or a misleading
+    # .der/.crt/.cer/.p12/.pfx name is classified from its structure rather than
+    # missed by the extension gate or reported as malformed certificate or
+    # PKCS#12 evidence, and ahead of the generic PEM private-key branch whose
+    # exception-driven recognition it replaced (HG-038).
+    for extension_based in ("pkcs12:container", "certificate:der", "private_key:pem"):
+        assert _priority("private_key:pkcs8_encrypted") < _priority(extension_based)
+    # ...but still after every terminal container detector that owns a whole
+    # file of its own, so it cannot take one from them.
+    for container in (
+        "java_keystore:bcfks",
+        "java_keystore:jceks",
+        "java_keystore:jks_magic",
+        "encrypted_filesystem:gocryptfs",
+    ):
+        assert _priority(container) < _priority("private_key:pkcs8_encrypted")
+
     # Certificate/key precedence within the text detectors.
     assert _priority("certificate:der") < _priority("certificate:pem")
     assert _priority("certificate:pem") < _priority("private_key:pem")
@@ -264,6 +285,7 @@ def test_terminal_declarations_match_current_dispatch_behavior():
         "java_keystore:bcfks",
         "java_keystore:jceks",
         "java_keystore:jks_magic",
+        "private_key:pkcs8_encrypted",
         "pkcs12:container",
         "certificate:der",
     ):

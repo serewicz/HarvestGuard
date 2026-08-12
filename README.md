@@ -134,7 +134,13 @@ evidence and must remain traceable back to it.
   plausible container length) — evidence only, at `Medium` confidence because
   the store is never opened, no password is requested or accepted, the keyed
   digest is never verified, entries are not parsed, and no Java serialized object
-  is deserialized. Only
+  is deserialized. Also recognizes **encrypted PKCS#8 private keys** — the outer
+  `EncryptedPrivateKeyInfo` structure only, in DER form or RFC-style PEM labelled
+  `ENCRYPTED PRIVATE KEY` — validated structurally from the file's own bytes
+  rather than from its extension or from a key-loading API's password failure;
+  evidence only, never decrypted, with no password prompted for or accepted and
+  no encryption algorithm, KDF, cipher, salt, IV, iteration count, or OID
+  reported. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See

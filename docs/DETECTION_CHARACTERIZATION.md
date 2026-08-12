@@ -731,6 +731,157 @@ behavior is unchanged.
 [internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
 and emits nothing beyond the single finding described above.
 
+#### Encrypted PKCS#8 private keys (HG-038)
+
+A file whose content is a **complete PKCS#8 `EncryptedPrivateKeyInfo`
+structure** (RFC 5958) is reported as asset type `Encrypted PKCS#8 Private Key`
+(`rule_id: private_key:pkcs8_encrypted`, confidence `High`, evidence
+`Encrypted PKCS#8 private-key structure detected`, technical metadata
+`Format: PKCS#8` and nothing else), based solely on the outer DER structure
+described below, in either DER or RFC-style PEM labelled
+`ENCRYPTED PRIVATE KEY`. Like the `Salted__`, OpenPGP, age, BCFKS, and JCEKS
+checks, it runs ahead of the extension-based branches — before PKCS#12 and DER
+certificate parsing, and ahead of the shared candidate gate — so a valid key
+saved as `key`, `key.bin`, `key.p8`, `key.pk8`, `key.key`, `key.der`, `key.crt`,
+`key.cer`, `key.pem`, `key.p12`, or `key.pfx` is classified from its content
+rather than missed by the gate or reported as a malformed DER certificate or
+PKCS#12 container. `key.p12`/`key.pfx` in particular would otherwise be taken
+terminally by `pkcs12:container`, whose candidate gate is extension-only; a real
+PKCS#12/PFX file is never misclassified by this ordering because its own
+top-level structure begins with a version `INTEGER`, which can never satisfy the
+`AlgorithmIdentifier` this detector requires. One finding is emitted per file —
+several encrypted PKCS#8 blocks in one file are one container asset at one
+location — and the match is terminal: no later detector also reads that file as
+PEM, DER, or PKCS#12 content.
+
+This replaces the pre-HG-038 recognition path for this label: previously,
+`BEGIN ENCRYPTED PRIVATE KEY` was reported only indirectly, by calling a
+key-loading API without a password and treating the resulting password-related
+failure as evidence of encryption. That exception-driven signal is gone for this
+label; every other PEM private-key label (traditional RSA/DSA/EC, the legacy
+`Proc-Type: 4,ENCRYPTED` encrypted form, OpenSSH, encrypted OpenSSH) keeps its
+existing recognition path unchanged.
+
+**What is detected** — the outer structure only, and only when every one of
+these holds:
+
+- **DER form:**
+  - The file is a **complete DER `SEQUENCE` beginning at byte offset 0** whose
+    declared length consumes the whole file with **no trailing bytes**.
+    Supported bytes embedded at a nonzero offset inside a larger file are not a
+    match.
+  - The top-level sequence has **exactly two elements**.
+  - The **first element structurally matches `AlgorithmIdentifier`**: a
+    sequence whose first child is a well-formed, non-empty OBJECT IDENTIFIER,
+    with at most one parameters element that is itself well-formed DER. The
+    parameters value is never interpreted or reported, only confirmed to be
+    validly encoded.
+  - The **second element is a non-empty, primitive `OCTET STRING`** — the
+    encrypted private-key bytes. A constructed `OCTET STRING`, or an empty one,
+    is not a match.
+  - Every length is a **well-formed, minimally encoded, definite DER length**,
+    and every element's content is consumed exactly by its children. Indefinite
+    and non-minimal length encodings are rejected.
+- **PEM form:** an exact `-----BEGIN ENCRYPTED PRIVATE KEY-----` /
+  `-----END ENCRYPTED PRIVATE KEY-----` pair — both labels present, in order,
+  forming a complete block, not merely a header with no matching footer — whose
+  base64 body decodes successfully under strict validation and whose decoded
+  bytes satisfy every DER requirement above. A header with no footer, a
+  truncated block, or an invalid base64 body produces no finding rather than a
+  partial or low-confidence one.
+
+The DER reader is the same bounded, defensive one BCFKS already uses
+(`_der_read`/`_der_children`/`_der_is_algorithm_identifier`/
+`_der_is_non_empty_octet_string`), reused unchanged: bounded nesting, no
+indefinite-length encodings, no high-tag-number expansion, no unbounded
+allocation, no recursion into the encrypted `OCTET STRING` payload, and
+malformed or truncated input returns no match rather than raising. BCFKS
+validation is untouched by this reuse.
+
+**Why confidence is `High`, not `Medium`.** Unlike JCEKS's header-only claim,
+the complete outer `EncryptedPrivateKeyInfo` structure is validated: exact
+top-level element count, a structurally valid `AlgorithmIdentifier`, a
+non-empty primitive encrypted-data `OCTET STRING`, complete DER consumption
+with no trailing bytes, and complete PEM decoding when PEM-encoded. `High`
+confidence applies to the **container type only**. It does not mean the
+password is known, the encrypted key is decryptable, the encrypted key is
+internally valid, the underlying private-key algorithm is known, or that
+cryptographic strength has been assessed.
+
+**Known false positive.** A deliberately crafted DER structure that is
+syntactically a valid `EncryptedPrivateKeyInfo` — a correct outer SEQUENCE, a
+well-formed `AlgorithmIdentifier`, and a non-empty OCTET STRING — but whose
+`encryptedData` does not actually decrypt to a valid `PrivateKeyInfo` is still
+classified as encrypted PKCS#8, because ruling that out would require
+decryption. This is a deliberate, accepted limitation: the claim is structural,
+not cryptographic.
+
+**Known false negatives** — each of these produces no finding at all, and never
+a lower-confidence partial finding:
+
+- An **empty or truncated file**, or a top-level DER `SEQUENCE` with **trailing
+  bytes** after it.
+- A top-level sequence with **one element or three or more elements**.
+- An **invalid or malformed `AlgorithmIdentifier`** — a missing or non-OID
+  first element, or malformed nested parameters DER.
+- A **wrong-tag or empty second element** — anything other than a non-empty
+  primitive `OCTET STRING`, including a constructed `OCTET STRING`.
+- **Indefinite-length or non-minimal-length DER** encodings anywhere in the
+  structure.
+- A structure **embedded at a nonzero offset** inside a larger file.
+- Arbitrary binary that merely begins with DER-like bytes.
+- A PEM block with a **header and no footer**, a **missing or empty body**, or
+  an **invalid base64 body**.
+- Valid base64 whose decoded DER is **not** an `EncryptedPrivateKeyInfo` — most
+  notably an **unencrypted PKCS#8 `PrivateKeyInfo`** (DER or PEM
+  `BEGIN PRIVATE KEY`), whose first element is a version `INTEGER`, not an
+  `AlgorithmIdentifier`.
+- Neighbouring formats, each of which keeps its own existing classification:
+  **traditional RSA/DSA/EC PEM private keys, legacy `Proc-Type: 4,ENCRYPTED`
+  encrypted PEM private keys, encrypted OpenSSH private keys, PKCS#12
+  containers, DER certificates, and BCFKS, JCEKS, and JKS keystores.**
+- A file **named `key`, `key.p8`, `key.pk8`, `key.key`, `key.der`, `.pem`,
+  `.crt`, `.cer`, `.p12`, or `.pfx` without encrypted PKCS#8 content**. **No
+  detection is based on filename, extension, entropy, or file size**; the
+  extension is not consulted at all, not even the shared candidate gate.
+- The bare word `ENCRYPTED PRIVATE KEY` appearing in ordinary text with no
+  actual PEM block around it.
+
+**The finding does not prove what is inside the encrypted key.** The private-key
+algorithm, key size, and validity all live inside `encryptedData`, which this
+detector never decrypts or reads as anything but a length. An
+`private_key:pkcs8_encrypted` finding is a container-structure observation, and
+HarvestGuard makes no claim beyond it.
+
+**No password, no decryption, no key material.** The scanner never requests,
+accepts, reads from the environment, guesses, or derives a password or
+encryption key; never decrypts `encryptedData`; never calls a private-key
+load API, including merely to use its exception as the detection signal — the
+recognition path this rule replaced; and never invokes `openssl`, `java`,
+`keytool`, or any other external process or network service. The encryption
+algorithm, KDF, cipher, salt, IV, iteration count, raw OID values, parameter
+bytes, and encrypted bytes are all absent from output — a finding carries
+exactly one metadata value, `Format: PKCS#8`. It also makes no claim about
+encryption strength, decryptability, or confidentiality. Absence of a
+`private_key:pkcs8_encrypted` finding is not proof that no encrypted PKCS#8 key
+exists in the target — this is one narrow rule for one explicitly enumerated
+structure, not general private-key inventory.
+
+**Scanner ownership.** Crypto inventory owns `private_key:pkcs8_encrypted`; the
+filesystem scanner never emits it, recognizes no PKCS#8 structure of its own,
+and `--type filesystem` is unchanged. There is therefore nothing for
+`--type all` to deduplicate, and HG-038 adds no cross-scanner deduplication
+pairing. Accounting is unchanged: an encrypted PKCS#8 file counts once in
+`Crypto files inspected`, contributes nothing to `Files scanned`, and there is
+no PKCS#8-specific count and no new summary bucket. JSON remains a bare
+normalized-finding array, Markdown remains evidence-only, CLI output and
+DataFrame columns are unchanged, and Streamlit behavior is unchanged.
+
+**No relationship output.** HG-038 adds encrypted PKCS#8 detection only; it
+creates no
+[internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+and emits nothing beyond the single finding described above.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:

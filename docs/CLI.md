@@ -368,6 +368,68 @@ unchanged and there is nothing for `--type all` to deduplicate. A JCEKS file
 counts once in `Crypto files inspected`, and no JCEKS-specific count or summary
 bucket was added.
 
+#### Encrypted PKCS#8 private-key evidence (HG-038)
+
+A file whose content is a complete PKCS#8 `EncryptedPrivateKeyInfo` is
+cryptographic evidence, and the crypto-inventory scanner owns it: a
+`--type crypto` (or `--type all`) scan reports it as asset type
+`Encrypted PKCS#8 Private Key`, `rule_id: private_key:pkcs8_encrypted`,
+confidence `High`, with evidence text limited to
+`Encrypted PKCS#8 private-key structure detected` and technical metadata limited
+to `Format: PKCS#8`. One finding is emitted per file — a file holding several
+encrypted PKCS#8 blocks is one container asset at one location — and as with the
+`Salted__`, OpenPGP, age, BCFKS, and JCEKS checks, content is evaluated before
+any extension-based parsing, so a valid key saved as `key`, `key.bin`, `key.p8`,
+`key.pk8`, `key.key`, `key.der`, `key.crt`, `key.cer`, `key.pem`, `key.p12`, or
+`key.pfx` is reported as an encrypted PKCS#8 key rather than being missed or
+reported as a malformed DER certificate or PKCS#12 container. Content wins over
+extension, and an extension alone never produces this finding.
+
+**Support is narrow and explicit.** Both encodings of the same structure share
+one detector identity:
+
+- **DER** — a `SEQUENCE` beginning at byte offset 0, consuming the entire file
+  with no trailing bytes, containing exactly two elements: a structurally valid
+  `AlgorithmIdentifier` and a non-empty *primitive* `OCTET STRING`. All lengths
+  must be definite, minimally encoded, and in bounds.
+- **PEM** — an exact `-----BEGIN ENCRYPTED PRIVATE KEY-----` /
+  `-----END ENCRYPTED PRIVATE KEY-----` pair with a complete base64 body that
+  decodes and satisfies the DER requirements above.
+
+An empty or truncated file, trailing bytes, one or three top-level elements, a
+malformed `AlgorithmIdentifier`, a missing algorithm OID, malformed parameters, a
+wrong second-element tag, an empty encrypted-data `OCTET STRING`, a constructed
+`OCTET STRING`, an indefinite or non-minimal length, a structure embedded at a
+nonzero offset, a PEM header with no footer, and an invalid base64 body each
+produce no finding. Neither does an unencrypted PKCS#8 key, a traditional
+RSA/DSA/EC PEM key, a legacy `Proc-Type: 4,ENCRYPTED` encrypted PEM key, an
+encrypted OpenSSH key, a PKCS#12 file, a DER certificate, or a BCFKS, JCEKS, or
+JKS store — each keeps its own existing classification.
+
+**Nothing is decrypted and no password is involved.** The claim is established
+from the structure alone, before any decryption-capable operation would be
+necessary: no password is prompted for, accepted, read from an environment
+variable, guessed, or derived; a private-key load API is never called — not even
+to use its password-related exception as the detection signal, which is the
+recognition path this rule replaced; and `openssl`, `java`, `keytool`, and every
+other external process are never invoked.
+
+**`High` confidence applies to the container type only.** It does not mean the
+password is known, the key is decryptable, the key is internally valid, the
+underlying private-key algorithm is known, or that cryptographic strength was
+assessed. The outer `AlgorithmIdentifier` is validated as well-formed DER and
+then discarded: no PBES/PBKDF/scrypt/cipher/hash name, salt, IV, nonce,
+iteration count, key length, OID, parameter byte, or encrypted byte appears in
+any finding, report, or stored record. Absence of a
+`private_key:pkcs8_encrypted` finding is not proof that no encrypted PKCS#8 key
+exists in the target. The full supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#encrypted-pkcs8-private-keys-hg-038).
+
+The filesystem scanner recognizes no PKCS#8 structure, so `--type filesystem` is
+unchanged and there is nothing for `--type all` to deduplicate. An encrypted
+PKCS#8 file counts once in `Crypto files inspected`, and no PKCS#8-specific count
+or summary bucket was added.
+
 #### gocryptfs encrypted-filesystem evidence (HG-032)
 
 A directory containing both a supported `gocryptfs.conf` and a root-level

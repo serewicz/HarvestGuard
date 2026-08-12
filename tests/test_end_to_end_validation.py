@@ -162,6 +162,16 @@ def representative_target(tmp_path_factory) -> Path:
     for asset in sorted(CRYPTO_FIXTURES.glob("*")):
         if asset.is_file() and asset.name != "EXPECTED_OUTPUT.md":
             shutil.copy2(asset, target / "certs" / asset.name)
+    # Since HG-038, "certs/encrypted_key.pem" (a genuine encrypted PKCS#8 key) is
+    # classified by the dedicated structural detector with no error, so it no
+    # longer exercises the passphrase-required error path this target is meant
+    # to demonstrate. A legacy `Proc-Type: 4,ENCRYPTED` encrypted PEM key still
+    # goes through the unchanged exception-driven recognition HG-038 did not
+    # touch, so it is copied in separately to keep that coverage real.
+    shutil.copy2(
+        CRYPTO_FIXTURES / "pkcs8_encrypted" / "legacy_encrypted_rsa.pem",
+        target / "certs" / "legacy_encrypted_rsa.pem",
+    )
     (target / "src").mkdir()
     (target / "src" / "hashing.py").write_text(
         "import hashlib\n\n\ndef fingerprint(value):\n    return hashlib.md5(value).hexdigest()\n",
@@ -480,7 +490,7 @@ def test_representative_target_crypto_inventory_reports_real_asset_types(
         "PEM Certificate",
         "DER Certificate",
         "PEM Private Key",
-        "Encrypted PEM Private Key",
+        "Encrypted PKCS#8 Private Key",
         "PKCS#12 Certificate",
         "Java Keystore",
     ]:

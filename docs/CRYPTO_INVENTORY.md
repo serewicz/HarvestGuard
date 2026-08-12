@@ -39,7 +39,24 @@ Example output shape:
 - PEM certificates
 - DER certificates
 - PEM private keys
-- Encrypted PEM private keys, detected without decrypting key material
+- Encrypted PKCS#8 private keys (`rule_id: private_key:pkcs8_encrypted`,
+  confidence `High`), **the outer `EncryptedPrivateKeyInfo` structure only**,
+  in DER form or RFC-style PEM labelled `ENCRYPTED PRIVATE KEY`. Validated
+  structurally from the file's own bytes — a DER `SEQUENCE` at offset 0
+  consuming the whole file with no trailing bytes, holding exactly an
+  `AlgorithmIdentifier` and a non-empty primitive `OCTET STRING`, decoded from a
+  complete PEM block when PEM-encoded — never by calling a key-loading API and
+  reading its password-related failure as evidence. Never decrypted: no password
+  is prompted for, accepted, read from the environment, guessed, or derived, and
+  no external process is invoked. The encryption algorithm, KDF, cipher, salt,
+  IV, iteration count, OIDs, and encrypted bytes are not reported; the only
+  metadata emitted is `Format: PKCS#8`. The extension is not evidence, and the
+  check runs ahead of the PKCS#12, DER, and generic PEM private-key branches —
+  and ahead of the candidate gate — so a key with a misleading extension or none
+  at all is still classified from its content. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#encrypted-pkcs8-private-keys-hg-038)
+- Encrypted legacy PEM private keys (traditional `Proc-Type: 4,ENCRYPTED` /
+  `DEK-Info` form), detected without decrypting key material
 - OpenSSH private keys
 - OpenSSH public keys
 - PKCS#12 containers (`.p12`, `.pfx`) when no password is required
@@ -294,8 +311,26 @@ Recursive scans do not follow symbolic links by default. Use
 
 - Password-protected PKCS#12 containers are detected as malformed/partial in
   this MVP because the scanner does not prompt for passphrases.
-- Encrypted PEM private keys are identified, but algorithm and key size may be
-  unavailable without a passphrase.
+- Encrypted private keys are identified, but algorithm and key size are not
+  available without a passphrase and are never reported for them.
+- Encrypted PKCS#8 support is limited to the outer `EncryptedPrivateKeyInfo`
+  container: the key is never decrypted, no password is requested or accepted,
+  the inner private key is not identified, and no encryption algorithm, KDF,
+  cipher, salt, IV, iteration count, OID, parameter, or encrypted byte is read
+  into a finding — the only metadata emitted is `Format: PKCS#8`. `High`
+  confidence applies to the **container type only**: it does not mean the
+  password is known, the key is decryptable, the key is internally valid, the
+  underlying algorithm is known, or that cryptographic strength was assessed. A
+  deliberately crafted structure that is syntactically a valid
+  `EncryptedPrivateKeyInfo` but whose encrypted data does not decrypt to a valid
+  `PrivateKeyInfo` is still reported as encrypted PKCS#8, because ruling that
+  out would require decryption. Non-DER (BER) encodings — indefinite lengths,
+  non-minimal lengths, constructed `OCTET STRING`s — and structures embedded at
+  a nonzero offset produce no finding, as does a malformed PEM block. A file
+  whose only encrypted PKCS#8 block is malformed is left unreported rather than
+  reported as an encrypted key on the strength of its label alone. Absence of a
+  `private_key:pkcs8_encrypted` finding is not proof that no encrypted PKCS#8
+  key exists in the target.
 - JKS support is limited to magic-header detection; entry-level parsing is not
   implemented.
 - BCFKS support is limited to the supported encrypted-object-store outer
