@@ -26,7 +26,6 @@ from pathlib import Path
 import pytest
 
 import harvestguard
-from finding_adapters import normalize_crypto_inventory_df
 from scanner.crypto_inventory import (
     CRYPTO_DETECTORS,
     scan_crypto_inventory,
@@ -42,7 +41,7 @@ RULE_ID = "private_key:legacy_pem_encrypted"
 EVIDENCE = "Legacy PEM encrypted private-key structure detected"
 CONFIDENCE = "High"
 FORMAT = "Legacy PEM"
-PRIORITY = 48
+PRIORITY = 75
 
 REAL_POSITIVE_FIXTURES = {
     "rsa_encrypted_legacy.pem": "RSA traditional AES-256-CBC",
@@ -60,9 +59,15 @@ GENERATION_SECRETS = (
 
 # SHA-256 of positive fixtures (must match PROVENANCE.md).
 EXPECTED_SHA256 = {
-    "rsa_encrypted_legacy.pem": "9168c394d55a5c8e34b02604c4813f4e6b6b700518b3d812d116d2166a02cf5d",
-    "ec_encrypted_legacy.pem": "2d1b33104c87fd39492bd866ad2318df4daf4f454372c3134cbb13d034781e9d",
-    "rsa_encrypted_legacy_des3.pem": "3d2c3a84c5584c5037a302657e225fed4c9703de36a7c29627cbfad8a73af363",
+    "rsa_encrypted_legacy.pem": (
+        "9168c394d55a5c8e34b02604c4813f4e6b6b700518b3d812d116d2166a02cf5d"
+    ),
+    "ec_encrypted_legacy.pem": (
+        "2d1b33104c87fd39492bd866ad2318df4daf4f454372c3134cbb13d034781e9d"
+    ),
+    "rsa_encrypted_legacy_des3.pem": (
+        "3d2c3a84c5584c5037a302657e225fed4c9703de36a7c29627cbfad8a73af363"
+    ),
 }
 
 
@@ -425,8 +430,9 @@ def test_unencrypted_traditional_label_without_headers_is_not_legacy(tmp_path):
 @pytest.mark.parametrize(
     "name",
     [
-        "key.p12",
-        "key.pfx",
+        # Non-.p12/.pfx names: content wins over extension. Terminal PKCS#12
+        # (priority 50) still claims real .p12/.pfx extensions before this
+        # detector (priority 75); that existing PKCS#12 behavior is unchanged.
         "key.pem",
         "key.key",
         "key.rsa",
@@ -442,6 +448,16 @@ def test_valid_legacy_detected_regardless_of_extension(tmp_path, name):
     findings = _legacy_findings(path)
     assert len(findings) == 1
     _assert_contract(findings[0])
+
+
+def test_p12_extension_remains_owned_by_pkcs12_detector(tmp_path):
+    # Contract: do not change PKCS#12 behavior. A .p12 file is claimed terminally
+    # by pkcs12:container even when the bytes are a traditional encrypted PEM
+    # block; HG-040 does not rewrite the PKCS#12 candidate or reorder past it.
+    path = _write(tmp_path, "key.p12", _real("rsa_encrypted_legacy.pem"))
+    findings = _findings(path)
+    assert all(f.rule_id != RULE_ID for f in findings)
+    assert any("PKCS#12" in f.asset_type for f in findings)
 
 
 def test_extension_alone_never_produces_finding(tmp_path):
@@ -524,8 +540,15 @@ def test_no_subprocess_invoked_during_detection(tmp_path, monkeypatch):
         return real_run(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", tracked_run)
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("Popen")))
-    monkeypatch.setattr(os, "system", lambda *a, **k: (_ for _ in ()).throw(AssertionError("system")))
+
+    def _deny_popen(*_a, **_k):
+        raise AssertionError("Popen")
+
+    def _deny_system(*_a, **_k):
+        raise AssertionError("system")
+
+    monkeypatch.setattr(subprocess, "Popen", _deny_popen)
+    monkeypatch.setattr(os, "system", _deny_system)
 
     path = _write(tmp_path, "key.pem", _real("rsa_encrypted_legacy.pem"))
     findings = _legacy_findings(path)
@@ -535,9 +558,28 @@ def test_no_subprocess_invoked_during_detection(tmp_path, monkeypatch):
 
 def test_no_password_environment_or_prompt_used(tmp_path, monkeypatch):
     # Ensure no password-related env vars are required or consumed.
+    keep_prefixes = (
+        "AWS_",
+        "AZURE_",
+        "GOOGLE_",
+        "PATH",
+        "HOME",
+        "USER",
+        "LANG",
+        "TERM",
+        "SHELL",
+        "PWD",
+        "OLDPWD",
+        "SHLVL",
+        "_",
+        "VIRTUAL",
+        "PYTHON",
+        "LC_",
+    )
     for key in list(os.environ):
-        if "PASS" in key.upper() or "SECRET" in key.upper() or "KEY" in key.upper():
-            if key.startswith(("AWS_", "AZURE_", "GOOGLE_", "PATH", "HOME", "USER", "LANG", "TERM", "SHELL", "PWD", "OLDPWD", "SHLVL", "_", "VIRTUAL", "PYTHON", "LC_")):
+        upper = key.upper()
+        if "PASS" in upper or "SECRET" in upper or "KEY" in upper:
+            if key.startswith(keep_prefixes):
                 continue
             monkeypatch.delenv(key, raising=False)
 

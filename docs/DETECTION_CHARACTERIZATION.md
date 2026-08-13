@@ -1074,12 +1074,13 @@ technical metadata `Format: Legacy PEM` and nothing else).
     headers, empty tokens, non-hex or odd-length IV rejected)
 - A non-empty body that strict-base64-decodes to non-empty ciphertext bytes
 
-The detector is **non-terminal** and runs at priority 48 (after CMS, ahead of
-extension-gated PKCS#12) so a traditional encrypted PEM key saved as `key.p12`
-or `key.pfx` is classified from its content rather than as a malformed PKCS#12.
-One finding is emitted per file for this rule even when multiple same-type
-blocks are present. A file may still also report a certificate PEM or other
-non-terminal PEM asset.
+The detector is **non-terminal** and runs at priority 75 (after certificate PEM,
+before generic private-key PEM), matching the issue contract and without
+changing PKCS#12, encrypted PKCS#8, or CMS behavior. One finding is emitted per
+file for this rule even when multiple same-type blocks are present. A file may
+still also report a certificate PEM or other non-terminal PEM asset. A file
+whose extension is `.p12`/`.pfx` continues to be claimed terminally by the
+existing PKCS#12 detector; that behavior is deliberately unchanged.
 
 This replaces the pre-HG-040 exception-driven path for these blocks: previously
 a passwordless key-load failure was treated as evidence of encryption. That

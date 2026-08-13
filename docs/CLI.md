@@ -525,11 +525,9 @@ reports it as asset type `Encrypted Legacy PEM Private Key`,
 `Legacy PEM encrypted private-key structure detected` and technical metadata
 limited to `Format: Legacy PEM`. One finding is emitted per file for this rule.
 The detector is non-terminal so a file may also report a certificate PEM or
-other coexisting PEM asset. Content is evaluated before extension-gated
-PKCS#12, so a valid traditional encrypted PEM key saved as `key.p12` or
-`key.pfx` is reported as legacy encrypted PEM rather than as a malformed
-PKCS#12 container. Encrypted PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`) remains
-HG-038.
+other coexisting PEM asset. It runs after certificate PEM and before generic
+private-key PEM, without changing PKCS#12, encrypted PKCS#8, or CMS behavior.
+Encrypted PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`) remains HG-038.
 
 **Support is narrow and explicit.** Exact BEGIN/END boundaries are required
 (prefix/suffix contamination rejected; LF and CRLF accepted). Both encryption

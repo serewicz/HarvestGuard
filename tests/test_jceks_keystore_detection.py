@@ -413,6 +413,7 @@ def test_registry_order_is_explicit_and_places_jceks_between_bcfks_and_jks():
         "pkcs12:container",
         "certificate:der",
         "certificate:pem",
+        "private_key:legacy_pem_encrypted",
         "private_key:pem",
         "public_key:ssh",
     ]

@@ -75,10 +75,10 @@ EXPECTED_DETECTOR_IDS = [
     "private_key:pkcs8_encrypted",
     "cms:enveloped_data",
     "cms:encrypted_data",
-    "private_key:legacy_pem_encrypted",
     "pkcs12:container",
     "certificate:der",
     "certificate:pem",
+    "private_key:legacy_pem_encrypted",
     "private_key:pem",
     "public_key:ssh",
 ]
@@ -302,12 +302,13 @@ def test_intentional_precedence_is_declared_in_the_registry():
 
     # Certificate/key precedence within the text detectors.
     assert _priority("certificate:der") < _priority("certificate:pem")
-    assert _priority("cms:encrypted_data") < _priority("private_key:legacy_pem_encrypted")
-    assert _priority("private_key:legacy_pem_encrypted") < _priority("pkcs12:container")
-    assert _priority("private_key:legacy_pem_encrypted") < _priority("certificate:pem")
+    assert _priority("certificate:pem") < _priority("private_key:legacy_pem_encrypted")
     assert _priority("private_key:legacy_pem_encrypted") < _priority("private_key:pem")
-    assert _priority("certificate:pem") < _priority("private_key:pem")
     assert _priority("private_key:pem") < _priority("public_key:ssh")
+    # Legacy PEM does not reorder PKCS#12, CMS, or encrypted PKCS#8.
+    assert _priority("private_key:pkcs8_encrypted") < _priority("pkcs12:container")
+    assert _priority("cms:encrypted_data") < _priority("pkcs12:container")
+    assert _priority("pkcs12:container") < _priority("private_key:legacy_pem_encrypted")
 
 
 def test_terminal_declarations_match_current_dispatch_behavior():

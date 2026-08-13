@@ -2381,25 +2381,23 @@ def _legacy_encrypted_pem_finding(file_path: Path) -> CryptoInventoryFinding:
 #      alongside its own whenever the shared pass observed both, since the
 #      dispatch loop would otherwise never reach cms:encrypted_data's own
 #      detect() for that file.
-#   48 Legacy encrypted PEM (Proc-Type: 4,ENCRYPTED), non-terminal, after CMS
-#      and ahead of extension-gated PKCS#12 so a traditional encrypted PEM
-#      private key saved as key.p12 is classified from its content rather than
-#      as a malformed PKCS#12. Exact BEGIN/END boundaries, validated
-#      Proc-Type/DEK-Info, and non-empty strict-base64 body; no password or
-#      decryption (HG-040). Certificate PEM (70) and generic private-key PEM
-#      (80) remain non-terminal peers so a file may still report both a
-#      certificate and a legacy encrypted key.
 #   40-60 JKS, encrypted PKCS#8, CMS, PKCS#12, and DER: mutually exclusive in
 #      practice, but each terminal for the file it claims, which is what keeps a
 #      keystore or container from also being read as PEM text.
-#   70-90 The text detectors, deliberately non-terminal: one PEM file may
-#      legitimately hold a certificate, a private key, and an SSH public key,
-#      and all three are reported. Legacy encrypted PEM (48) is also
-#      non-terminal for the same multi-asset reason.
+#   70 certificate:pem -- non-terminal text detector for CERTIFICATE blocks.
+#   75 private_key:legacy_pem_encrypted -- traditional Proc-Type/DEK-Info
+#      encrypted PEM private keys (HG-040), non-terminal, after certificate PEM
+#      and before generic private-key PEM, without changing PKCS#12, encrypted
+#      PKCS#8, or CMS. Exact BEGIN/END boundaries, validated Proc-Type/DEK-Info,
+#      and non-empty strict-base64 body; no password or decryption.
+#   80-90 Remaining text detectors (generic PEM private keys, SSH public keys),
+#      deliberately non-terminal: one PEM file may legitimately hold a
+#      certificate, a private key, and an SSH public key, and all three are
+#      reported.
 #
 # Detectors that are terminal stop further matching for that file; non-terminal
-# detectors (legacy PEM, certificate PEM, private-key PEM, SSH public key) may
-# coexist. Nothing here relies on a general "first detector wins" rule.
+# detectors (certificate PEM, legacy encrypted PEM, private-key PEM, SSH public
+# key) may coexist. Nothing here relies on a general "first detector wins" rule.
 
 
 def _openssl_candidate(context: FileContext) -> bool:
@@ -2657,10 +2655,7 @@ def _detect_jks(context: FileContext) -> DetectionResult:
 
 
 def _pkcs12_candidate(context: FileContext) -> bool:
-    if not (_passes_candidate_gate(context) and context.suffix in {".p12", ".pfx"}):
-        return False
-    # PEM textual encodings belong to the PEM detectors, not malformed PKCS#12.
-    return not context.data.lstrip().startswith(b"-----BEGIN ")
+    return _passes_candidate_gate(context) and context.suffix in {".p12", ".pfx"}
 
 
 def _detect_pkcs12(context: FileContext) -> DetectionResult:
@@ -2959,7 +2954,7 @@ CRYPTO_DETECTORS = build_registry(
         ),
         FileDetector(
             detector_id="private_key:legacy_pem_encrypted",
-            priority=48,
+            priority=75,
             candidate=_legacy_encrypted_pem_candidate,
             detect=_detect_legacy_encrypted_pem,
             evidence="Legacy PEM encrypted private-key structure detected",
@@ -2972,8 +2967,9 @@ CRYPTO_DETECTORS = build_registry(
                 "boundaries, Proc-Type: 4,ENCRYPTED, a syntactically valid "
                 "DEK-Info cipher and hex IV, and a non-empty strict-base64 body; "
                 "no password is accepted, nothing is decrypted, and cipher/IV/"
-                "ciphertext are never reported. Priority 48 places this before "
-                "extension-gated PKCS#12 so content wins for misleading .p12/.pfx."
+                "ciphertext are never reported. Priority 75 places this after "
+                "certificate PEM and before generic private-key PEM, without "
+                "changing PKCS#12, encrypted PKCS#8, or CMS behavior."
             ),
         ),
         FileDetector(

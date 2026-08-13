@@ -89,8 +89,8 @@ Example output shape:
   guessed, or derived, and no external process or private-key load API is
   invoked. Cipher name, IV, and ciphertext are not reported; the only metadata
   emitted is `Format: Legacy PEM`. The extension is not evidence. The detector
-  is non-terminal and runs ahead of extension-gated PKCS#12 so a key with a
-  misleading `.p12`/`.pfx` name is still classified from its content. Encrypted
+  is non-terminal and runs after certificate PEM and before generic private-key
+  PEM, without changing PKCS#12, encrypted PKCS#8, or CMS behavior. Encrypted
   PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`) remains HG-038. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#encrypted-legacy-pem-private-keys-hg-040)
 - OpenSSH private keys
