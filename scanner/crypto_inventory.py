@@ -1788,6 +1788,388 @@ def _pkcs8_encrypted_finding(file_path: Path) -> CryptoInventoryFinding:
     )
 
 
+# --- CMS / PKCS#7 encrypted-object detection (HG-039) -----------------------
+#
+# RFC 5652 wraps every CMS content type in one outer structure:
+#
+#     ContentInfo ::= SEQUENCE {
+#         contentType  ContentType,
+#         content      [0] EXPLICIT ANY DEFINED BY contentType }
+#
+# HG-039 supports exactly two contentType values, `id-envelopedData` and
+# `id-encryptedData`, and validates the structure each one carries:
+#
+#     EnvelopedData ::= SEQUENCE {
+#         version              CMSVersion,
+#         originatorInfo   [0] IMPLICIT OriginatorInfo OPTIONAL,
+#         recipientInfos       RecipientInfos,
+#         encryptedContentInfo EncryptedContentInfo,
+#         unprotectedAttrs [1] IMPLICIT UnprotectedAttributes OPTIONAL }
+#
+#     EncryptedData ::= SEQUENCE {
+#         version              CMSVersion,
+#         encryptedContentInfo EncryptedContentInfo,
+#         unprotectedAttrs [1] IMPLICIT UnprotectedAttributes OPTIONAL }
+#
+#     EncryptedContentInfo ::= SEQUENCE {
+#         contentType                 ContentType,
+#         contentEncryptionAlgorithm  AlgorithmIdentifier,
+#         encryptedContent        [0] IMPLICIT OCTET STRING OPTIONAL }
+#
+# The claim is that this structure is present and carries embedded encrypted
+# bytes, and nothing more. Which recipients exist, whether their certificates
+# are valid, who can decrypt, whether a signature verifies, and which cipher,
+# KDF, salt, or IV was chosen are all outside it: recipient infos are checked
+# for presence and well-formedness and never decoded, and the encrypted content
+# is only ever measured. No password, private key, secret key, or recipient
+# certificate is requested or accepted, nothing is decrypted, no signature is
+# verified, no certificate or chain is validated, `openssl` and every other
+# external process are never invoked, and no network call is made.
+#
+# Two distinctions do the separating work, and both are structural:
+#
+#   - the outer OID must be *exactly* one of the two supported values, so a
+#     PKCS#7 certificate bundle, a degenerate or ordinary SignedData, a CMS
+#     Data object, and a DigestedData object are all valid ContentInfos that
+#     produce no finding -- the `CMS`/`PKCS7` label and the CMS container shape
+#     are never themselves evidence of encryption;
+#   - `encryptedContent` must be present and non-empty, so a detached object
+#     (whose ciphertext lives elsewhere) is a deliberate false negative rather
+#     than a claim about bytes this scanner never saw.
+#
+# The DER reader is the one BCFKS and encrypted PKCS#8 already use, unchanged:
+# definite and minimally encoded lengths only, bounded nesting, no high-tag-
+# number expansion, no unbounded allocation, and no recursion into the
+# encrypted content. Indefinite-length (streaming) BER CMS is therefore outside
+# the supported subset and fails closed; that boundary is documented in
+# docs/DETECTION_CHARACTERIZATION.md rather than closed by weakening the reader.
+#
+# The two content types are distinguished by `asset_type`, `rule_id`, and
+# evidence wording rather than by a new metadata field: the only format-specific
+# metadata either rule emits is `Format: CMS/PKCS#7`. Adding a generic
+# `Content Type` field would have put a new key into every existing
+# crypto-inventory finding's technical metadata and JSON export, which is a
+# change to established report semantics that HG-039 does not need -- the issue
+# permits exactly this alternative.
+
+_DER_TAG_INTEGER = 0x02
+_DER_TAG_SET = 0x31
+# Context-specific class, constructed: the explicit `[0]` ContentInfo wrapper
+# and the implicit `[0]`/`[1]` optional fields inside the CMS structures.
+_DER_TAG_CONTEXT_0_CONSTRUCTED = 0xA0
+_DER_TAG_CONTEXT_1_CONSTRUCTED = 0xA1
+# Context-specific class, primitive: `encryptedContent`, an implicitly tagged
+# OCTET STRING, which DER requires to be primitive. The constructed (chunked)
+# BER form is outside the supported subset.
+_DER_TAG_CONTEXT_0_PRIMITIVE = 0x80
+
+# The two supported `contentType` values, as their DER OID content octets:
+# id-envelopedData (1.2.840.113549.1.7.3) and id-encryptedData
+# (1.2.840.113549.1.7.6). Compared as bytes, used internally only -- neither
+# these values nor any OID read from a scanned file is ever emitted.
+_CMS_OID_ENVELOPED_DATA = bytes((0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x03))
+_CMS_OID_ENCRYPTED_DATA = bytes((0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x07, 0x06))
+
+# Internal content-type discriminators. They select which finding to build; they
+# are not a metadata value and are never written into a finding.
+_CMS_ENVELOPED_DATA = "EnvelopedData"
+_CMS_ENCRYPTED_DATA = "EncryptedData"
+
+_CMS_CONTENT_INFO_ELEMENTS = 2
+_CMS_CONTENT_WRAPPER_ELEMENTS = 1
+_CMS_ENCRYPTED_CONTENT_INFO_ELEMENTS = 3
+# RFC 5652 fixes EncryptedData's version: 0 with no unprotected attributes, 2
+# when they are present.
+_CMS_ENCRYPTED_DATA_VERSION_WITHOUT_ATTRIBUTES = 0
+_CMS_ENCRYPTED_DATA_VERSION_WITH_ATTRIBUTES = 2
+_CMS_VERSION_CONTENT_LENGTH = 1
+
+# The RFC 7468 textual labels that carry a CMS `ContentInfo`. Both are accepted;
+# neither is evidence of anything on its own, since the decoded body still has
+# to pass the full structural check below.
+_CMS_PEM_LABELS = ("CMS", "PKCS7")
+_CMS_PEM_BEGIN_LINES = {f"-----BEGIN {label}-----": label for label in _CMS_PEM_LABELS}
+
+
+def _der_oid_equals(data: bytes, element: _DerElement, oid: bytes) -> bool:
+    """Whether ``element`` is a well-formed OBJECT IDENTIFIER whose content
+    octets are exactly ``oid``.
+
+    A byte comparison against a fixed constant, not a decode: the identifier is
+    never turned into a dotted string, looked up in a table, retained, or
+    reported. An OID that merely starts with the supported arc, or that carries
+    extra octets, is a different identifier and does not match.
+    """
+    if not _der_is_object_identifier(data, element):
+        return False
+    return data[element.content_start : element.content_end] == oid
+
+
+def _cms_encrypted_content_info_valid(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` is a supported ``EncryptedContentInfo``: a SEQUENCE of
+    exactly a content-type OBJECT IDENTIFIER, an ``AlgorithmIdentifier``, and a
+    present, non-empty ``[0]`` ``encryptedContent``.
+
+    All three fields are required. The inner content type and the content-
+    encryption algorithm are validated as encodings and then discarded -- which
+    cipher, mode, KDF, salt, IV, or nonce a writer chose is never decoded or
+    reported. The ciphertext is measured, never read: an empty
+    ``encryptedContent`` is a malformed object, and an absent one is a detached
+    object, and neither is a match.
+    """
+    if element.tag != _DER_TAG_SEQUENCE:
+        return False
+    children = _der_children(data, element)
+    if children is None or len(children) != _CMS_ENCRYPTED_CONTENT_INFO_ELEMENTS:
+        return False
+    content_type, algorithm, encrypted_content = children
+    if not _der_is_object_identifier(data, content_type):
+        return False
+    if not _der_is_algorithm_identifier(data, algorithm):
+        return False
+    if encrypted_content.tag != _DER_TAG_CONTEXT_0_PRIMITIVE:
+        return False
+    return encrypted_content.content_length > 0
+
+
+def _cms_enveloped_data_valid(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` is a supported ``EnvelopedData`` body.
+
+    The fields are walked in the order RFC 5652 declares them: a minimally
+    encoded INTEGER version, an optional implicit ``[0]`` ``originatorInfo``, a
+    non-empty ``RecipientInfos`` SET, an ``EncryptedContentInfo``, and an
+    optional implicit ``[1]`` ``unprotectedAttrs``. Nothing may follow.
+
+    ``RecipientInfos`` is checked for being a constructed SET holding at least
+    one well-formed element and is deliberately not decoded further: recipient
+    identities, issuer and serial numbers, subject key identifiers, encrypted
+    content-encryption keys, KEK and password-recipient details, and originator
+    certificates are all things this detector must never read into a finding,
+    and the cheapest way to guarantee that is not to parse them at all.
+    """
+    if element.tag != _DER_TAG_SEQUENCE:
+        return False
+    children = _der_children(data, element)
+    if children is None:
+        return False
+    index = 0
+    if index >= len(children) or not _cms_version_valid(data, children[index]):
+        return False
+    index += 1
+    if index < len(children) and children[index].tag == _DER_TAG_CONTEXT_0_CONSTRUCTED:
+        # originatorInfo: permitted, and never interpreted.
+        index += 1
+    if index >= len(children) or children[index].tag != _DER_TAG_SET:
+        return False
+    recipients = _der_children(data, children[index])
+    if not recipients:
+        # None (the SET's content is not an exact sequence of DER elements) or
+        # empty (RecipientInfos is SIZE (1..MAX)).
+        return False
+    index += 1
+    if index >= len(children) or not _cms_encrypted_content_info_valid(
+        data, children[index]
+    ):
+        return False
+    index += 1
+    if index < len(children) and children[index].tag == _DER_TAG_CONTEXT_1_CONSTRUCTED:
+        # unprotectedAttrs: permitted, and never interpreted.
+        index += 1
+    return index == len(children)
+
+
+def _cms_encrypted_data_valid(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` is a supported ``EncryptedData`` body: a minimally
+    encoded INTEGER version, an ``EncryptedContentInfo``, and an optional
+    implicit ``[1]`` ``unprotectedAttrs``, with nothing following.
+
+    RFC 5652 fixes the version against the presence of those attributes -- 0
+    without them, 2 with them -- so the two are checked together. The version is
+    the one value this detector compares rather than merely validates, and it is
+    not reported either.
+    """
+    if element.tag != _DER_TAG_SEQUENCE:
+        return False
+    children = _der_children(data, element)
+    if children is None:
+        return False
+    index = 0
+    if index >= len(children) or not _cms_version_valid(data, children[index]):
+        return False
+    version = children[index]
+    index += 1
+    if index >= len(children) or not _cms_encrypted_content_info_valid(
+        data, children[index]
+    ):
+        return False
+    index += 1
+    has_attributes = (
+        index < len(children) and children[index].tag == _DER_TAG_CONTEXT_1_CONSTRUCTED
+    )
+    if has_attributes:
+        index += 1
+    if index != len(children):
+        return False
+    expected = (
+        _CMS_ENCRYPTED_DATA_VERSION_WITH_ATTRIBUTES
+        if has_attributes
+        else _CMS_ENCRYPTED_DATA_VERSION_WITHOUT_ATTRIBUTES
+    )
+    return (
+        version.content_length == _CMS_VERSION_CONTENT_LENGTH
+        and data[version.content_start] == expected
+    )
+
+
+def _cms_version_valid(data: bytes, element: _DerElement) -> bool:
+    """Whether ``element`` is a minimally encoded INTEGER, the encoding every
+    ``CMSVersion`` field uses. The magnitude is not read here -- only
+    ``EncryptedData`` constrains its version value, and it does so itself."""
+    return element.tag == _DER_TAG_INTEGER and _der_is_minimal_integer(data, element)
+
+
+def _cms_encrypted_content_type(data: bytes) -> str | None:
+    """Which supported CMS encrypted-content type ``data`` is a complete
+    ``ContentInfo`` for, or None.
+
+    Content only -- never the filename, the extension, entropy, or file size.
+    Offset 0 and full consumption are both required, so a supported CMS object
+    embedded at a nonzero offset inside a larger binary file is not a match: the
+    format puts the ContentInfo's own SEQUENCE header first and nothing after
+    its end.
+
+    Length-safe and binary-safe throughout, so an empty, truncated, or arbitrary
+    binary buffer returns None instead of raising.
+    """
+    outer = _der_read(data, 0, len(data))
+    if outer is None or outer.tag != _DER_TAG_SEQUENCE:
+        return None
+    if outer.content_end != len(data):
+        return None
+    children = _der_children(data, outer)
+    if children is None or len(children) != _CMS_CONTENT_INFO_ELEMENTS:
+        return None
+    content_type, wrapper = children
+    if wrapper.tag != _DER_TAG_CONTEXT_0_CONSTRUCTED:
+        return None
+    wrapped = _der_children(data, wrapper)
+    if wrapped is None or len(wrapped) != _CMS_CONTENT_WRAPPER_ELEMENTS:
+        return None
+    content = wrapped[0]
+    if content.tag != _DER_TAG_SEQUENCE:
+        return None
+    if _der_oid_equals(data, content_type, _CMS_OID_ENVELOPED_DATA):
+        return _CMS_ENVELOPED_DATA if _cms_enveloped_data_valid(data, content) else None
+    if _der_oid_equals(data, content_type, _CMS_OID_ENCRYPTED_DATA):
+        return _CMS_ENCRYPTED_DATA if _cms_encrypted_data_valid(data, content) else None
+    # Every other content type -- id-data, id-signedData, id-digestedData,
+    # id-authenticatedData, and anything else -- is a valid ContentInfo that is
+    # not encrypted-content evidence.
+    return None
+
+
+def _cms_pem_bodies(text: str) -> list[bytes]:
+    """The decoded body of every complete, well-formed ``CMS`` or ``PKCS7`` PEM
+    block in ``text``.
+
+    The same hardened boundary rules HG-038 established for encrypted PKCS#8: a
+    block counts only when both labels appear as **exact boundary lines** -- the
+    line, with only leading/trailing whitespace stripped, equals the label
+    exactly -- so ``prefix-----BEGIN CMS-----`` or ``-----END CMS-----suffix``
+    is not a boundary and can neither open nor close a block. The BEGIN and END
+    labels must be the *same* label, so a ``CMS`` header closed by a ``PKCS7``
+    footer is an incomplete block rather than a match.
+    ``str.splitlines()`` recognizes LF, CRLF, and bare CR line endings alike, so
+    this is not tied to one line-ending convention, and unrelated explanatory
+    text on its own lines before, between, or after a block is simply never a
+    boundary line.
+
+    A block also counts only when the base64 between the boundaries decodes
+    under strict validation, so a header with no footer, a truncated block, or
+    an invalid base64 body yields nothing and cannot reach the structural check.
+    ``text`` is the scanner's existing bounded text view (see ``decode_text``),
+    so this adds no new size boundary.
+
+    The decoded bytes are returned for structural validation only; they are
+    never retained in a finding.
+    """
+    lines = text.splitlines()
+    bodies: list[bytes] = []
+    index = 0
+    while index < len(lines):
+        label = _CMS_PEM_BEGIN_LINES.get(lines[index].strip())
+        if label is None:
+            index += 1
+            continue
+        end_line = f"-----END {label}-----"
+        end_index = None
+        for candidate in range(index + 1, len(lines)):
+            if lines[candidate].strip() == end_line:
+                end_index = candidate
+                break
+        if end_index is None:
+            # A header with no matching footer is an incomplete block, not a
+            # CMS object.
+            return bodies
+        body = "".join("".join(lines[index + 1 : end_index]).split())
+        index = end_index + 1
+        if not body:
+            continue
+        try:
+            bodies.append(base64.b64decode(body, validate=True))
+        except (ValueError, binascii.Error):
+            # Invalid base64 is a malformed block, which produces no finding.
+            continue
+    return bodies
+
+
+def _cms_content_types(context: FileContext) -> list[str]:
+    """Every supported CMS encrypted-content type observed in one file: from the
+    file's own bytes read as binary DER, and from each complete textual
+    ``CMS``/``PKCS7`` block it carries.
+
+    Both encodings are checked in one pass so the two rule detectors share the
+    work and neither reads the file again -- the bytes and the text view both
+    come from the shared context's single read.
+    """
+    observed: list[str] = []
+    content_type = _cms_encrypted_content_type(context.data)
+    if content_type is not None:
+        observed.append(content_type)
+    text = context.text
+    if text is not None:
+        observed.extend(
+            found
+            for found in (
+                _cms_encrypted_content_type(body) for body in _cms_pem_bodies(text)
+            )
+            if found is not None
+        )
+    return observed
+
+
+def _cms_enveloped_data_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="CMS/PKCS#7 Enveloped Data",
+        location=str(file_path),
+        evidence="CMS/PKCS#7 EnvelopedData encrypted-content structure detected",
+        confidence="High",
+        rule_id="cms:enveloped_data",
+        format="CMS/PKCS#7",
+    )
+
+
+def _cms_encrypted_data_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="CMS/PKCS#7 Encrypted Data",
+        location=str(file_path),
+        evidence="CMS/PKCS#7 EncryptedData encrypted-content structure detected",
+        confidence="High",
+        rule_id="cms:encrypted_data",
+        format="CMS/PKCS#7",
+    )
+
+
 # --- Detector registry (HG-033) --------------------------------------------
 #
 # The static, explicit registry of every crypto-inventory detector family. It
@@ -1839,7 +2221,21 @@ def _pkcs8_encrypted_finding(file_path: Path) -> CryptoInventoryFinding:
 #      PKCS#12 file is taken from it: a PFX's first element is a version
 #      INTEGER, which can never satisfy the AlgorithmIdentifier requirement
 #      here, and this detector reads no extension at all (HG-038).
-#   40-60 JKS, encrypted PKCS#8, PKCS#12, and DER: mutually exclusive in
+#   46/47 The two CMS/PKCS#7 encrypted-object rules, after the keystore and
+#      encrypted-PKCS#8 detectors and ahead of extension-gated PKCS#12, generic
+#      DER certificate parsing, and generic PEM handling, and ahead of the
+#      shared gate: a supported ContentInfo is identified from its own bytes, so
+#      a valid object named `message`, `message.bin`, `message.p7m`,
+#      `message.p7b`, `message.der`, `message.cer`, or `message.p12` must be
+#      classified from its content rather than missed by the extension gate or
+#      reported as a malformed DER certificate or PKCS#12. No real PKCS#12,
+#      keystore, or encrypted PKCS#8 file is taken from the detectors above:
+#      each requires an outer content type or element shape a CMS ContentInfo
+#      cannot have, and neither CMS detector reads an extension at all. The two
+#      run in the recommended semantic order, EnvelopedData before EncryptedData;
+#      they are mutually exclusive on any one file's outer content type, and
+#      both share one structural pass over the file (HG-039).
+#   40-60 JKS, encrypted PKCS#8, CMS, PKCS#12, and DER: mutually exclusive in
 #      practice, but each terminal for the file it claims, which is what keeps a
 #      keystore or container from also being read as PEM text.
 #   70-90 The text detectors, deliberately non-terminal: one PEM file may
@@ -2007,6 +2403,65 @@ def _detect_pkcs8_encrypted(context: FileContext) -> DetectionResult:
         # and the finding carries no per-block detail that could distinguish them.
         return DetectionResult.match([_pkcs8_encrypted_finding(context.path)])
     return DetectionResult.no_match()
+
+
+# Where the shared CMS structural pass caches its result for one file, so the
+# two CMS rule detectors validate the same bytes once between them rather than
+# once each.
+_CMS_MEMO_KEY = "cms_content_types"
+
+
+def _cms_candidate(context: FileContext) -> bool:
+    """The cheap gate for both CMS detectors: either the file begins with a
+    definite-length DER SEQUENCE header whose declared content ends exactly at
+    the end of the file (the binary ContentInfo form), or its text view contains
+    an exact supported opening boundary line (the textual form).
+
+    Those are the only two shapes the CMS detectors can match, so a file failing
+    both could only ever produce a non-match. Content only: the extension is not
+    consulted here or in either detector, so a ``.p7m``, ``.p7e``, ``.p7b``,
+    ``.p7c``, ``.cms``, or ``.der`` name alone can never produce a finding, and
+    a valid object named ``message`` or ``message.bin`` is still classified from
+    its bytes. Deliberately not behind ``_passes_candidate_gate``, which admits
+    files by extension and would drop exactly those unextensioned objects.
+    """
+    prefix = context.leading_bytes(_DER_MAX_HEADER_BYTES)
+    header = _der_header(prefix, 0, len(prefix))
+    if header is not None:
+        tag, content_start, length = header
+        if tag == _DER_TAG_SEQUENCE and content_start + length == len(context.data):
+            return True
+    text = context.text
+    return text is not None and any(line in text for line in _CMS_PEM_BEGIN_LINES)
+
+
+def _cms_observed_content_types(context: FileContext) -> list[str]:
+    """The supported CMS encrypted-content types this file carries, computed
+    once per file and shared by both CMS detectors through the context memo."""
+    observed = context.memo.get(_CMS_MEMO_KEY)
+    if observed is None:
+        observed = _cms_content_types(context)
+        context.memo[_CMS_MEMO_KEY] = observed
+    return observed
+
+
+def _detect_cms_enveloped_data(context: FileContext) -> DetectionResult:
+    # The full bytes are required, not a prefix: the ContentInfo runs to the end
+    # of the file and the "no trailing bytes" requirement is only meaningful
+    # against the whole file. The bytes are already in the shared context, so
+    # this is not an extra read.
+    if _CMS_ENVELOPED_DATA not in _cms_observed_content_types(context):
+        return DetectionResult.no_match()
+    # One finding per file, not per block: several supported CMS blocks in one
+    # file are one encrypted-object asset at one location, and the finding
+    # carries no per-block detail that could distinguish them.
+    return DetectionResult.match([_cms_enveloped_data_finding(context.path)])
+
+
+def _detect_cms_encrypted_data(context: FileContext) -> DetectionResult:
+    if _CMS_ENCRYPTED_DATA not in _cms_observed_content_types(context):
+        return DetectionResult.no_match()
+    return DetectionResult.match([_cms_encrypted_data_finding(context.path)])
 
 
 def _jks_candidate(context: FileContext) -> bool:
@@ -2222,6 +2677,53 @@ CRYPTO_DETECTORS = build_registry(
                 "decrypted, no key-loading API is consulted, and the encryption "
                 "algorithm, KDF, salt, IV, iteration count, and encrypted bytes "
                 "are never reported."
+            ),
+        ),
+        FileDetector(
+            detector_id="cms:enveloped_data",
+            priority=46,
+            candidate=_cms_candidate,
+            detect=_detect_cms_enveloped_data,
+            evidence="CMS/PKCS#7 EnvelopedData encrypted-content structure detected",
+            confidence="High",
+            terminal=True,
+            rule_id="cms:enveloped_data",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "Complete RFC 5652 ContentInfo read from the file's own bytes -- "
+                "a DER SEQUENCE at offset 0 consuming the whole object, an outer "
+                "content type that is exactly id-envelopedData, an explicit [0] "
+                "wrapper holding one EnvelopedData SEQUENCE, a non-empty "
+                "RecipientInfos SET, and an EncryptedContentInfo whose "
+                "encryptedContent is present and non-empty -- decoded from a "
+                "complete CMS/PKCS7 textual block when textually encoded; no "
+                "password, private key, or recipient certificate is accepted, "
+                "nothing is decrypted, no signature or certificate is validated, "
+                "and no recipient identity, algorithm, KDF, IV, OID, encrypted "
+                "key, or ciphertext byte is reported."
+            ),
+        ),
+        FileDetector(
+            detector_id="cms:encrypted_data",
+            priority=47,
+            candidate=_cms_candidate,
+            detect=_detect_cms_encrypted_data,
+            evidence="CMS/PKCS#7 EncryptedData encrypted-content structure detected",
+            confidence="High",
+            terminal=True,
+            rule_id="cms:encrypted_data",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "Complete RFC 5652 ContentInfo read from the file's own bytes -- "
+                "a DER SEQUENCE at offset 0 consuming the whole object, an outer "
+                "content type that is exactly id-encryptedData, an explicit [0] "
+                "wrapper holding one EncryptedData SEQUENCE, the CMS version the "
+                "specification fixes for the unprotected attributes present, and "
+                "an EncryptedContentInfo whose encryptedContent is present and "
+                "non-empty -- decoded from a complete CMS/PKCS7 textual block "
+                "when textually encoded; no password or key is accepted, nothing "
+                "is decrypted, and no algorithm, KDF, IV, OID, or ciphertext byte "
+                "is reported."
             ),
         ),
         FileDetector(

@@ -60,7 +60,10 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "crypto_inventory"
 # one (the native age v1 encrypted-file detector), HG-036 added exactly one
 # (the BCFKS keystore-container detector), and HG-037 added exactly one (the
 # JCEKS keystore-container detector, a separate format and identity from the
-# existing JKS detector below it).
+# existing JKS detector below it). HG-039 added exactly two, the CMS/PKCS#7
+# EnvelopedData and EncryptedData encrypted-object detectors, which are two
+# separate content types with two separate rule identities rather than one
+# detector that reports which it saw.
 EXPECTED_DETECTOR_IDS = [
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
@@ -70,6 +73,8 @@ EXPECTED_DETECTOR_IDS = [
     "java_keystore:jceks",
     "java_keystore:jks_magic",
     "private_key:pkcs8_encrypted",
+    "cms:enveloped_data",
+    "cms:encrypted_data",
     "pkcs12:container",
     "certificate:der",
     "certificate:pem",
@@ -80,9 +85,9 @@ EXPECTED_DETECTOR_IDS = [
 # The only rule IDs any crypto-inventory detector may carry. Every other asset
 # type leaves rule_id unset (parsed certificates and keys have no named
 # detection rule); HG-033 introduced none, HG-035 introduced exactly one,
-# HG-036 introduced exactly one, HG-037 introduced exactly one, and HG-038
-# introduced exactly one. The JKS detector deliberately remains without one,
-# unchanged by HG-037 and HG-038.
+# HG-036 introduced exactly one, HG-037 introduced exactly one, HG-038
+# introduced exactly one, and HG-039 introduced exactly two. The JKS detector
+# deliberately remains without one, unchanged by HG-037, HG-038, and HG-039.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
@@ -91,6 +96,8 @@ EXPECTED_RULE_IDS = {
     "java_keystore:bcfks",
     "java_keystore:jceks",
     "private_key:pkcs8_encrypted",
+    "cms:enveloped_data",
+    "cms:encrypted_data",
 }
 
 
@@ -271,6 +278,26 @@ def test_intentional_precedence_is_declared_in_the_registry():
     ):
         assert _priority(container) < _priority("private_key:pkcs8_encrypted")
 
+    # Both CMS/PKCS#7 encrypted-object rules ahead of the extension-based
+    # container and certificate branches, so a valid object with no extension or
+    # a misleading .der/.cer/.crt/.p12/.pfx name is classified from its
+    # structure rather than missed by the extension gate or reported as
+    # malformed certificate or PKCS#12 evidence, and after every keystore and
+    # encrypted-PKCS#8 detector, whose formats a CMS ContentInfo cannot satisfy
+    # (HG-039).
+    for extension_based in ("pkcs12:container", "certificate:der", "private_key:pem"):
+        assert _priority("cms:enveloped_data") < _priority(extension_based)
+        assert _priority("cms:encrypted_data") < _priority(extension_based)
+    for earlier in (
+        "java_keystore:bcfks",
+        "java_keystore:jceks",
+        "java_keystore:jks_magic",
+        "private_key:pkcs8_encrypted",
+    ):
+        assert _priority(earlier) < _priority("cms:enveloped_data")
+        assert _priority(earlier) < _priority("cms:encrypted_data")
+    assert _priority("cms:enveloped_data") < _priority("cms:encrypted_data")
+
     # Certificate/key precedence within the text detectors.
     assert _priority("certificate:der") < _priority("certificate:pem")
     assert _priority("certificate:pem") < _priority("private_key:pem")
@@ -286,6 +313,8 @@ def test_terminal_declarations_match_current_dispatch_behavior():
         "java_keystore:jceks",
         "java_keystore:jks_magic",
         "private_key:pkcs8_encrypted",
+        "cms:enveloped_data",
+        "cms:encrypted_data",
         "pkcs12:container",
         "certificate:der",
     ):

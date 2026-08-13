@@ -430,6 +430,86 @@ unchanged and there is nothing for `--type all` to deduplicate. An encrypted
 PKCS#8 file counts once in `Crypto files inspected`, and no PKCS#8-specific count
 or summary bucket was added.
 
+#### CMS / PKCS#7 encrypted-object evidence (HG-039)
+
+A file whose content is a complete RFC 5652 `ContentInfo` carrying one of two
+supported encrypted content types is cryptographic evidence, and the
+crypto-inventory scanner owns it. A `--type crypto` (or `--type all`) scan
+reports it as:
+
+- asset type `CMS/PKCS#7 Enveloped Data`, `rule_id: cms:enveloped_data`,
+  evidence `CMS/PKCS#7 EnvelopedData encrypted-content structure detected`; or
+- asset type `CMS/PKCS#7 Encrypted Data`, `rule_id: cms:encrypted_data`,
+  evidence `CMS/PKCS#7 EncryptedData encrypted-content structure detected`.
+
+Both are confidence `High` with technical metadata limited to
+`Format: CMS/PKCS#7`. One finding is emitted per file per rule — a file holding
+several supported blocks is one encrypted-object asset at one location — and as
+with the `Salted__`, OpenPGP, age, BCFKS, JCEKS, and encrypted-PKCS#8 checks,
+content is evaluated before any extension-based parsing, so a valid object saved
+as `message`, `message.bin`, `message.cms`, `message.p7m`, `message.p7e`,
+`message.p7b`, `message.p7c`, `message.der`, `message.cer`, `message.crt`,
+`message.p12`, or `message.pfx` is reported as the CMS object it is rather than
+being missed or reported as a malformed DER certificate or PKCS#12 container.
+Content wins over extension, and an extension alone never produces this finding.
+
+**Support is narrow and explicit.** Both encodings share the same structural
+requirements:
+
+- **Binary DER** — a `SEQUENCE` beginning at byte offset 0 and consuming the
+  entire file with no trailing bytes, holding exactly a content-type OBJECT
+  IDENTIFIER that is exactly `id-envelopedData` or `id-encryptedData` and a
+  constructed `[0]` wrapper containing exactly one inner `SEQUENCE`. All lengths
+  must be definite, minimally encoded, and in bounds.
+- **Textual** — an exact `-----BEGIN CMS-----`/`-----END CMS-----` or
+  `-----BEGIN PKCS7-----`/`-----END PKCS7-----` pair with matching labels and a
+  complete base64 body that decodes and satisfies the requirements above. LF and
+  CRLF are both supported; explanatory text on separate lines is ignored.
+
+Inside the wrapper, `EnvelopedData` must carry a minimally encoded version, a
+non-empty `recipientInfos` SET, and an `EncryptedContentInfo`, with
+`originatorInfo` and unprotected attributes permitted; `EncryptedData` must
+carry the CMS version RFC 5652 fixes for the unprotected attributes present and
+an `EncryptedContentInfo`. In both cases `EncryptedContentInfo` must hold a
+content-type OID, a structurally valid `AlgorithmIdentifier`, and a **present,
+non-empty** `[0]` encrypted content.
+
+**Certificate-only and signed PKCS#7/CMS bundles are separated, not matched.** A
+PKCS#7 certificate bundle, a degenerate or ordinary `SignedData`, a CMS `Data`
+object, and any other content type — `id-digestedData` and `id-authenticatedData`
+included — produce no finding, and the `CMS`/`PKCS7` label alone is never
+evidence. Neither is a truncated object, trailing bytes, an object embedded at a
+nonzero offset, a missing or malformed `[0]` wrapper, an indefinite-length (BER)
+or non-minimal encoding, a malformed `AlgorithmIdentifier`, an empty
+`recipientInfos`, or an absent, detached, or empty `encryptedContent`. A DER
+certificate, PKCS#12 file, encrypted PKCS#8 key, or BCFKS, JCEKS, or JKS store
+keeps its own existing classification.
+
+**Nothing is decrypted and no secret is involved.** The claim is established from
+the structure alone: no password, private key, secret key, or recipient
+certificate is prompted for, accepted, or read from an environment variable; no
+content-encryption key or payload is decrypted; no signature is verified and no
+recipient certificate or chain is validated; no S/MIME policy is evaluated; and
+`openssl` and every other external process are never invoked at runtime.
+
+**`High` confidence applies to the object structure only.** It does not mean the
+object is decryptable, that any recipient is valid or reachable, that any
+signature or certificate was checked, or that any algorithm was assessed — a
+syntactically valid supported structure whose `encryptedContent` holds arbitrary
+non-empty bytes still matches. No recipient identity, issuer or serial number,
+subject key identifier, encrypted content-encryption key, originator identity,
+unprotected attribute, signer information, OID, cipher/KDF name, parameter,
+salt, IV, nonce, key size, raw ASN.1 fragment, or ciphertext byte appears in any
+finding, report, or stored record. Absence of a `cms:enveloped_data` or
+`cms:encrypted_data` finding is not proof that no CMS encrypted object exists in
+the target. The full supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#cms--pkcs7-encrypted-objects-hg-039).
+
+The filesystem scanner recognizes no CMS structure, so `--type filesystem` is
+unchanged and there is nothing for `--type all` to deduplicate. A CMS object
+counts once in `Crypto files inspected`, and no CMS-specific count or summary
+bucket was added.
+
 #### gocryptfs encrypted-filesystem evidence (HG-032)
 
 A directory containing both a supported `gocryptfs.conf` and a root-level

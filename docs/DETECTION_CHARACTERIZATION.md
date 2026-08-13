@@ -882,6 +882,165 @@ creates no
 [internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
 and emits nothing beyond the single finding described above.
 
+#### CMS / PKCS#7 encrypted objects (HG-039)
+
+A file whose content is a **complete RFC 5652 `ContentInfo` carrying one of two
+supported encrypted content types** is reported as one of:
+
+| Content type | Asset type | Rule ID | Evidence |
+| --- | --- | --- | --- |
+| `EnvelopedData` | `CMS/PKCS#7 Enveloped Data` | `cms:enveloped_data` | `CMS/PKCS#7 EnvelopedData encrypted-content structure detected` |
+| `EncryptedData` | `CMS/PKCS#7 Encrypted Data` | `cms:encrypted_data` | `CMS/PKCS#7 EncryptedData encrypted-content structure detected` |
+
+Both are confidence `High` with technical metadata `Format: CMS/PKCS#7` and
+nothing else. The two content types are distinguished by asset type, rule ID,
+and evidence wording rather than by a new metadata field, so no existing
+report or evidence-store schema changes. Both encodings are supported: binary
+DER, and the RFC 7468 textual forms labelled `CMS` and `PKCS7`.
+
+Like the `Salted__`, OpenPGP, age, BCFKS, JCEKS, and encrypted-PKCS#8 checks,
+both run ahead of the extension-based branches — before extension-gated PKCS#12,
+generic DER certificate parsing, and generic PEM handling, and ahead of the
+shared candidate gate — so a valid object saved as `message`, `message.bin`,
+`message.cms`, `message.p7m`, `message.p7e`, `message.p7b`, `message.p7c`,
+`message.der`, `message.cer`, `message.crt`, `message.p12`, or `message.pfx` is
+classified from its content rather than missed by the gate or reported as a
+malformed DER certificate or PKCS#12 container. They run after the keystore and
+encrypted-PKCS#8 detectors, whose formats a CMS `ContentInfo` cannot satisfy.
+One finding is emitted per file per rule — several supported blocks in one file
+are one encrypted-object asset at one location — and a match is terminal.
+
+**What is detected** — the outer structure only, and only when every one of
+these holds:
+
+- **Outer `ContentInfo`:**
+  - a **complete DER `SEQUENCE` beginning at byte offset 0** whose declared
+    length consumes the whole file (or the whole decoded textual body) with **no
+    trailing bytes**; a supported object embedded at a nonzero offset inside a
+    larger binary file is not a match;
+  - **exactly two children**;
+  - the first child is a **structurally valid OBJECT IDENTIFIER** whose value is
+    **exactly** `id-envelopedData` or `id-encryptedData`;
+  - the second child is a **constructed context-specific `[0]`** wrapper — the
+    explicit CMS content wrapper — holding **exactly one** element, which is a
+    `SEQUENCE`.
+- **`EnvelopedData`:** a minimally encoded INTEGER version; an optional
+  context-specific `[0]` `originatorInfo`; a required **non-empty constructed
+  SET** of `recipientInfos`; a required `EncryptedContentInfo`; an optional
+  context-specific `[1]` unprotected-attributes field; and nothing else. The
+  recipient infos are checked for presence and well-formedness only and are
+  never decoded.
+- **`EncryptedData`:** a minimally encoded INTEGER CMS version — **0** when
+  unprotected attributes are absent and **2** when they are present; a required
+  `EncryptedContentInfo`; an optional context-specific `[1]`
+  unprotected-attributes field; and nothing else.
+- **`EncryptedContentInfo`** (both rules): a `SEQUENCE` of exactly a structurally
+  valid content-type OBJECT IDENTIFIER, a structurally valid
+  `AlgorithmIdentifier`, and a **present, non-empty context-specific `[0]`
+  encrypted content**. A fourth or later child is not a match.
+- **Textual form:** an exact `-----BEGIN CMS-----`/`-----END CMS-----` or
+  `-----BEGIN PKCS7-----`/`-----END PKCS7-----` pair — both boundaries present
+  as exact lines, with matching labels, forming a complete block — whose base64
+  body decodes under strict validation and whose decoded bytes satisfy every
+  structural requirement above. LF and CRLF line endings are both supported, and
+  explanatory text on separate lines is ignored. A header with no matching
+  footer, a mismatched label, a prefix or suffix on a boundary line, an empty
+  body, or invalid base64 produces no finding rather than a partial one.
+
+The DER reader is the same bounded, defensive one BCFKS and encrypted PKCS#8
+already use, reused unchanged: definite, minimally encoded lengths only, bounded
+nesting, no high-tag-number expansion, no unbounded allocation, no recursion
+into the encrypted content, and malformed or truncated input returns no match
+rather than raising. No general BER engine, general CMS parser, or new ASN.1
+dependency is introduced, and BCFKS/JCEKS/JKS/encrypted-PKCS#8 behavior is
+untouched.
+
+**Certificate-only and signed objects are separated, not matched.** A PKCS#7
+certificate bundle (degenerate `SignedData`), an ordinary CMS `SignedData`, a
+CMS `Data` object, and any other valid `ContentInfo` whose content OID is not
+one of the two supported values produce **no** HG-039 finding: `id-data`,
+`id-signedData`, `id-digestedData`, and `id-authenticatedData` are never treated
+as encryption evidence. The `CMS` or `PKCS7` textual label alone is never
+evidence either — the decoded body must still pass the full structural check.
+
+**Why confidence is `High`.** The complete supported `ContentInfo` structure is
+validated, including the exact outer content-type OID, the explicit `[0]`
+wrapper, the content-type-specific field sequence, and a present, non-empty
+`encryptedContent`. `High` applies to the **object structure only**. It does not
+mean the object is decryptable, that any recipient is valid or reachable, that
+any signature or certificate was checked, that the payload is still
+operationally relevant, or that any algorithm was assessed.
+
+**Known false positive.** A syntactically valid supported CMS structure whose
+`encryptedContent` holds arbitrary non-empty bytes still matches, because
+proving those bytes decrypt correctly would require keys and decryption. The
+claim is structural, not cryptographic.
+
+**Known false negatives** — each produces no finding at all, never a
+lower-confidence partial finding:
+
+- **BER indefinite-length or streaming CMS** outside the supported
+  definite-length subset. The reader is deliberately DER-oriented and is not
+  weakened to accept it.
+- **Detached or absent `encryptedContent`** — an object whose ciphertext lives
+  elsewhere. HarvestGuard saw no encrypted bytes, so it claims none.
+- **Malformed-but-tolerated encodings** outside the strict subset: non-minimal
+  lengths, high-tag-number forms, a constructed (chunked) `encryptedContent`, or
+  content whose children do not exactly consume their parent.
+- **Unsupported CMS content types**, notably `AuthEnvelopedData`, as well as
+  `SignedData`, `Data`, `DigestedData`, and `AuthenticatedData`.
+- An **empty or truncated object**, **trailing bytes** after the outer
+  `SEQUENCE`, or a supported object **embedded at a nonzero offset** inside a
+  larger binary file.
+- A **missing, primitive, empty, or multi-child `[0]` content wrapper**, or a
+  wrapper whose inner element is not a `SEQUENCE`.
+- An **unsupported, truncated, or malformed outer OID**.
+- A structurally invalid field: a missing or non-minimal version, an
+  `EncryptedData` version that does not match the presence of unprotected
+  attributes, an empty or non-SET `recipientInfos`, a malformed
+  `AlgorithmIdentifier`, an empty `encryptedContent`, or an unexpected trailing
+  child.
+- A file **named `message.p7m`, `.p7e`, `.p7b`, `.p7c`, `.cms`, `.der`, `.cer`,
+  `.crt`, `.p12`, or `.pfx` without supported CMS content**. **No detection is
+  based on filename, extension, entropy, or file size**; the extension is not
+  consulted at all, not even the shared candidate gate.
+- Neighbouring formats, each of which keeps its own existing classification:
+  **DER certificates, PKCS#12 containers, encrypted PKCS#8 private keys, PEM
+  certificates and keys, and BCFKS, JCEKS, and JKS keystores.**
+
+**No decryption, no secrets, no identities.** The scanner never requests or
+accepts a password, private key, secret key, or recipient certificate; never
+reads secret material from the environment; never decrypts a content-encryption
+key or a payload; never verifies a signature; never validates a recipient
+certificate or chain; performs no S/MIME policy evaluation; invokes `openssl` or
+any other external process at runtime; and makes no network call. Recipient
+identities, issuer and serial numbers, subject key identifiers, encrypted
+content-encryption keys, KEK and password-recipient details, originator
+certificates, unprotected attributes, signer information, content-type and
+algorithm OIDs, cipher/KDF names and parameters, key sizes, salts, IVs and
+nonces, raw ASN.1 fragments, ciphertext bytes, and plaintext are all absent from
+findings, normalized findings, JSON, Markdown, evidence-store records, and
+scanner errors — a finding carries exactly one metadata value,
+`Format: CMS/PKCS#7`. Absence of a `cms:enveloped_data` or `cms:encrypted_data`
+finding is not proof that no CMS encrypted object exists in the target: these
+are two narrow rules for two explicitly enumerated structures, not general CMS
+inventory.
+
+**Scanner ownership.** Crypto inventory owns both rules; the filesystem scanner
+never emits them, recognizes no CMS structure of its own, and `--type
+filesystem` is unchanged. There is therefore nothing for `--type all` to
+deduplicate, and HG-039 adds no cross-scanner deduplication pairing. Accounting
+is unchanged: a CMS object counts once in `Crypto files inspected`, contributes
+nothing to `Files scanned`, and there is no CMS-specific count and no new
+summary bucket. JSON remains a bare normalized-finding array, Markdown remains
+evidence-only, CLI output and DataFrame columns are unchanged, and Streamlit
+behavior is unchanged.
+
+**No relationship output.** HG-039 adds CMS/PKCS#7 encrypted-object detection
+only; it creates no
+[internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+and emits nothing beyond the single finding described above.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:
