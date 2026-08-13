@@ -482,20 +482,32 @@ def test_one_finding_per_file_for_multiple_same_type_blocks(tmp_path):
 
 
 def test_coexists_with_certificate_pem_when_both_present(tmp_path):
-    # Minimal syntactically framed cert (may be malformed as X.509; still
-    # exercises non-terminal dispatch).
-    cert = (
-        "-----BEGIN CERTIFICATE-----\n"
-        "MIIBkTCB+wIJAKHBfLqLqLqLMA0GCSqGSIb3DQEBCwUAMBQxEjAQBgNVBAMMCXRlc3QuY29t\n"
-        "-----END CERTIFICATE-----\n"
-    )
+    # Real valid certificate fixture + real legacy encrypted PEM in one file.
+    # Both detectors are non-terminal; both evidence claims must survive.
+    cert = (FIXTURE_DIR / "rsa_cert.pem").read_text(encoding="ascii")
     key = _valid_block_from()
-    path = _write(tmp_path, "both.pem", cert + "\n" + key)
+    path = _write(tmp_path, "both.pem", cert.rstrip() + "\n\n" + key + "\n")
     findings = _findings(path)
-    assert any(f.rule_id == RULE_ID for f in findings)
-    # Certificate detector may report a malformed cert; what matters is that
-    # legacy still fires (non-terminal).
-    assert any(f.rule_id == RULE_ID for f in findings)
+    legacy = [f for f in findings if f.rule_id == RULE_ID]
+    certs = [
+        f
+        for f in findings
+        if f.asset_type == "PEM Certificate" and f.confidence == "High"
+    ]
+    assert len(legacy) == 1
+    _assert_contract(legacy[0])
+    assert len(certs) == 1
+    assert certs[0].evidence == "PEM Certificate parsed successfully"
+    # No contradictory generic private-key finding for the HG-040-owned block.
+    assert not any(
+        f.asset_type
+        in {
+            "PEM Private Key",
+            "Encrypted PEM Private Key",
+            "Malformed PEM Private Key",
+        }
+        for f in findings
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -616,30 +628,75 @@ def test_finding_ids_are_deterministic(tmp_path):
 
 
 def test_evidence_store_round_trip_preserves_the_finding(tmp_path, capsys):
-    """Evidence-store scan + normalized finding contract for a real fixture.
-
-    Full CLI export/verify flag shapes vary by build; the durable contract is
-    that scan_crypto_inventory_findings produces the approved finding and that
-    a DataFrame/JSON path does not leak secrets.
-    """
-    target = tmp_path / "scan_root"
+    """Real evidence-db scan → verify → JSON/Markdown export for an HG-040 finding."""
+    target = tmp_path / "target"
     target.mkdir()
-    path = _write(target, "legacy.pem", _real("rsa_encrypted_legacy.pem"))
-    findings = _findings(path)
-    assert len(findings) == 1
-    _assert_contract(findings[0])
+    _write(target, "legacy.pem", _real("rsa_encrypted_legacy.pem"))
+    db = tmp_path / "evidence.db"
 
-    df = scan_crypto_inventory(str(target))
-    assert not df.empty
-    row = df.iloc[0]
-    assert row["Rule ID"] == RULE_ID
-    assert row["Format"] == FORMAT
-    # Privacy on tabular/JSON path
-    payload = df.to_json(orient="records")
-    for secret in GENERATION_SECRETS:
-        assert secret not in payload
-    assert "Proc-Type" not in payload
-    assert "DEK-Info" not in payload
+    assert (
+        harvestguard.main(
+            [
+                "scan",
+                str(target),
+                "--type",
+                "crypto",
+                "--json",
+                "--quiet",
+                "--evidence-db",
+                str(db),
+            ]
+        )
+        == 0
+    )
+    live = capsys.readouterr().out
+    records = json.loads(live)
+    assert len(records) == 1
+    scan_id = records[0]["scan_id"]
+    assert scan_id
+    assert records[0]["rule_id"] == RULE_ID
+    assert records[0]["asset_type"] == ASSET_TYPE
+    assert records[0]["confidence"] == CONFIDENCE
+    assert records[0]["evidence"] == EVIDENCE
+    assert records[0]["technical_metadata"]["Format"] == FORMAT
+
+    assert harvestguard.main(["evidence", "verify", scan_id, "--evidence-db", str(db)]) == 0
+    capsys.readouterr()
+
+    assert (
+        harvestguard.main(
+            ["evidence", "export", scan_id, "--evidence-db", str(db), "--json", "--quiet"]
+        )
+        == 0
+    )
+    stored = capsys.readouterr().out
+    assert stored == live
+    record = json.loads(stored)[0]
+    assert record["scan_id"] == scan_id
+    assert record["rule_id"] == RULE_ID
+    assert record["asset_type"] == ASSET_TYPE
+    assert record["confidence"] == CONFIDENCE
+    assert record["evidence"] == EVIDENCE
+    assert record["technical_metadata"]["Format"] == FORMAT
+    assert record["schema_version"] == "1.0.0"
+
+    assert (
+        harvestguard.main(
+            ["evidence", "export", scan_id, "--evidence-db", str(db), "--markdown", "--quiet"]
+        )
+        == 0
+    )
+    markdown = capsys.readouterr().out
+    assert ASSET_TYPE in markdown
+    assert EVIDENCE in markdown
+
+    # Private fixture material must not leak through stored JSON or Markdown.
+    for payload in (live, stored, markdown):
+        for secret in GENERATION_SECRETS:
+            assert secret not in payload
+        assert "Proc-Type" not in payload
+        assert "DEK-Info" not in payload
+        assert "BEGIN RSA PRIVATE KEY" not in payload
 
 
 def test_dataframe_normalization_preserves_format(tmp_path):
@@ -652,6 +709,79 @@ def test_dataframe_normalization_preserves_format(tmp_path):
     assert row["Format"] == FORMAT
     assert row["Evidence"] == EVIDENCE
     assert row["Confidence"] == CONFIDENCE
+
+
+# ---------------------------------------------------------------------------
+# Ownership boundary vs generic private_key:pem
+# ---------------------------------------------------------------------------
+
+
+_GENERIC_PRIVATE_KEY_ASSET_TYPES = {
+    "PEM Private Key",
+    "Encrypted PEM Private Key",
+    "Malformed PEM Private Key",
+}
+
+
+def _no_generic_private_key_finding(findings) -> None:
+    conflicting = [
+        (f.asset_type, f.rule_id, f.evidence)
+        for f in findings
+        if f.asset_type in _GENERIC_PRIVATE_KEY_ASSET_TYPES
+    ]
+    assert conflicting == [], conflicting
+
+
+@pytest.mark.parametrize(
+    "header_transform",
+    [
+        # Canonical casing (control).
+        lambda s: s,
+        # Header names lower-case (detector is case-insensitive on names).
+        lambda s: s.replace("Proc-Type:", "proc-type:").replace("DEK-Info:", "dek-info:"),
+        # Header names mixed case.
+        lambda s: s.replace("Proc-Type:", "PROC-TYPE:").replace("DEK-Info:", "Dek-Info:"),
+        # Leading spaces after colon are stripped by the grammar.
+        lambda s: s.replace("Proc-Type: 4,ENCRYPTED", "Proc-Type:  4,ENCRYPTED").replace(
+            "DEK-Info: ", "DEK-Info:  "
+        ),
+    ],
+)
+def test_hg040_owned_block_never_produces_generic_private_key_finding(
+    tmp_path, header_transform
+):
+    block = header_transform(_valid_block_from())
+    path = _write(tmp_path, "owned.pem", block)
+    findings = _findings(path)
+    legacy = [f for f in findings if f.rule_id == RULE_ID]
+    assert len(legacy) == 1
+    _assert_contract(legacy[0])
+    _no_generic_private_key_finding(findings)
+
+
+def test_real_fixture_is_not_also_generic_private_key(tmp_path):
+    path = _write(tmp_path, "rsa.pem", _real("rsa_encrypted_legacy.pem"))
+    findings = _findings(path)
+    assert len([f for f in findings if f.rule_id == RULE_ID]) == 1
+    _no_generic_private_key_finding(findings)
+
+
+def test_invalid_proc_type_is_not_owned_by_hg040(tmp_path):
+    # Wrong Proc-Type value: HG-040 must not claim it; generic path may still
+    # observe the PEM block (ownership is only for supported HG-040 grammar).
+    block = _valid_block_from().replace("Proc-Type: 4,ENCRYPTED", "Proc-Type: 4,PLAIN")
+    path = _write(tmp_path, "plainish.pem", block)
+    assert _legacy_findings(path) == []
+
+
+def test_missing_dek_info_is_not_owned_by_hg040(tmp_path):
+    lines = []
+    for line in _valid_block_from().splitlines():
+        if line.lower().startswith("dek-info:"):
+            continue
+        lines.append(line)
+    path = _write(tmp_path, "no_dek.pem", "\n".join(lines) + "\n")
+    assert _legacy_findings(path) == []
 
 
 # ---------------------------------------------------------------------------

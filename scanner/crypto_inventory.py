@@ -2267,6 +2267,28 @@ def _looks_like_legacy_encrypted_pem_block(block_lines: list[str]) -> bool:
     )
 
 
+def _block_owned_by_legacy_encrypted_pem(block: str) -> bool:
+    """True when a full traditional PEM private-key block is HG-040-owned.
+
+    Shared ownership predicate used by both the dedicated detector path and
+    the generic ``_parse_pem_private_keys`` skip. Header *names* (``Proc-Type``,
+    ``DEK-Info``) are matched case-insensitively, matching the detector grammar,
+    so a block the detector accepts cannot also fall through to a contradictory
+    ``PEM Private Key`` / ``Encrypted PEM Private Key`` / ``Malformed …``
+    finding. Only structurally complete HG-040 blocks return True; partial or
+    invalid headers are left for other paths.
+    """
+    lines = block.splitlines()
+    if not lines:
+        return False
+    interior = list(lines)
+    if interior and interior[0].strip().startswith("-----BEGIN "):
+        interior = interior[1:]
+    if interior and interior[-1].strip().startswith("-----END "):
+        interior = interior[:-1]
+    return _looks_like_legacy_encrypted_pem_block(interior)
+
+
 def _legacy_encrypted_pem_blocks(text: str) -> list[list[str]]:
     """Interior lines of complete traditional encrypted PEM blocks.
 
@@ -3079,7 +3101,11 @@ def _parse_pem_private_keys(
             continue
         for block in _extract_pem_blocks(text, label):
             # Traditional Proc-Type encrypted blocks are owned by HG-040.
-            if label in _LEGACY_ENCRYPTED_PEM_LABELS and "Proc-Type: 4,ENCRYPTED" in block:
+            # Use the shared semantic predicate so casing variants the detector
+            # accepts cannot also produce a generic private-key finding.
+            if label in _LEGACY_ENCRYPTED_PEM_LABELS and _block_owned_by_legacy_encrypted_pem(
+                block
+            ):
                 continue
             encrypted = "ENCRYPTED" in label or "Proc-Type: 4,ENCRYPTED" in block
             try:
