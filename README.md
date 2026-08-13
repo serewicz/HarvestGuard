@@ -148,7 +148,12 @@ evidence and must remain traceable back to it.
   are not classified as encrypted; evidence only, never decrypted, with no
   password, private key, or recipient certificate accepted, no signature or
   certificate validated, no recipient enumerated, and no algorithm, OID, IV,
-  encrypted key, or ciphertext reported. Only
+  encrypted key, or ciphertext reported. Also recognizes **legacy encrypted PEM
+  private keys** — traditional OpenSSL-style `RSA`/`DSA`/`EC PRIVATE KEY` blocks
+  that declare `Proc-Type: 4,ENCRYPTED` and a valid `DEK-Info` header with a
+  non-empty strict-base64 body — validated from exact PEM boundaries and
+  headers only; evidence only, never decrypted, with no password prompted for
+  or accepted and no cipher, IV, or ciphertext reported. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See

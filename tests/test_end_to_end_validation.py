@@ -162,12 +162,10 @@ def representative_target(tmp_path_factory) -> Path:
     for asset in sorted(CRYPTO_FIXTURES.glob("*")):
         if asset.is_file() and asset.name != "EXPECTED_OUTPUT.md":
             shutil.copy2(asset, target / "certs" / asset.name)
-    # Since HG-038, "certs/encrypted_key.pem" (a genuine encrypted PKCS#8 key) is
-    # classified by the dedicated structural detector with no error, so it no
-    # longer exercises the passphrase-required error path this target is meant
-    # to demonstrate. A legacy `Proc-Type: 4,ENCRYPTED` encrypted PEM key still
-    # goes through the unchanged exception-driven recognition HG-038 did not
-    # touch, so it is copied in separately to keep that coverage real.
+    # Since HG-038/HG-040, encrypted PKCS#8 and traditional Proc-Type encrypted
+    # PEM are both claimed by dedicated structural detectors with no error.
+    # The legacy fixture is still copied so the representative target includes
+    # a real encrypted traditional PEM asset under its own rule.
     shutil.copy2(
         CRYPTO_FIXTURES / "pkcs8_encrypted" / "legacy_encrypted_rsa.pem",
         target / "certs" / "legacy_encrypted_rsa.pem",
@@ -899,10 +897,11 @@ def test_finding_level_errors_are_visible_without_being_a_scanner_failure(
 ):
     # Documented reading (docs/SCAN_COVERAGE.md, "Markdown and console
     # reporting"): a per-finding `errors` entry -- an unparsable PEM, a JKS
-    # entry the MVP scanner cannot read, an encrypted key whose metadata needs
-    # a passphrase -- is an observation that partly failed, not a scanner
-    # execution failure. It exits 0 and does not change the Coverage row, so it
-    # must stay visible through Errors and Warnings and Detailed Findings.
+    # entry the MVP scanner cannot read -- is an observation that partly failed,
+    # not a scanner execution failure. It exits 0 and does not change the
+    # Coverage row, so it must stay visible through Errors and Warnings and
+    # Detailed Findings. (Traditional Proc-Type encrypted PEM is now owned by
+    # HG-040 and no longer produces a passphrase-required finding-level error.)
     exit_code = harvestguard.main(
         ["scan", str(representative_target), "--type", "crypto", "--markdown", "--quiet"]
     )
@@ -911,5 +910,4 @@ def test_finding_level_errors_are_visible_without_being_a_scanner_failure(
     assert exit_code == 0
     assert "- Finding-level errors are listed in Detailed Findings." in report
     assert "JKS entry parsing is not implemented in the MVP scanner" in report
-    assert "key metadata requires a passphrase" in report
     assert "- Scanner error:" not in report

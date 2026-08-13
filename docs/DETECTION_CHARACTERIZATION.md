@@ -758,9 +758,9 @@ This replaces the pre-HG-038 recognition path for this label: previously,
 `BEGIN ENCRYPTED PRIVATE KEY` was reported only indirectly, by calling a
 key-loading API without a password and treating the resulting password-related
 failure as evidence of encryption. That exception-driven signal is gone for this
-label; every other PEM private-key label (traditional RSA/DSA/EC, the legacy
-`Proc-Type: 4,ENCRYPTED` encrypted form, OpenSSH, encrypted OpenSSH) keeps its
-existing recognition path unchanged.
+label; traditional RSA/DSA/EC labels without encryption headers, OpenSSH, and
+encrypted OpenSSH keep their existing recognition paths. Traditional
+`Proc-Type: 4,ENCRYPTED` blocks are owned by HG-040.
 
 **What is detected** — the outer structure only, and only when every one of
 these holds:
@@ -837,9 +837,10 @@ a lower-confidence partial finding:
   `BEGIN PRIVATE KEY`), whose first element is a version `INTEGER`, not an
   `AlgorithmIdentifier`.
 - Neighbouring formats, each of which keeps its own existing classification:
-  **traditional RSA/DSA/EC PEM private keys, legacy `Proc-Type: 4,ENCRYPTED`
-  encrypted PEM private keys, encrypted OpenSSH private keys, PKCS#12
-  containers, DER certificates, and BCFKS, JCEKS, and JKS keystores.**
+  **traditional unencrypted RSA/DSA/EC PEM private keys, encrypted OpenSSH
+  private keys, PKCS#12 containers, DER certificates, and BCFKS, JCEKS, and JKS
+  keystores.** Traditional `Proc-Type: 4,ENCRYPTED` PEM is owned by HG-040, not
+  this rule.
 - A file **named `key`, `key.p8`, `key.pk8`, `key.key`, `key.der`, `.pem`,
   `.crt`, `.cer`, `.p12`, or `.pfx` without encrypted PKCS#8 content**. **No
   detection is based on filename, extension, entropy, or file size**; the
@@ -1050,6 +1051,63 @@ behavior is unchanged.
 only; it creates no
 [internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
 and emits nothing beyond the single finding described above.
+
+#### Encrypted legacy PEM private keys (HG-040)
+
+A file whose content contains a **complete traditional PEM private-key block**
+labelled `RSA PRIVATE KEY`, `DSA PRIVATE KEY`, or `EC PRIVATE KEY` that declares
+the legacy OpenSSL encryption headers is reported as asset type
+`Encrypted Legacy PEM Private Key` (`rule_id: private_key:legacy_pem_encrypted`,
+confidence `High`, evidence `Legacy PEM encrypted private-key structure detected`,
+technical metadata `Format: Legacy PEM` and nothing else).
+
+**What is detected** — only when every one of these holds:
+
+- Exact `-----BEGIN <label>-----` and matching `-----END <label>-----` boundary
+  lines (LF or CRLF). Prefix or suffix contamination on boundary lines is
+  rejected.
+- Both encryption headers in the header area before the base64 body:
+  - `Proc-Type: 4,ENCRYPTED` (exactly one occurrence; wrong version or status
+    rejected)
+  - `DEK-Info: <cipher>,<hex-IV>` with a non-empty cipher token, exactly one
+    comma, and a non-empty even-length hexadecimal IV (duplicate/conflicting
+    headers, empty tokens, non-hex or odd-length IV rejected)
+- A non-empty body that strict-base64-decodes to non-empty ciphertext bytes
+
+The detector is **non-terminal** and runs at priority 48 (after CMS, ahead of
+extension-gated PKCS#12) so a traditional encrypted PEM key saved as `key.p12`
+or `key.pfx` is classified from its content rather than as a malformed PKCS#12.
+One finding is emitted per file for this rule even when multiple same-type
+blocks are present. A file may still also report a certificate PEM or other
+non-terminal PEM asset.
+
+This replaces the pre-HG-040 exception-driven path for these blocks: previously
+a passwordless key-load failure was treated as evidence of encryption. That
+path is no longer used for traditional `Proc-Type` blocks.
+
+**What is not detected**
+
+- Encrypted PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`) — owned exclusively by
+  HG-038 / `private_key:pkcs8_encrypted`
+- Unencrypted traditional RSA/DSA/EC PEM, unencrypted PKCS#8, OpenSSH private
+  keys, certificates, public keys
+- `Proc-Type` or `DEK-Info` text outside a complete supported private-key block
+- Extension alone (`.pem`, `.key`, `.p12`, etc.) without valid content
+- Malformed headers, missing/invalid base64 body, mismatched BEGIN/END labels
+
+**The finding does not prove the key decrypts or is valid.** Cipher name, IV,
+passphrase state, underlying algorithm, key size, and ciphertext are never
+reported. High confidence applies to the legacy encrypted-PEM *container*
+evidence only.
+
+**No password, no decryption, no external process.** The scanner never requests,
+accepts, reads from the environment, guesses, or derives a password; never
+decrypts the body; never calls a private-key load API for classification; and
+never invokes OpenSSL or any other external process at runtime.
+
+**No relationship output.** HG-040 adds legacy encrypted PEM detection only; it
+creates no internal relationship records and emits nothing beyond the single
+finding described above.
 
 ### Confidence semantics
 

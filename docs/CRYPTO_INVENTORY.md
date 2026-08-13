@@ -79,8 +79,20 @@ Example output shape:
   gate — so an object with a misleading extension or none at all is still
   classified from its content. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#cms--pkcs7-encrypted-objects-hg-039)
-- Encrypted legacy PEM private keys (traditional `Proc-Type: 4,ENCRYPTED` /
-  `DEK-Info` form), detected without decrypting key material
+- Encrypted legacy PEM private keys (`rule_id: private_key:legacy_pem_encrypted`,
+  confidence `High`), **the traditional OpenSSL-style encrypted PEM form only**,
+  for labels `RSA PRIVATE KEY`, `DSA PRIVATE KEY`, and `EC PRIVATE KEY` that
+  declare `Proc-Type: 4,ENCRYPTED` and a syntactically valid `DEK-Info:
+  <cipher>,<hex-IV>` header plus a non-empty strict-base64 body. Exact BEGIN/END
+  boundaries are required (prefix/suffix contamination rejected). Never
+  decrypted: no password is prompted for, accepted, read from the environment,
+  guessed, or derived, and no external process or private-key load API is
+  invoked. Cipher name, IV, and ciphertext are not reported; the only metadata
+  emitted is `Format: Legacy PEM`. The extension is not evidence. The detector
+  is non-terminal and runs ahead of extension-gated PKCS#12 so a key with a
+  misleading `.p12`/`.pfx` name is still classified from its content. Encrypted
+  PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`) remains HG-038. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#encrypted-legacy-pem-private-keys-hg-040)
 - OpenSSH private keys
 - OpenSSH public keys
 - PKCS#12 containers (`.p12`, `.pfx`) when no password is required

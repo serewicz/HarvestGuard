@@ -513,6 +513,33 @@ unchanged and there is nothing for `--type all` to deduplicate. A CMS object
 counts once in `Crypto files inspected`, and no CMS-specific count or summary
 bucket was added.
 
+#### Encrypted legacy PEM private-key evidence (HG-040)
+
+A file whose content contains a complete traditional PEM private-key block
+(`RSA PRIVATE KEY`, `DSA PRIVATE KEY`, or `EC PRIVATE KEY`) that declares
+`Proc-Type: 4,ENCRYPTED` and a syntactically valid `DEK-Info: <cipher>,<hex-IV>`
+header with a non-empty strict-base64 body is cryptographic evidence, and the
+crypto-inventory scanner owns it. A `--type crypto` (or `--type all`) scan
+reports it as asset type `Encrypted Legacy PEM Private Key`,
+`rule_id: private_key:legacy_pem_encrypted`, confidence `High`, with evidence
+`Legacy PEM encrypted private-key structure detected` and technical metadata
+limited to `Format: Legacy PEM`. One finding is emitted per file for this rule.
+The detector is non-terminal so a file may also report a certificate PEM or
+other coexisting PEM asset. Content is evaluated before extension-gated
+PKCS#12, so a valid traditional encrypted PEM key saved as `key.p12` or
+`key.pfx` is reported as legacy encrypted PEM rather than as a malformed
+PKCS#12 container. Encrypted PKCS#8 (`BEGIN ENCRYPTED PRIVATE KEY`) remains
+HG-038.
+
+**Support is narrow and explicit.** Exact BEGIN/END boundaries are required
+(prefix/suffix contamination rejected; LF and CRLF accepted). Both encryption
+headers must be present and valid; the body must strict-base64-decode to
+non-empty ciphertext. No password is requested, accepted, read, or guessed; no
+decryption occurs; no private-key load API or external process is used. Cipher
+name, IV, and ciphertext never appear in findings or reports. The full
+supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#encrypted-legacy-pem-private-keys-hg-040).
+
 #### gocryptfs encrypted-filesystem evidence (HG-032)
 
 A directory containing both a supported `gocryptfs.conf` and a root-level

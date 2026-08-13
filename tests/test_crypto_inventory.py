@@ -59,10 +59,8 @@ def test_scan_crypto_inventory_detects_private_keys_and_encryption():
     # This committed fixture is an encrypted PKCS#8 key, so since HG-038 it is
     # claimed by the dedicated `private_key:pkcs8_encrypted` detector, which
     # validates the EncryptedPrivateKeyInfo structure directly instead of
-    # inferring encryption from a failed passwordless load. The legacy
-    # `Proc-Type: 4,ENCRYPTED` traditional-PEM form still reports as
-    # "Encrypted PEM Private Key" (see
-    # tests/test_pkcs8_encrypted_private_key_detection.py).
+    # inferring encryption from a failed passwordless load. Traditional
+    # Proc-Type encrypted PEM is owned by HG-040 (`private_key:legacy_pem_encrypted`).
     encrypted = by_name.loc["encrypted_key.pem"]
     assert encrypted["Asset Type"] == "Encrypted PKCS#8 Private Key"
     assert encrypted["Evidence"] == "Encrypted PKCS#8 private-key structure detected"
