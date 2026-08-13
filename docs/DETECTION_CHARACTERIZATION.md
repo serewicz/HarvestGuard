@@ -907,8 +907,18 @@ shared candidate gate — so a valid object saved as `message`, `message.bin`,
 classified from its content rather than missed by the gate or reported as a
 malformed DER certificate or PKCS#12 container. They run after the keystore and
 encrypted-PKCS#8 detectors, whose formats a CMS `ContentInfo` cannot satisfy.
-One finding is emitted per file per rule — several supported blocks in one file
-are one encrypted-object asset at one location — and a match is terminal.
+One finding is emitted per file per rule — several supported blocks of the
+*same* content type in one file are one encrypted-object asset at one
+location — and a match is terminal, so a claimed object is never also read as
+PKCS#12, DER, or generic PEM. Terminal does not mean mutually exclusive between
+the two CMS rules themselves: a single textual file can genuinely carry a
+separate `EnvelopedData` block and a separate `EncryptedData` block (a binary
+`ContentInfo`'s own outer content type can only be one or the other), and both
+findings are preserved. The `cms:enveloped_data` detector runs first by
+priority and, when it observes both supported content types in the same
+structural pass, reports both findings itself — otherwise `cms:encrypted_data`
+would never run for a file the earlier detector already claimed, and that
+finding would be silently lost rather than reported.
 
 **What is detected** — the outer structure only, and only when every one of
 these holds:

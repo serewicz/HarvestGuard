@@ -435,17 +435,20 @@ or summary bucket was added.
 A file whose content is a complete RFC 5652 `ContentInfo` carrying one of two
 supported encrypted content types is cryptographic evidence, and the
 crypto-inventory scanner owns it. A `--type crypto` (or `--type all`) scan
-reports it as:
+reports it as either or both of:
 
 - asset type `CMS/PKCS#7 Enveloped Data`, `rule_id: cms:enveloped_data`,
-  evidence `CMS/PKCS#7 EnvelopedData encrypted-content structure detected`; or
+  evidence `CMS/PKCS#7 EnvelopedData encrypted-content structure detected`;
 - asset type `CMS/PKCS#7 Encrypted Data`, `rule_id: cms:encrypted_data`,
   evidence `CMS/PKCS#7 EncryptedData encrypted-content structure detected`.
 
-Both are confidence `High` with technical metadata limited to
-`Format: CMS/PKCS#7`. One finding is emitted per file per rule — a file holding
-several supported blocks is one encrypted-object asset at one location — and as
-with the `Salted__`, OpenPGP, age, BCFKS, JCEKS, and encrypted-PKCS#8 checks,
+A binary file's outer `ContentInfo` can only carry one content type, so it
+produces at most one of these; a textual file can carry a separate block of
+each, and both findings are reported for it. Both are confidence `High` with
+technical metadata limited to `Format: CMS/PKCS#7`. One finding is emitted per
+file per rule — several supported blocks of the *same* content type in one
+file are one encrypted-object asset at one location — and as with the
+`Salted__`, OpenPGP, age, BCFKS, JCEKS, and encrypted-PKCS#8 checks,
 content is evaluated before any extension-based parsing, so a valid object saved
 as `message`, `message.bin`, `message.cms`, `message.p7m`, `message.p7e`,
 `message.p7b`, `message.p7c`, `message.der`, `message.cer`, `message.crt`,

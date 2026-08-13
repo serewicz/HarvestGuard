@@ -2232,9 +2232,15 @@ def _cms_encrypted_data_finding(file_path: Path) -> CryptoInventoryFinding:
 #      keystore, or encrypted PKCS#8 file is taken from the detectors above:
 #      each requires an outer content type or element shape a CMS ContentInfo
 #      cannot have, and neither CMS detector reads an extension at all. The two
-#      run in the recommended semantic order, EnvelopedData before EncryptedData;
-#      they are mutually exclusive on any one file's outer content type, and
-#      both share one structural pass over the file (HG-039).
+#      run in the recommended semantic order, EnvelopedData before EncryptedData,
+#      and both share one structural pass over the file (HG-039). A single
+#      binary file's outer content type can only be one or the other, but a
+#      textual file may carry a separate block of each -- both are supported
+#      content types, so both claims must survive even though the priority-46
+#      detector is terminal: it reports the EncryptedData finding itself
+#      alongside its own whenever the shared pass observed both, since the
+#      dispatch loop would otherwise never reach cms:encrypted_data's own
+#      detect() for that file.
 #   40-60 JKS, encrypted PKCS#8, CMS, PKCS#12, and DER: mutually exclusive in
 #      practice, but each terminal for the file it claims, which is what keeps a
 #      keystore or container from also being read as PEM text.
@@ -2450,12 +2456,30 @@ def _detect_cms_enveloped_data(context: FileContext) -> DetectionResult:
     # of the file and the "no trailing bytes" requirement is only meaningful
     # against the whole file. The bytes are already in the shared context, so
     # this is not an extra read.
-    if _CMS_ENVELOPED_DATA not in _cms_observed_content_types(context):
+    observed = _cms_observed_content_types(context)
+    if _CMS_ENVELOPED_DATA not in observed:
         return DetectionResult.no_match()
-    # One finding per file, not per block: several supported CMS blocks in one
-    # file are one encrypted-object asset at one location, and the finding
-    # carries no per-block detail that could distinguish them.
-    return DetectionResult.match([_cms_enveloped_data_finding(context.path)])
+    # One finding per file per content type, not per block: several supported
+    # blocks of the *same* type in one file are one encrypted-object asset at
+    # one location, and neither finding carries per-block detail that could
+    # distinguish them.
+    findings = [_cms_enveloped_data_finding(context.path)]
+    if _CMS_ENCRYPTED_DATA in observed:
+        # Both content types can genuinely coexist in one physical file (most
+        # plausibly two separate textual blocks). Both CMS detectors are
+        # terminal -- required so a match here is not also re-read as PKCS#12,
+        # DER, or generic PEM -- but the shared dispatch loop stops entirely at
+        # the first terminal match, priority 46 before 47, so
+        # cms:encrypted_data's own detect() would never run for a file this
+        # detector already claimed. Reporting both observed claims here, from
+        # this one shared structural pass, is what keeps the EncryptedData
+        # finding from being silently lost rather than solving it with a
+        # second read or a finding unrelated to what was actually observed.
+        # cms:encrypted_data's own detect() is unchanged: it is unreachable in
+        # this case precisely because this detector is terminal, and it still
+        # runs and matches normally whenever EnvelopedData is absent.
+        findings.append(_cms_encrypted_data_finding(context.path))
+    return DetectionResult.match(findings)
 
 
 def _detect_cms_encrypted_data(context: FileContext) -> DetectionResult:

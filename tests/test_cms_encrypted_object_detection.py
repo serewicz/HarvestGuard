@@ -281,6 +281,128 @@ def test_multiple_textual_blocks_in_one_file_are_one_finding(tmp_path):
     assert finding.rule_id == ENVELOPED_RULE_ID
 
 
+# --- Coexistence: both supported content types in one physical file --------
+#
+# Codex Principal Review (PR #105) found that because both CMS detectors are
+# terminal, a textual file carrying both a valid EnvelopedData block and a
+# valid EncryptedData block silently lost the EncryptedData finding: the
+# priority-46 EnvelopedData detector matched first, terminally, and the shared
+# dispatch loop never reached cms:encrypted_data's own detect() for that file.
+# These tests prove both claims now survive, in either block order, and that
+# same-type multiplicity still collapses to one finding per rule.
+
+
+def test_enveloped_then_encrypted_blocks_in_one_file_produce_both_rule_ids(tmp_path):
+    _write(
+        tmp_path,
+        "bundle.pem",
+        _real("enveloped_data.pem") + _real("encrypted_data.pem"),
+    )
+
+    found = _cms_findings(tmp_path)
+
+    assert {f.rule_id for f in found} == RULE_IDS
+    assert len(found) == 2
+
+
+def test_encrypted_then_enveloped_blocks_in_one_file_produce_both_rule_ids(tmp_path):
+    # Reverse block order: the shared structural pass observes both content
+    # types regardless of which block comes first in the file.
+    _write(
+        tmp_path,
+        "bundle.pem",
+        _real("encrypted_data.pem") + _real("enveloped_data.pem"),
+    )
+
+    found = _cms_findings(tmp_path)
+
+    assert {f.rule_id for f in found} == RULE_IDS
+    assert len(found) == 2
+
+
+def test_two_enveloped_data_blocks_remain_one_enveloped_finding(tmp_path):
+    _write(
+        tmp_path,
+        "bundle.pem",
+        _real("enveloped_data.pem") + _real("enveloped_data.pem"),
+    )
+
+    found = _cms_findings(tmp_path)
+
+    assert [f.rule_id for f in found] == [ENVELOPED_RULE_ID]
+
+
+def test_two_encrypted_data_blocks_remain_one_encrypted_finding(tmp_path):
+    _write(
+        tmp_path,
+        "bundle.pem",
+        _real("encrypted_data.pem") + _real("encrypted_data.pem"),
+    )
+
+    found = _cms_findings(tmp_path)
+
+    assert [f.rule_id for f in found] == [ENCRYPTED_RULE_ID]
+
+
+def test_mixed_cms_and_pkcs7_labels_produce_both_rule_ids(tmp_path):
+    # enveloped_data.pem is OpenSSL's own CMS-labelled EnvelopedData block; the
+    # PKCS7-labelled EncryptedData block is built the same deterministic way as
+    # the committed enveloped_data_pkcs7.pem fixture -- the real ENCRYPTED_DER
+    # bytes, only the RFC 7468 wrapper applied.
+    _write(
+        tmp_path,
+        "bundle.pem",
+        _real("enveloped_data.pem") + _pem("PKCS7", ENCRYPTED_DER),
+    )
+
+    found = _cms_findings(tmp_path)
+
+    assert {f.rule_id for f in found} == RULE_IDS
+
+
+def test_evidence_store_and_json_preserve_both_findings_from_one_file(tmp_path, capsys):
+    target = tmp_path / "target"
+    target.mkdir()
+    _write(target, "bundle.pem", _real("enveloped_data.pem") + _real("encrypted_data.pem"))
+    db = tmp_path / "evidence.db"
+
+    assert (
+        harvestguard.main(
+            [
+                "scan",
+                str(target),
+                "--type",
+                "crypto",
+                "--json",
+                "--quiet",
+                "--evidence-db",
+                str(db),
+            ]
+        )
+        == 0
+    )
+    live_records = json.loads(capsys.readouterr().out)
+    live_cms = [r for r in live_records if r["rule_id"] in RULE_IDS]
+    assert {r["rule_id"] for r in live_cms} == RULE_IDS
+    scan_id = live_cms[0]["scan_id"]
+    assert scan_id
+    assert all(r["scan_id"] == scan_id for r in live_cms)
+
+    assert harvestguard.main(["evidence", "verify", scan_id, "--evidence-db", str(db)]) == 0
+    capsys.readouterr()
+
+    assert (
+        harvestguard.main(
+            ["evidence", "export", scan_id, "--evidence-db", str(db), "--json", "--quiet"]
+        )
+        == 0
+    )
+    exported_records = json.loads(capsys.readouterr().out)
+    exported_cms = [r for r in exported_records if r["rule_id"] in RULE_IDS]
+    assert {r["rule_id"] for r in exported_cms} == RULE_IDS
+    assert len(exported_cms) == 2
+
+
 def test_textual_block_surrounded_by_unrelated_text_is_still_detected(tmp_path):
     _write(
         tmp_path,
