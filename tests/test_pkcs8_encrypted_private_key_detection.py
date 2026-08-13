@@ -500,7 +500,9 @@ def test_the_word_encrypted_alone_is_not_evidence(tmp_path):
         ("unencrypted_pkcs8.pem", "PEM Private Key"),
         ("traditional_rsa.pem", "PEM Private Key"),
         ("traditional_ec.pem", "PEM Private Key"),
-        ("legacy_encrypted_rsa.pem", "Encrypted PEM Private Key"),
+        # HG-040 owns traditional Proc-Type encrypted PEM; this adjacent
+        # fixture must not be claimed by the PKCS#8 detector.
+        ("legacy_encrypted_rsa.pem", "Encrypted Legacy PEM Private Key"),
         ("encrypted_openssh_key", "Encrypted OpenSSH Private Key"),
     ],
 )
@@ -550,14 +552,18 @@ def test_existing_container_detectors_keep_their_files(
 
 def test_committed_non_pkcs8_fixtures_are_unaffected():
     # A whole-directory scan of the existing fixture corpus gains no encrypted
-    # PKCS#8 finding outside the new fixture directory -- except the one
+    # PKCS#8 finding outside the PKCS#8 fixture directory -- except the one
     # committed encrypted PKCS#8 key that already lived at the top level, whose
-    # classification HG-038 deliberately moved to this detector.
+    # classification HG-038 deliberately moved to this detector, and the
+    # adjacent copy used by HG-040 under legacy_pem_encrypted/.
     found = [f for f in scan_crypto_inventory_findings(str(FIXTURE_DIR)) if f.rule_id == RULE_ID]
 
     locations = {Path(f.location).name: Path(f.location).parent.name for f in found}
 
     assert locations.pop("encrypted_key.pem") == "crypto_inventory"
+    # Adjacent negative control copied into the HG-040 fixture tree.
+    if "pkcs8_encrypted_adjacent.pem" in locations:
+        assert locations.pop("pkcs8_encrypted_adjacent.pem") == "legacy_pem_encrypted"
     assert set(locations.values()) == {"pkcs8_encrypted"}
     assert set(locations) == {name for name in REAL_FIXTURES}
 

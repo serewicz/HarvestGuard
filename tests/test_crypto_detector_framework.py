@@ -78,6 +78,7 @@ EXPECTED_DETECTOR_IDS = [
     "pkcs12:container",
     "certificate:der",
     "certificate:pem",
+    "private_key:legacy_pem_encrypted",
     "private_key:pem",
     "public_key:ssh",
 ]
@@ -98,6 +99,7 @@ EXPECTED_RULE_IDS = {
     "private_key:pkcs8_encrypted",
     "cms:enveloped_data",
     "cms:encrypted_data",
+    "private_key:legacy_pem_encrypted",
 }
 
 
@@ -300,8 +302,13 @@ def test_intentional_precedence_is_declared_in_the_registry():
 
     # Certificate/key precedence within the text detectors.
     assert _priority("certificate:der") < _priority("certificate:pem")
-    assert _priority("certificate:pem") < _priority("private_key:pem")
+    assert _priority("certificate:pem") < _priority("private_key:legacy_pem_encrypted")
+    assert _priority("private_key:legacy_pem_encrypted") < _priority("private_key:pem")
     assert _priority("private_key:pem") < _priority("public_key:ssh")
+    # Legacy PEM does not reorder PKCS#12, CMS, or encrypted PKCS#8.
+    assert _priority("private_key:pkcs8_encrypted") < _priority("pkcs12:container")
+    assert _priority("cms:encrypted_data") < _priority("pkcs12:container")
+    assert _priority("pkcs12:container") < _priority("private_key:legacy_pem_encrypted")
 
 
 def test_terminal_declarations_match_current_dispatch_behavior():
@@ -319,10 +326,16 @@ def test_terminal_declarations_match_current_dispatch_behavior():
         "certificate:der",
     ):
         assert _detector(terminal_id).terminal is True
-    # ...and the text detectors are not, because one PEM file may legitimately
-    # hold a certificate, a private key, and an SSH public key at once. There is
-    # no general "first detector wins" rule.
-    for coexisting_id in ("certificate:pem", "private_key:pem", "public_key:ssh"):
+    # ...and the text detectors (including non-terminal legacy encrypted PEM)
+    # are not, because one PEM file may legitimately hold a certificate, a
+    # private key, and an SSH public key at once. There is no general "first
+    # detector wins" rule.
+    for coexisting_id in (
+        "private_key:legacy_pem_encrypted",
+        "certificate:pem",
+        "private_key:pem",
+        "public_key:ssh",
+    ):
         assert _detector(coexisting_id).terminal is False
     assert _detector("encrypted_filesystem:gocryptfs").owns_marker is True
 
@@ -347,7 +360,11 @@ def test_registry_introduces_no_new_rule_id():
 
 def test_declared_rule_ids_match_emitted_rule_ids():
     findings = scan_crypto_inventory_findings(str(FIXTURE_DIR))
-    emitted = {f.rule_id for f in findings if f.rule_id is not None}
+    emitted = {
+        f.rule_id
+        for f in findings
+        if isinstance(f.rule_id, str) and f.rule_id
+    }
     assert emitted <= EXPECTED_RULE_IDS
 
 

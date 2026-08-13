@@ -66,10 +66,11 @@ class CryptoInventoryFinding:
     # Salted__ signature (HG-030), the OpenPGP encrypted-file structure
     # (HG-031), the native age v1 encrypted file (HG-035), the gocryptfs cipher
     # root (HG-032), the BCFKS keystore container (HG-036), and the JCEKS
-    # keystore container (HG-037). Every other asset type leaves this None
-    # rather than inventing one.
+    # keystore container (HG-037), encrypted PKCS#8 (HG-038), CMS/PKCS#7
+    # (HG-039), and legacy encrypted PEM (HG-040). Every other asset type
+    # leaves this None rather than inventing one.
     rule_id: str | None = None
-    # Container metadata (HG-032 gocryptfs, HG-036 BCFKS, HG-037 JCEKS; generic rather
+    # Container metadata (HG-032/036/037/038/039/040 containers; generic rather
     # than format-specific field names so each container format can reuse them,
     # and each detector's own allowlist decides which it may populate). Unset
     # for every other asset type. Deliberately limited to what those privacy
@@ -2170,6 +2171,167 @@ def _cms_encrypted_data_finding(file_path: Path) -> CryptoInventoryFinding:
     )
 
 
+
+# --- Legacy encrypted PEM private-key detection (HG-040) --------------------
+#
+# Traditional OpenSSL-style encrypted PEM private keys:
+#
+#     -----BEGIN RSA PRIVATE KEY-----
+#     Proc-Type: 4,ENCRYPTED
+#     DEK-Info: <cipher>,<hex-IV>
+#
+#     <base64 ciphertext>
+#     -----END RSA PRIVATE KEY-----
+#
+# Same form for DSA/EC. Claim is structural only: complete traditional
+# private-key PEM block with Proc-Type: 4,ENCRYPTED, valid DEK-Info, and
+# non-empty strict-base64 body. No password, decryption, key-load API, or
+# external process. Replaces the pre-HG-040 exception-driven path for these
+# blocks. Encrypted PKCS#8 remains HG-038; OpenSSH remains its own path.
+
+_LEGACY_ENCRYPTED_PEM_LABELS = ("RSA PRIVATE KEY", "DSA PRIVATE KEY", "EC PRIVATE KEY")
+_LEGACY_PROC_TYPE_VALUE = "4,ENCRYPTED"
+_HEX_IV_CHARS = frozenset("0123456789abcdefABCDEF")
+
+
+def _legacy_pem_header_lines(block_lines: list[str]) -> tuple[list[str], list[str]] | None:
+    if not block_lines:
+        return None
+    lines = list(block_lines)
+    while lines and lines[-1] == "":
+        lines.pop()
+    if not lines:
+        return None
+    blank = None
+    for index, line in enumerate(lines):
+        if line.strip() == "":
+            blank = index
+            break
+    if blank is None:
+        return None
+    headers = [line.strip() for line in lines[:blank] if line.strip()]
+    body_lines = [line.strip() for line in lines[blank + 1 :] if line.strip()]
+    return headers, body_lines
+
+
+def _legacy_proc_type_ok(headers: list[str]) -> bool:
+    values = []
+    for line in headers:
+        if line.lower().startswith("proc-type:"):
+            values.append(line.split(":", 1)[1].strip())
+    return len(values) == 1 and values[0] == _LEGACY_PROC_TYPE_VALUE
+
+
+def _legacy_dek_info_ok(headers: list[str]) -> bool:
+    values = []
+    for line in headers:
+        if line.lower().startswith("dek-info:"):
+            values.append(line.split(":", 1)[1].strip())
+    if len(values) != 1:
+        return False
+    value = values[0]
+    if any(ch in value for ch in ("\n", "\r", "\x00")):
+        return False
+    if value.count(",") != 1:
+        return False
+    cipher, iv = value.split(",", 1)
+    if not cipher or any(ch.isspace() for ch in cipher):
+        return False
+    if not iv or len(iv) % 2 != 0:
+        return False
+    return all(ch in _HEX_IV_CHARS for ch in iv)
+
+
+def _legacy_encrypted_pem_body_ok(body_lines: list[str]) -> bool:
+    if not body_lines:
+        return False
+    body = "".join(body_lines)
+    if not body:
+        return False
+    try:
+        decoded = base64.b64decode(body, validate=True)
+    except (ValueError, binascii.Error):
+        return False
+    return len(decoded) > 0
+
+
+def _looks_like_legacy_encrypted_pem_block(block_lines: list[str]) -> bool:
+    parts = _legacy_pem_header_lines(block_lines)
+    if parts is None:
+        return False
+    headers, body_lines = parts
+    return (
+        _legacy_proc_type_ok(headers)
+        and _legacy_dek_info_ok(headers)
+        and _legacy_encrypted_pem_body_ok(body_lines)
+    )
+
+
+def _block_owned_by_legacy_encrypted_pem(block: str) -> bool:
+    """True when a full traditional PEM private-key block is HG-040-owned.
+
+    Shared ownership predicate used by both the dedicated detector path and
+    the generic ``_parse_pem_private_keys`` skip. Header *names* (``Proc-Type``,
+    ``DEK-Info``) are matched case-insensitively, matching the detector grammar,
+    so a block the detector accepts cannot also fall through to a contradictory
+    ``PEM Private Key`` / ``Encrypted PEM Private Key`` / ``Malformed …``
+    finding. Only structurally complete HG-040 blocks return True; partial or
+    invalid headers are left for other paths.
+    """
+    lines = block.splitlines()
+    if not lines:
+        return False
+    interior = list(lines)
+    if interior and interior[0].strip().startswith("-----BEGIN "):
+        interior = interior[1:]
+    if interior and interior[-1].strip().startswith("-----END "):
+        interior = interior[:-1]
+    return _looks_like_legacy_encrypted_pem_block(interior)
+
+
+def _legacy_encrypted_pem_blocks(text: str) -> list[list[str]]:
+    """Interior lines of complete traditional encrypted PEM blocks.
+
+    Exact boundary lines only (HG-038 style): prefix/suffix contamination is
+    rejected; BEGIN/END labels must match; LF and CRLF are accepted.
+    """
+    lines = text.splitlines()
+    blocks: list[list[str]] = []
+    index = 0
+    begin_by_line = {
+        f"-----BEGIN {label}-----": label for label in _LEGACY_ENCRYPTED_PEM_LABELS
+    }
+    while index < len(lines):
+        label = begin_by_line.get(lines[index].strip())
+        if label is None:
+            index += 1
+            continue
+        end_line = f"-----END {label}-----"
+        end_index = None
+        for candidate in range(index + 1, len(lines)):
+            if lines[candidate].strip() == end_line:
+                end_index = candidate
+                break
+        if end_index is None:
+            return blocks
+        interior = lines[index + 1 : end_index]
+        index = end_index + 1
+        if _looks_like_legacy_encrypted_pem_block(interior):
+            blocks.append(interior)
+    return blocks
+
+
+def _legacy_encrypted_pem_finding(file_path: Path) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Encrypted Legacy PEM Private Key",
+        location=str(file_path),
+        evidence="Legacy PEM encrypted private-key structure detected",
+        confidence="High",
+        rule_id="private_key:legacy_pem_encrypted",
+        format="Legacy PEM",
+    )
+
+
 # --- Detector registry (HG-033) --------------------------------------------
 #
 # The static, explicit registry of every crypto-inventory detector family. It
@@ -2244,12 +2406,20 @@ def _cms_encrypted_data_finding(file_path: Path) -> CryptoInventoryFinding:
 #   40-60 JKS, encrypted PKCS#8, CMS, PKCS#12, and DER: mutually exclusive in
 #      practice, but each terminal for the file it claims, which is what keeps a
 #      keystore or container from also being read as PEM text.
-#   70-90 The text detectors, deliberately non-terminal: one PEM file may
-#      legitimately hold a certificate, a private key, and an SSH public key,
-#      and all three are reported.
+#   70 certificate:pem -- non-terminal text detector for CERTIFICATE blocks.
+#   75 private_key:legacy_pem_encrypted -- traditional Proc-Type/DEK-Info
+#      encrypted PEM private keys (HG-040), non-terminal, after certificate PEM
+#      and before generic private-key PEM, without changing PKCS#12, encrypted
+#      PKCS#8, or CMS. Exact BEGIN/END boundaries, validated Proc-Type/DEK-Info,
+#      and non-empty strict-base64 body; no password or decryption.
+#   80-90 Remaining text detectors (generic PEM private keys, SSH public keys),
+#      deliberately non-terminal: one PEM file may legitimately hold a
+#      certificate, a private key, and an SSH public key, and all three are
+#      reported.
 #
-# Detectors below 70 are terminal; nothing here relies on a general "first
-# detector wins" rule.
+# Detectors that are terminal stop further matching for that file; non-terminal
+# detectors (certificate PEM, legacy encrypted PEM, private-key PEM, SSH public
+# key) may coexist. Nothing here relies on a general "first detector wins" rule.
 
 
 def _openssl_candidate(context: FileContext) -> bool:
@@ -2533,6 +2703,25 @@ def _detect_der_certificate(context: FileContext) -> DetectionResult:
     return DetectionResult.match(findings)
 
 
+def _legacy_encrypted_pem_candidate(context: FileContext) -> bool:
+    text = context.text
+    if text is None:
+        return False
+    begin_lines = {f"-----BEGIN {label}-----" for label in _LEGACY_ENCRYPTED_PEM_LABELS}
+    return any(line.strip() in begin_lines for line in text.splitlines())
+
+
+def _detect_legacy_encrypted_pem(context: FileContext) -> DetectionResult:
+    text = context.text
+    if text is None:
+        return DetectionResult.no_match()
+    if not _legacy_encrypted_pem_blocks(text):
+        return DetectionResult.no_match()
+    # One finding per file (same-rule collapse), non-terminal so certificates
+    # and other PEM assets in the same file can still be reported.
+    return DetectionResult.match([_legacy_encrypted_pem_finding(context.path)])
+
+
 def _text_candidate(context: FileContext) -> bool:
     return _passes_candidate_gate(context) and context.text is not None
 
@@ -2786,6 +2975,26 @@ CRYPTO_DETECTORS = build_registry(
             verification_rationale="Structural PEM X.509 parse of each CERTIFICATE block.",
         ),
         FileDetector(
+            detector_id="private_key:legacy_pem_encrypted",
+            priority=75,
+            candidate=_legacy_encrypted_pem_candidate,
+            detect=_detect_legacy_encrypted_pem,
+            evidence="Legacy PEM encrypted private-key structure detected",
+            confidence="High",
+            terminal=False,
+            rule_id="private_key:legacy_pem_encrypted",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "Complete traditional PEM private-key block with exact BEGIN/END "
+                "boundaries, Proc-Type: 4,ENCRYPTED, a syntactically valid "
+                "DEK-Info cipher and hex IV, and a non-empty strict-base64 body; "
+                "no password is accepted, nothing is decrypted, and cipher/IV/"
+                "ciphertext are never reported. Priority 75 places this after "
+                "certificate PEM and before generic private-key PEM, without "
+                "changing PKCS#12, encrypted PKCS#8, or CMS behavior."
+            ),
+        ),
+        FileDetector(
             detector_id="private_key:pem",
             priority=80,
             candidate=_text_candidate,
@@ -2794,9 +3003,10 @@ CRYPTO_DETECTORS = build_registry(
             confidence="High",
             metadata_keys=_KEY_METADATA_KEYS,
             verification_rationale=(
-                "PEM/OpenSSH private-key block parsed with no passphrase; an "
-                "encrypted block is identified by its header and reported "
-                "without being decrypted."
+                "PEM/OpenSSH private-key block parsed with no passphrase. "
+                "Traditional Proc-Type encrypted blocks are owned by "
+                "private_key:legacy_pem_encrypted (HG-040); encrypted PKCS#8 "
+                "is owned by private_key:pkcs8_encrypted (HG-038)."
             ),
         ),
         FileDetector(
@@ -2880,8 +3090,8 @@ def _parse_pem_private_keys(
         # raises for it is not evidence of anything -- that exception-driven
         # classification is precisely what HG-038 replaced -- so it is left
         # unreported rather than turned into a High-confidence encrypted-key
-        # claim here. Every other private-key label below is unchanged,
-        # including the legacy `Proc-Type: 4,ENCRYPTED` form.
+        # claim here. Traditional Proc-Type: 4,ENCRYPTED blocks for RSA/DSA/EC
+        # labels are owned by HG-040 and skipped below.
         if label in {
             "CERTIFICATE",
             "OPENSSH PRIVATE KEY",
@@ -2890,6 +3100,13 @@ def _parse_pem_private_keys(
         }:
             continue
         for block in _extract_pem_blocks(text, label):
+            # Traditional Proc-Type encrypted blocks are owned by HG-040.
+            # Use the shared semantic predicate so casing variants the detector
+            # accepts cannot also produce a generic private-key finding.
+            if label in _LEGACY_ENCRYPTED_PEM_LABELS and _block_owned_by_legacy_encrypted_pem(
+                block
+            ):
+                continue
             encrypted = "ENCRYPTED" in label or "Proc-Type: 4,ENCRYPTED" in block
             try:
                 key = serialization.load_pem_private_key(block.encode("ascii"), password=None)
