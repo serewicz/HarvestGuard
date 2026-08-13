@@ -408,6 +408,8 @@ def test_registry_order_is_explicit_and_places_jceks_between_bcfks_and_jks():
         "java_keystore:jceks",
         "java_keystore:jks_magic",
         "private_key:pkcs8_encrypted",
+        "cms:enveloped_data",
+        "cms:encrypted_data",
         "pkcs12:container",
         "certificate:der",
         "certificate:pem",

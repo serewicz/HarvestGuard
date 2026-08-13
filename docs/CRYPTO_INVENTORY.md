@@ -55,6 +55,30 @@ Example output shape:
   and ahead of the candidate gate — so a key with a misleading extension or none
   at all is still classified from its content. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#encrypted-pkcs8-private-keys-hg-038)
+- CMS / PKCS#7 encrypted objects, **the outer RFC 5652 `ContentInfo` structure
+  only**, for two content types: `EnvelopedData`
+  (`rule_id: cms:enveloped_data`, asset type `CMS/PKCS#7 Enveloped Data`) and
+  `EncryptedData` (`rule_id: cms:encrypted_data`, asset type
+  `CMS/PKCS#7 Encrypted Data`), both confidence `High`, in binary DER form or
+  the RFC 7468 textual forms labelled `CMS` and `PKCS7`. Validated structurally
+  from the object's own bytes — a DER `SEQUENCE` at offset 0 consuming the whole
+  object with no trailing bytes, an outer content-type OID that is exactly one
+  of the two supported values, an explicit `[0]` wrapper holding one inner
+  `SEQUENCE`, the content-type-specific fields (a non-empty `recipientInfos`
+  SET for `EnvelopedData`; the CMS version the specification fixes for
+  `EncryptedData`), and an `EncryptedContentInfo` whose `encryptedContent` is
+  present and non-empty. Certificate-only PKCS#7 bundles, `SignedData`, `Data`,
+  and every other content type produce no finding, and the `CMS`/`PKCS7` label
+  alone is never evidence. Never decrypted: no password, private key, secret
+  key, or recipient certificate is prompted for or accepted, no signature or
+  certificate is validated, no recipient is enumerated, and no external process
+  is invoked. Recipient identities, algorithms, KDFs, IVs, OIDs, encrypted keys,
+  and ciphertext are not reported; the only metadata emitted is
+  `Format: CMS/PKCS#7`. The extension is not evidence, and the checks run ahead
+  of the PKCS#12, DER, and generic PEM branches — and ahead of the candidate
+  gate — so an object with a misleading extension or none at all is still
+  classified from its content. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#cms--pkcs7-encrypted-objects-hg-039)
 - Encrypted legacy PEM private keys (traditional `Proc-Type: 4,ENCRYPTED` /
   `DEK-Info` form), detected without decrypting key material
 - OpenSSH private keys
@@ -331,6 +355,21 @@ Recursive scans do not follow symbolic links by default. Use
   reported as an encrypted key on the strength of its label alone. Absence of a
   `private_key:pkcs8_encrypted` finding is not proof that no encrypted PKCS#8
   key exists in the target.
+- CMS / PKCS#7 support is limited to two encrypted content types,
+  `EnvelopedData` and `EncryptedData`, in a definite-length, minimally encoded
+  DER subset. The object is never decrypted, no password, private key, secret
+  key, or recipient certificate is requested or accepted, no signature or
+  certificate chain is verified, no recipient is identified, and no OID,
+  algorithm, KDF, salt, IV, encrypted key, or ciphertext byte is read into a
+  finding — the only metadata emitted is `Format: CMS/PKCS#7`. `High` confidence
+  applies to the **object structure only**: a syntactically valid supported
+  structure whose `encryptedContent` holds arbitrary non-empty bytes still
+  matches, because proving those bytes decrypt would require keys. BER
+  indefinite-length/streaming CMS, detached or absent `encryptedContent`,
+  malformed-but-tolerated encodings outside the strict subset, and unsupported
+  content types such as `AuthEnvelopedData` produce no finding. Absence of a
+  `cms:enveloped_data` or `cms:encrypted_data` finding is not proof that no CMS
+  encrypted object exists in the target.
 - JKS support is limited to magic-header detection; entry-level parsing is not
   implemented.
 - BCFKS support is limited to the supported encrypted-object-store outer

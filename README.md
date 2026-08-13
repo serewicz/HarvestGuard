@@ -140,7 +140,15 @@ evidence and must remain traceable back to it.
   rather than from its extension or from a key-loading API's password failure;
   evidence only, never decrypted, with no password prompted for or accepted and
   no encryption algorithm, KDF, cipher, salt, IV, iteration count, or OID
-  reported. Only
+  reported. Also recognizes **CMS/PKCS#7 encrypted objects** — the outer
+  RFC 5652 `ContentInfo` structure only, for `EnvelopedData` and
+  `EncryptedData`, in binary DER or the textual `CMS`/`PKCS7` forms — validated
+  structurally from the object's own bytes rather than its extension, and
+  separated from certificate-only and PKCS#7/CMS `SignedData` bundles, which
+  are not classified as encrypted; evidence only, never decrypted, with no
+  password, private key, or recipient certificate accepted, no signature or
+  certificate validated, no recipient enumerated, and no algorithm, OID, IV,
+  encrypted key, or ciphertext reported. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See
