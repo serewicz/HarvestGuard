@@ -404,6 +404,7 @@ def test_registry_order_is_explicit_and_places_jceks_between_bcfks_and_jks():
         "encrypted_file:openpgp",
         "encrypted_file:age",
         "encrypted_filesystem:gocryptfs",
+        "nss:sql_database_set",
         "java_keystore:bcfks",
         "java_keystore:jceks",
         "java_keystore:jks_magic",

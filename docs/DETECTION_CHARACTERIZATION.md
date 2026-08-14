@@ -507,6 +507,167 @@ finding is not proof that no gocryptfs cipher root exists in the target — this
 is one narrow, explicitly enumerated detection rule, not general
 encrypted-filesystem or FUSE coverage.
 
+#### Mozilla NSS SQL database sets (HG-041)
+
+A lexical directory holding all three canonical modern NSS SQL components —
+`cert9.db`, `key4.db`, and `pkcs11.txt` — where `pkcs11.txt` carries a
+structurally recognized NSS internal-module stanza is reported as one asset-type
+`NSS Cryptographic Database Set` finding (`rule_id: nss:sql_database_set`,
+confidence `High`, evidence `Supported NSS SQL database set detected`,
+technical metadata `Format: NSS SQL` and nothing else, `location` the containing
+directory).
+
+The bounded claim is exactly:
+
+> This lexical directory contains the supported canonical NSS SQL database-set
+> layout and a structurally recognized NSS internal-module configuration stanza.
+
+It is **not** a claim that `cert9.db` or `key4.db` is internally valid
+SQLite/NSS data, that certificates or keys are present, that a private key can
+be unlocked, that a password is known, that certificate trust is correct, that a
+PKCS #11 module is safe or loadable, or that Firefox, Thunderbird, or any other
+application currently uses the directory.
+
+**Aggregate semantics.** One validated lexical directory produces exactly one
+finding. `pkcs11.txt` is the only root marker; `cert9.db` and `key4.db` are
+supporting sibling evidence and are never separate NSS findings, and there is no
+file-level `nss:*` rule at all. Two distinct lexical roots produce two findings,
+and a valid set nested inside another valid set is an independent root. Identity
+is lexical: with `--follow-symlinks`, two directory paths that resolve to one
+physical directory may each produce a finding with its own deterministic finding
+ID, because HG-041 adds no realpath, inode, or device deduplication.
+
+**Detected — the required structure.** All of:
+
+1. a genuine regular, non-symlink file named exactly `pkcs11.txt`;
+2. `cert9.db` present in the same lexical directory, as a genuine regular
+   non-symlink file this scan did not exclude;
+3. `key4.db`, under the same conditions;
+4. one `pkcs11.txt` stanza satisfying the whole grammar below.
+
+Parent and child directories are never searched for a missing component.
+
+**Detected — the supported marker grammar.** Parsing is one deterministic
+left-to-right pass over the marker's bounded text view, with no recursive
+descent:
+
+- LF and CRLF are both accepted, and a final newline may be present or absent.
+- Leading/trailing ASCII whitespace around a record is ignored; empty lines and
+  lines whose first non-whitespace character is `#` are ignored and do not end a
+  stanza. There is no line-continuation syntax: a required record must sit
+  wholly on one physical line.
+- The first `=` separates record name from value. Record names (`library`,
+  `name`, `parameters`, `NSS`) are compared ASCII case-insensitively; unknown
+  record names inside a stanza are ignored and can never satisfy a required one.
+- A `library=` record (any ASCII case spelling) always starts a new stanza, even
+  when the previous one is incomplete; a stanza ends at the next `library=` or
+  at EOF. Records before the first `library=` are discarded, so required records
+  can never be assembled across stanzas.
+- Within one stanza, a duplicate `name=`, `parameters=`, or `NSS=` record
+  rejects that stanza — never first-wins or last-wins, even for identical
+  values.
+- `library=` must normalize to the **empty** value: a stanza naming an external
+  library (`library=/usr/lib/libsomething.so`) is a different thing and is not
+  recognized.
+- `name=` must equal `NSS Internal PKCS #11 Module` or
+  `NSS Internal PKCS 11 Module` exactly, compared case-sensitively after
+  trimming and collapsing internal ASCII whitespace runs to one space.
+- `parameters=` must carry exactly one exact-key `configdir` argument with a
+  non-empty value. Arguments split on ASCII space/tab outside quotes; a single
+  or double quote may enclose an **entire** value beginning immediately after
+  `=`, with its match as the token's final character. Mixed quoted/unquoted
+  fragments (`configdir=abc'd ef'`), unmatched quotes, empty quoted values
+  (`configdir=''`, `configdir=""`), and duplicate `configdir` arguments all
+  reject the stanza. Backslash is an ordinary character with no escape meaning.
+  Substring keys (`notconfigdir`, `myconfigdir`, `configdirectory`) are not
+  `configdir`.
+- `NSS=` is tokenized at top level using one quote state and one delimiter stack
+  for `()`, `{}`, and `[]`. Whitespace inside quotes or nesting stays part of the
+  argument. A mismatched or stray closing delimiter, a cross-nested form
+  (`([)]`, `{(})`, `[(])`), an unmatched quote, or an unclosed delimiter at EOF
+  rejects the stanza. Exactly one top-level `Flags` argument is required, its
+  value must be **unquoted** (`Flags="internal,critical"` and
+  `Flags='internal,critical'` do not satisfy it), and its comma-separated tokens
+  must include both exact tokens `internal` and `critical` — `notinternal`,
+  `internally`, and `criticality` do not count, while extra exact tokens are
+  allowed. Other top-level arguments (`trustOrder`, `cipherOrder`, `slotParams`,
+  …) may appear in any order and are neither interpreted nor emitted.
+- A marker matches when **at least one** stanza satisfies all of the above. Two
+  independently valid stanzas still produce exactly one finding, and the count of
+  satisfying stanzas is not emitted.
+
+The written grammar above is normative. It is fixture-grounded: a real
+`certutil -N` marker is committed byte-for-byte under
+`tests/fixtures/crypto_inventory/nss_sql/` and tested unmodified, but the
+fixture does not implicitly broaden the grammar.
+
+**Presence versus inspection.** `pkcs11.txt` is the only file this rule reads.
+`cert9.db` and `key4.db` are **presence/eligibility checked only** — never
+opened, read, parsed, copied, locked, or internally validated. The check is a
+fixed-name question (no listing, globbing, recursion, or arbitrary path input)
+that also consults the scan's own exclusion rules, so a sibling the user
+excluded behaves exactly as a missing one and aggregate evidence cannot bypass
+`--exclude`. For a direct scan of `pkcs11.txt` the sibling's exclusion match path
+is exactly the basename (`cert9.db` / `key4.db`), with no parent prefix; during a
+directory scan it is the same root-relative POSIX path normal traversal would
+assign.
+
+**Accounting.** `Crypto files inspected` keeps its existing meaning — candidate
+files yielded to the scanner for inspection, including a file whose attempted
+read later fails. Supporting sibling checks are not inspections and never
+increment it. A normal directory scan of a validated root therefore counts three
+files and emits one finding; a direct scan of the marker counts one. No
+NSS-specific count or bucket was added.
+
+**Not detected (deliberate false negatives).**
+
+- Legacy DBM layouts: `cert8.db`, `key3.db`, `secmod.db`.
+- Prefixed or renamed database sets (`foo-cert9.db`, `foo-key4.db`).
+- Backup or suffixed names (`cert9.db.bak`, `key4.db.old`, `pkcs11.txt~`).
+- Incomplete sets — any of the three canonical entries missing, or components
+  split across different directories.
+- A marker reached through a symlink, and a symlinked `cert9.db` or `key4.db`,
+  regardless of `--follow-symlinks`.
+- Excluded marker, excluded root directory, or excluded sibling.
+- A marker with no supported internal-module stanza, or one whose stanza falls
+  outside the bounded grammar above — including a valid NSS layout whose
+  generated marker a future NSS version writes in an unsupported form.
+- Any NSS database set without a `pkcs11.txt`.
+
+Absence of an `nss:sql_database_set` finding is not proof that no NSS database
+exists in the target. This is one narrow rule for one canonical layout, not
+general NSS discovery.
+
+**Accepted false positive.** A directory matches when `cert9.db` and `key4.db`
+are arbitrary eligible regular files carrying the canonical names and
+`pkcs11.txt` holds a supported stanza. Because the databases are never opened,
+that case cannot be distinguished from a genuinely usable NSS database, and the
+finding wording is deliberately not strengthened beyond the layout/marker claim.
+
+**Ownership.** A detector that runs earlier and terminally keeps its precedence:
+an OpenSSL `Salted__` file that happens to be named `pkcs11.txt` is still
+`encrypted_file:openssl`. Unlike gocryptfs, this detector does not own its
+marker by name (`owns_marker=False`): a marker it rejects falls through, so a
+defensible certificate or private-key finding inside that file is still
+reported. A validated root, by contrast, is terminal for its marker. An
+unrelated non-NSS finding another detector observes from `cert9.db` or `key4.db`
+when traversal opens those files coexists with the aggregate finding — evidence
+coexistence, not duplicate NSS inventory.
+
+**No NSS or SQLite execution, and no secrets.** NSS is never initialized;
+`certutil`, `modutil`, `pk12util`, `sqlite3`, Python's `sqlite3`, and any FFI
+binding are never used at runtime; no PKCS #11 module is loaded; no password is
+requested, accepted, read from the environment, stored, or guessed; no
+certificate, key, token, or slot is enumerated; the databases are never copied,
+locked, or written beside (no journal or WAL is created); and `configdir` is
+never resolved, expanded, followed, compared to the scanned root, or emitted.
+Marker lines, library paths, module configuration, database hashes, and
+target-derived parser exception messages never appear in a finding, report,
+stored record, or error. A root-parser failure is reported through the existing
+privacy-safe detector-error path, identifying the detector ID, the lexical root
+directory, and the exception type only. See
+[docs/CLI.md](CLI.md#mozilla-nss-sql-database-set-evidence-hg-041).
+
 #### BCFKS keystore containers (HG-036)
 
 A file whose content is a **supported Bouncy Castle BCFKS `ObjectStore`** is

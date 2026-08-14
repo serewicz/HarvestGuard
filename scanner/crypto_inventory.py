@@ -7,6 +7,7 @@ import fnmatch
 import json
 import math
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ from scanner.crypto_detectors import (
     FileDetector,
     RootContext,
     RootDetector,
+    ScanScope,
     build_registry,
     run_detectors,
 )
@@ -152,13 +154,14 @@ def scan_crypto_inventory(
     root_path = Path(path)
     patterns = exclude_patterns or []
     files_inspected = 0
+    scope = _scan_scope(root_path, patterns)
 
     for file_path in _iter_candidate_files(
         root_path, patterns, follow_symlinks, traversal_errors
     ):
         files_inspected += 1
         try:
-            findings.extend(_scan_file(file_path))
+            findings.extend(_scan_file(file_path, scope=scope))
         except DetectorExecutionError as exc:
             if detector_errors is None:
                 raise
@@ -1102,6 +1105,383 @@ def _gocryptfs_root_finding(context: RootContext) -> CryptoInventoryFinding | No
         format="gocryptfs",
         config_version=version,
         mode="forward",
+    )
+
+
+# --- NSS SQL database-set detection (HG-041) --------------------------------
+#
+# One aggregate finding for one lexical directory that holds the supported
+# canonical Mozilla NSS SQL database-set layout:
+#
+#   cert9.db  key4.db  pkcs11.txt
+#
+# The bounded evidence claim is exactly: *this lexical directory contains the
+# supported canonical NSS SQL database-set layout and a structurally recognized
+# NSS internal-module configuration stanza.* It is deliberately not a claim that
+# either database is internally valid SQLite/NSS data, that any certificate or
+# key exists, that a private key could be unlocked, that trust is correct, or
+# that any application currently uses the directory.
+#
+# `pkcs11.txt` is the only marker. `cert9.db` and `key4.db` are fixed-name
+# supporting siblings: presence/eligibility checked through
+# `RootContext.has_eligible_regular_sibling` and never opened, read, parsed,
+# locked, or counted as inspected files. Nothing here initializes NSS, loads a
+# PKCS #11 module, uses sqlite3 (CLI, library, or Python module), runs certutil /
+# modutil / pk12util, requests or reads a password, or resolves the marker's
+# `configdir` value.
+#
+# Legacy DBM layouts (cert8.db/key3.db/secmod.db) and prefixed/renamed database
+# sets are deliberate false negatives, as is a marker reached through a symlink:
+# an alias to a pkcs11.txt is not aggregate-root evidence, with or without
+# --follow-symlinks.
+_NSS_MARKER_FILENAME = "pkcs11.txt"
+_NSS_CERT_DB_FILENAME = "cert9.db"
+_NSS_KEY_DB_FILENAME = "key4.db"
+
+# The four record names one supported stanza must carry, keyed by their
+# ASCII-lowercased spelling: field-name comparison is ASCII case-insensitive.
+_NSS_RECORD_LIBRARY = "library"
+_NSS_RECORD_NAME = "name"
+_NSS_RECORD_PARAMETERS = "parameters"
+_NSS_RECORD_NSS = "nss"
+_NSS_REQUIRED_RECORDS = frozenset(
+    {_NSS_RECORD_LIBRARY, _NSS_RECORD_NAME, _NSS_RECORD_PARAMETERS, _NSS_RECORD_NSS}
+)
+
+# The only two module names accepted, compared case-sensitively after trimming
+# and collapsing internal ASCII whitespace runs to one space. The `#`-less
+# spelling is accepted because both forms occur in the wild; no other name is.
+_NSS_INTERNAL_MODULE_NAMES = frozenset(
+    {"NSS Internal PKCS #11 Module", "NSS Internal PKCS 11 Module"}
+)
+
+# The exact `parameters=` key required, and the exact `NSS=` top-level argument
+# and flag tokens required. All compared ASCII case-insensitively as whole
+# tokens: `notconfigdir`, `myconfigdir`, `configdirectory`, `notinternal`, and
+# `criticality` are not matches.
+_NSS_CONFIGDIR_KEY = "configdir"
+_NSS_FLAGS_KEY = "flags"
+_NSS_REQUIRED_FLAGS = frozenset({"internal", "critical"})
+
+# ASCII whitespace only -- str.strip() would also strip Unicode whitespace,
+# which this grammar does not recognize.
+_NSS_ASCII_WHITESPACE = " \t\n\r\v\f"
+_NSS_INLINE_WHITESPACE = (" ", "\t")
+_NSS_QUOTES = ("'", '"')
+# The three delimiter pairs the NSS= top-level tokenizer tracks on one stack, so
+# a cross-nested form such as `([)]` is malformed rather than tolerated.
+_NSS_CLOSING_DELIMITERS = {")": "(", "}": "{", "]": "["}
+_NSS_ASCII_LOWER = str.maketrans(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"
+)
+_NSS_WHITESPACE_RUN = re.compile("[ \t\v\f\r\n]+")
+
+
+def _nss_ascii_lower(value: str) -> str:
+    """``value`` with A-Z mapped to a-z and every other character untouched --
+    ASCII case folding, not ``str.lower()``'s Unicode case folding, so no
+    non-ASCII character can be folded into an accepted record name, parameter
+    key, or flag token."""
+    return value.translate(_NSS_ASCII_LOWER)
+
+
+class _NssStanza:
+    """One `library=`-rooted stanza being accumulated by the single-pass parser.
+
+    ``rejected`` is set when a duplicate required record appears: the contract is
+    explicit that a duplicate rejects the stanza rather than resolving
+    first-wins or last-wins, even when both values are identical.
+    """
+
+    __slots__ = ("records", "rejected")
+
+    def __init__(self, library_value: str):
+        self.records: dict[str, str] = {_NSS_RECORD_LIBRARY: library_value}
+        self.rejected = False
+
+    def add(self, key: str, value: str) -> None:
+        if key in self.records:
+            self.rejected = True
+            return
+        self.records[key] = value
+
+
+def _nss_marker_has_supported_internal_module(text: str) -> bool:
+    """Whether ``text`` -- the marker's existing bounded text view -- contains at
+    least one stanza satisfying the supported NSS internal-module grammar.
+
+    One left-to-right pass, line-oriented, no recursive descent, no backtracking
+    over earlier lines. Splitting on ``\\n`` and trimming ASCII whitespace is what
+    accepts both LF and CRLF and a present-or-absent final newline; empty lines
+    and ``#`` comment lines are ignored and never terminate a stanza; a
+    ``library=`` record always starts a new one, even mid-stanza; and records
+    before the first ``library=`` are discarded, so required records can never be
+    assembled across stanzas.
+    """
+    stanza: _NssStanza | None = None
+    for raw_line in text.split("\n"):
+        line = raw_line.strip(_NSS_ASCII_WHITESPACE)
+        if not line or line.startswith("#"):
+            continue
+        separator = line.find("=")
+        if separator == -1:
+            # Not a record at all under this grammar: ignored, and (like an
+            # unknown record name) it cannot satisfy a required record.
+            continue
+        key = _nss_ascii_lower(line[:separator])
+        value = line[separator + 1 :]
+        if key == _NSS_RECORD_LIBRARY:
+            if stanza is not None and _nss_stanza_matches(stanza):
+                return True
+            stanza = _NssStanza(value)
+        elif stanza is not None and key in _NSS_REQUIRED_RECORDS:
+            stanza.add(key, value)
+        # Anything else -- an unknown record name, or any record before the first
+        # `library=` -- is ignored.
+    return stanza is not None and _nss_stanza_matches(stanza)
+
+
+def _nss_stanza_matches(stanza: _NssStanza) -> bool:
+    """Whether one accumulated stanza is the supported NSS internal-module
+    stanza: every required record present exactly once, an empty ``library``
+    value (a stanza naming an external library is a different thing and not
+    recognized), one of the two approved module names, exactly one non-empty
+    ``configdir`` parameter, and exactly one unquoted top-level ``Flags``
+    argument carrying both ``internal`` and ``critical``."""
+    if stanza.rejected:
+        return False
+    records = stanza.records
+    if not _NSS_REQUIRED_RECORDS.issubset(records):
+        return False
+    if records[_NSS_RECORD_LIBRARY].strip(_NSS_ASCII_WHITESPACE):
+        return False
+    module_name = _NSS_WHITESPACE_RUN.sub(
+        " ", records[_NSS_RECORD_NAME].strip(_NSS_ASCII_WHITESPACE)
+    )
+    if module_name not in _NSS_INTERNAL_MODULE_NAMES:
+        return False
+    if not _nss_parameters_have_configdir(records[_NSS_RECORD_PARAMETERS]):
+        return False
+    return _nss_arguments_have_required_flags(records[_NSS_RECORD_NSS])
+
+
+def _nss_split_parameter_arguments(value: str) -> list[str] | None:
+    """``parameters=``'s arguments, split on ASCII space or tab outside quotes,
+    or None when a quote is left unmatched at end of value (which rejects the
+    stanza).
+
+    A quote opens a quoted region that the next occurrence of the same quote
+    character closes -- there is no escape syntax, and backslash is an ordinary
+    character. Quote characters are kept in the token here so the whole-value
+    quoting rule can be checked on the argument that matters.
+    """
+    arguments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    for char in value:
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in _NSS_INLINE_WHITESPACE:
+            if current:
+                arguments.append("".join(current))
+                current = []
+            continue
+        if char in _NSS_QUOTES:
+            quote = char
+        current.append(char)
+    if quote is not None:
+        return None
+    if current:
+        arguments.append("".join(current))
+    return arguments
+
+
+def _nss_unquote_whole_value(value: str) -> str | None:
+    """``value`` with a matching outer quote pair removed, or None when it is a
+    mixed quoted/unquoted form this grammar rejects.
+
+    A quote may only enclose an **entire** value: it must begin immediately after
+    the ``=`` and its match must be the final character, and (since no escape
+    syntax exists) it cannot appear inside. ``abc'd ef'`` and ``'abc'd`` are
+    therefore rejected rather than partially unquoted.
+    """
+    if not value:
+        return value
+    first = value[0]
+    if first in _NSS_QUOTES:
+        if len(value) < 2 or value[-1] != first or first in value[1:-1]:
+            return None
+        return value[1:-1]
+    if any(quote in value for quote in _NSS_QUOTES):
+        return None
+    return value
+
+
+def _nss_parameters_have_configdir(value: str) -> bool:
+    """Whether ``parameters=`` carries exactly one exact-key ``configdir``
+    argument with a non-empty normalized value.
+
+    The value itself is opaque: it is not required to start with ``sql:``, not
+    resolved, not expanded, not normalized to a filesystem path, not compared to
+    the scanned root, not followed, and never emitted. Only its presence,
+    uniqueness, and non-emptiness are evidence. Every other syntactically valid
+    argument is ignored.
+    """
+    arguments = _nss_split_parameter_arguments(value)
+    if arguments is None:
+        return False
+    configdir: str | None = None
+    for argument in arguments:
+        separator = argument.find("=")
+        if separator == -1:
+            continue
+        if _nss_ascii_lower(argument[:separator]) != _NSS_CONFIGDIR_KEY:
+            continue
+        if configdir is not None:
+            # A duplicate configdir rejects the stanza -- no first-wins or
+            # last-wins resolution.
+            return False
+        unquoted = _nss_unquote_whole_value(argument[separator + 1 :])
+        if unquoted is None:
+            return False
+        configdir = unquoted
+    return bool(configdir)
+
+
+def _nss_split_top_level_arguments(value: str) -> list[str] | None:
+    """``NSS=``'s top-level arguments, or None when the value is malformed.
+
+    One left-to-right pass with one quote state and one delimiter stack holding
+    the exact opening characters of ``()``, ``{}``, and ``[]``. Top level means
+    the quote state is none *and* the stack is empty, so only whitespace there
+    splits arguments: whitespace inside quotes or inside any nesting stays part
+    of the current argument, and a ``Flags=`` sequence inside either can never
+    become a top-level argument.
+
+    Malformed -- and therefore stanza-rejecting -- is a closing delimiter that
+    does not match the most recent opening one (including cross-nested ``([)]``,
+    ``{(})``, and ``[(])``), a closing delimiter with an empty stack, an
+    unmatched quote at end of value, and a non-empty stack at end of value.
+    Backslash has no escape meaning. Memory is bounded by the length of the
+    already bounded marker text view.
+    """
+    arguments: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    stack: list[str] = []
+    for char in value:
+        if quote is not None:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+        if char in _NSS_QUOTES:
+            quote = char
+            current.append(char)
+            continue
+        if char in _NSS_CLOSING_DELIMITERS:
+            if not stack or stack[-1] != _NSS_CLOSING_DELIMITERS[char]:
+                return None
+            stack.pop()
+            current.append(char)
+            continue
+        if char in ("(", "{", "["):
+            stack.append(char)
+            current.append(char)
+            continue
+        if char in _NSS_INLINE_WHITESPACE and not stack:
+            if current:
+                arguments.append("".join(current))
+                current = []
+            continue
+        current.append(char)
+    if quote is not None or stack:
+        return None
+    if current:
+        arguments.append("".join(current))
+    return arguments
+
+
+def _nss_arguments_have_required_flags(value: str) -> bool:
+    """Whether ``NSS=`` carries exactly one top-level ``Flags`` argument whose
+    unquoted, comma-separated tokens include both ``internal`` and ``critical``.
+
+    Quote characters are never stripped from a ``Flags`` value, so
+    ``Flags="internal,critical"`` and ``Flags='internal,critical'`` do not
+    satisfy this. Flag tokens are compared as whole tokens after trimming, so
+    ``notinternal``, ``internally``, and ``criticality`` are not matches, while
+    additional exact tokens alongside the two required ones are allowed. Other
+    top-level arguments (``trustOrder``, ``cipherOrder``, ``slotParams``, ...)
+    may appear in any order and are neither interpreted nor emitted.
+    """
+    arguments = _nss_split_top_level_arguments(value)
+    if arguments is None:
+        return False
+    flags: frozenset[str] | None = None
+    for argument in arguments:
+        separator = argument.find("=")
+        if separator == -1:
+            continue
+        if _nss_ascii_lower(argument[:separator]) != _NSS_FLAGS_KEY:
+            continue
+        if flags is not None:
+            # A duplicate top-level Flags argument rejects the stanza.
+            return False
+        flags = frozenset(
+            _nss_ascii_lower(token.strip(_NSS_ASCII_WHITESPACE))
+            for token in argument[separator + 1 :].split(",")
+        )
+    return flags is not None and _NSS_REQUIRED_FLAGS.issubset(flags)
+
+
+def _nss_sql_database_set_finding(
+    context: RootContext,
+) -> CryptoInventoryFinding | None:
+    """The aggregate NSS finding for ``context``'s candidate root (the directory
+    holding the ``pkcs11.txt`` marker the scanner discovered), or None when that
+    directory is not a supported canonical NSS SQL database set.
+
+    No directory is listed or walked, and the two supporting siblings are only
+    presence/eligibility checked -- never opened, parsed, or validated. The
+    marker's own already-read text view is the only content read.
+    """
+    marker_path = context.marker_path
+    # A genuine regular file named exactly pkcs11.txt. Checked independently of
+    # the caller's symlink policy: a symlink alias to a pkcs11.txt is not
+    # aggregate-root evidence with --follow-symlinks, without it, or when scanned
+    # directly.
+    if marker_path.is_symlink() or not marker_path.is_file():
+        return None
+
+    # Both canonical databases must be present, in this same lexical directory,
+    # as genuine regular non-symlink files the user did not exclude. Parent and
+    # child directories are never searched for a missing component, and an
+    # excluded sibling behaves exactly as a missing one.
+    if not context.has_eligible_regular_sibling(_NSS_CERT_DB_FILENAME):
+        return None
+    if not context.has_eligible_regular_sibling(_NSS_KEY_DB_FILENAME):
+        return None
+
+    # The shared bounded text view: a marker too large to decode, binary, or
+    # not decodable as UTF-8/ASCII has no text evidence and cannot match. The
+    # physical read already happened for this candidate file; only the parsing
+    # is bounded here.
+    text = context.marker.text
+    if text is None:
+        return None
+    if not _nss_marker_has_supported_internal_module(text):
+        return None
+
+    return CryptoInventoryFinding(
+        asset_type="NSS Cryptographic Database Set",
+        location=str(context.root_path),
+        evidence="Supported NSS SQL database set detected",
+        confidence="High",
+        rule_id="nss:sql_database_set",
+        format="NSS SQL",
     )
 
 
@@ -2358,6 +2738,13 @@ def _legacy_encrypted_pem_finding(file_path: Path) -> CryptoInventoryFinding:
 #      same reason -- gocryptfs.conf is plain JSON -- and terminal for its
 #      marker file either way, so a rejected marker never falls through into
 #      PEM/DER/PKCS#12 parsing (HG-032).
+#   31 NSS SQL database set immediately after the gocryptfs root and ahead of
+#      every file-format branch and the shared gate: pkcs11.txt is plain text
+#      with no recognized extension and no "-----BEGIN " content. Unlike
+#      gocryptfs it declares `owns_marker=False`, so only a *validated* root is
+#      terminal for the marker; a rejected pkcs11.txt falls through so a
+#      defensible certificate or private key inside it is still reported
+#      (HG-041).
 #   35 BCFKS ahead of JKS, PKCS#12, and DER, and ahead of the shared gate: a
 #      BCFKS store is structurally identified from its own bytes, so a valid
 #      store saved as truststore.p12 or certs.der must be classified as the
@@ -2483,6 +2870,21 @@ def _detect_gocryptfs_root(context: RootContext) -> DetectionResult:
         # PEM/DER/PKCS#12 detectors.
         return DetectionResult.claim()
     return DetectionResult.match([finding])
+
+
+def _detect_nss_sql_database_set(context: RootContext) -> DetectionResult:
+    finding = _nss_sql_database_set_finding(context)
+    if finding is None:
+        # Conditional ownership (HG-041): unlike the gocryptfs root detector,
+        # this one does not own a file merely because it is named pkcs11.txt. A
+        # rejected marker is a normal non-match, so later detectors still get to
+        # inspect it -- an arbitrary pkcs11.txt holding a supported certificate
+        # or private key must not have that defensible evidence suppressed.
+        return DetectionResult.no_match()
+    # A validated root, by contrast, is terminal for its marker: the aggregate
+    # finding is the NSS evidence for this directory, and the marker must not
+    # also be reported as some other asset.
+    return DetectionResult.match([finding], terminal=True)
 
 
 def _bcfks_candidate(context: FileContext) -> bool:
@@ -2822,6 +3224,27 @@ CRYPTO_DETECTORS = build_registry(
                 "material, salt, or KDF parameter is read into the finding."
             ),
         ),
+        RootDetector(
+            detector_id="nss:sql_database_set",
+            priority=31,
+            marker_filename=_NSS_MARKER_FILENAME,
+            detect=_detect_nss_sql_database_set,
+            evidence="Supported NSS SQL database set detected",
+            confidence="High",
+            rule_id="nss:sql_database_set",
+            metadata_keys=frozenset({"Format"}),
+            owns_marker=False,
+            verification_rationale=(
+                "Canonical cert9.db, key4.db, and pkcs11.txt all present in one "
+                "lexical directory -- the two databases presence/eligibility "
+                "checked as genuine regular non-symlink files the scan did not "
+                "exclude, never opened -- plus a structurally recognized NSS "
+                "internal-module stanza in the marker; no NSS or SQLite tool or "
+                "library is invoked, no password is requested or accepted, no "
+                "certificate or key is enumerated, and the marker's configdir is "
+                "neither resolved nor reported."
+            ),
+        ),
         FileDetector(
             detector_id="java_keystore:bcfks",
             priority=35,
@@ -3024,7 +3447,9 @@ CRYPTO_DETECTORS = build_registry(
 
 
 def _scan_file(
-    file_path: Path, detectors: tuple | None = None
+    file_path: Path,
+    detectors: tuple | None = None,
+    scope: ScanScope | None = None,
 ) -> list[CryptoInventoryFinding]:
     """Every finding the detector registry produces for one file the scanner's
     traversal already selected.
@@ -3033,8 +3458,13 @@ def _scan_file(
     same single read this function performed before HG-033. An unreadable file
     (permission denied, vanished or replaced mid-scan) produces no findings and
     no evidence, unchanged.
+
+    ``scope`` carries this scan's target and exclusion rules so an aggregate root
+    detector's fixed-name supporting-sibling check respects the user's
+    ``--exclude`` patterns (HG-041). It adds no traversal and no read: the scope
+    object only answers "would this scan have excluded that path".
     """
-    context = FileContext(file_path)
+    context = FileContext(file_path, scope=scope)
     if not context.readable():
         return []
     return run_detectors(context, detectors or CRYPTO_DETECTORS)
@@ -3405,6 +3835,25 @@ def _is_excluded(path: Path, match_path: str, patterns: list[str]) -> bool:
     return any(
         fnmatch.fnmatch(path.name, pattern) or fnmatch.fnmatch(match_path, pattern)
         for pattern in patterns
+    )
+
+
+def _scan_scope(root_path: Path, patterns: list[str]) -> ScanScope:
+    """This scan's scope rules, for the aggregate supporting-sibling eligibility
+    check (HG-041).
+
+    Both callables are the traversal's own: ``_relative_for_match`` produces the
+    same root-relative POSIX match path ``_iter_candidate_files`` assigns a file
+    it encounters -- and, when the scan target is a single file, the sibling's
+    bare basename, since a sibling of the target is not relative to the target
+    and no parent prefix, absolute path, or ``..`` segment is introduced -- and
+    ``_is_excluded`` is the same matcher, over the same patterns. There is no
+    second exclusion grammar.
+    """
+    return ScanScope(
+        target_path=root_path,
+        match_path_for=lambda path: _relative_for_match(path, root_path),
+        is_excluded=lambda path, match_path: _is_excluded(path, match_path, patterns),
     )
 
 

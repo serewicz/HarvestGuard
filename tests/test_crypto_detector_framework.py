@@ -63,12 +63,15 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "crypto_inventory"
 # existing JKS detector below it). HG-039 added exactly two, the CMS/PKCS#7
 # EnvelopedData and EncryptedData encrypted-object detectors, which are two
 # separate content types with two separate rule identities rather than one
-# detector that reports which it saw.
+# detector that reports which it saw. HG-041 added exactly one, the aggregate
+# NSS SQL database-set root detector -- one root detector for the whole
+# canonical set, not one detector per component file.
 EXPECTED_DETECTOR_IDS = [
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
     "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
+    "nss:sql_database_set",
     "java_keystore:bcfks",
     "java_keystore:jceks",
     "java_keystore:jks_magic",
@@ -87,13 +90,17 @@ EXPECTED_DETECTOR_IDS = [
 # type leaves rule_id unset (parsed certificates and keys have no named
 # detection rule); HG-033 introduced none, HG-035 introduced exactly one,
 # HG-036 introduced exactly one, HG-037 introduced exactly one, HG-038
-# introduced exactly one, and HG-039 introduced exactly two. The JKS detector
-# deliberately remains without one, unchanged by HG-037, HG-038, and HG-039.
+# introduced exactly one, HG-039 introduced exactly two, and HG-041 introduced
+# exactly one (`nss:sql_database_set`, the aggregate NSS set; there is
+# deliberately no file-level `nss:*` rule for pkcs11.txt, cert9.db, or key4.db).
+# The JKS detector deliberately remains without one, unchanged by HG-037,
+# HG-038, HG-039, and HG-041.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
     "encrypted_file:age",
     "encrypted_filesystem:gocryptfs",
+    "nss:sql_database_set",
     "java_keystore:bcfks",
     "java_keystore:jceks",
     "private_key:pkcs8_encrypted",

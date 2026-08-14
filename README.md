@@ -153,7 +153,16 @@ evidence and must remain traceable back to it.
   that declare `Proc-Type: 4,ENCRYPTED` and a valid `DEK-Info` header with a
   non-empty strict-base64 body — validated from exact PEM boundaries and
   headers only; evidence only, never decrypted, with no password prompted for
-  or accepted and no cipher, IV, or ciphertext reported. Only
+  or accepted and no cipher, IV, or ciphertext reported. Also recognizes
+  **Mozilla NSS SQL database sets** — the canonical `cert9.db` + `key4.db` +
+  `pkcs11.txt` layout in one lexical directory, plus a structurally recognized
+  NSS internal-module stanza in the marker — as **one aggregate finding per
+  validated directory**, never one per component file; the two databases are
+  presence/eligibility checked only and are never opened, so no NSS or SQLite
+  tool or library is invoked, no password is requested or accepted, no
+  certificate or key is enumerated, and the marker's `configdir` is never
+  resolved or reported. Legacy DBM sets, prefixed or renamed layouts,
+  incomplete sets, and marker symlinks are unsupported. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See
