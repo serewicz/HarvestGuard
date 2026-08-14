@@ -142,6 +142,25 @@ Example output shape:
   and never decrypted, mounted, or unlocked. Reverse mode and `PlaintextNames`
   mode are unsupported. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#gocryptfs-encrypted-filesystem-hg-032)
+- Mozilla NSS SQL database sets (`rule_id: nss:sql_database_set`, asset type
+  `NSS Cryptographic Database Set`, confidence `High`), **the supported
+  canonical modern layout only** — `cert9.db`, `key4.db`, and `pkcs11.txt`
+  together in one lexical directory, with a structurally recognized NSS
+  internal-module stanza in `pkcs11.txt`. **One validated lexical directory
+  produces one finding**, located at the containing directory; the component
+  files are never separate NSS findings. `pkcs11.txt` is the only marker, and
+  it must be a genuine regular non-symlink file. The two databases are
+  **presence/eligibility checked only — never opened, read, parsed, locked, or
+  internally validated**, so they do not increment `Crypto files inspected` on
+  account of the aggregate check, and a database the scan excluded behaves
+  exactly as a missing one. Never initialized or unlocked: no NSS or SQLite
+  library, CLI, or FFI binding is loaded or invoked, no password is requested,
+  accepted, read from the environment, or guessed, no certificate or key object
+  is enumerated, and the marker's `configdir` is never resolved, followed, or
+  reported. The only metadata emitted is `Format: NSS SQL`. Legacy DBM sets
+  (`cert8.db`/`key3.db`/`secmod.db`), prefixed or renamed database sets,
+  incomplete sets, and marker symlinks produce no finding. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#mozilla-nss-sql-database-sets-hg-041)
 
 ## Detector Framework
 
@@ -169,7 +188,21 @@ Adding a detector therefore does not add a read of the file.
 
 **File and root detectors.** Most detectors are file-scope: one asset, one
 file. gocryptfs is root-scope, because the evidence is a directory structure —
-one finding per validated root, never one per ciphertext file.
+one finding per validated root, never one per ciphertext file. The NSS SQL
+database set (HG-041) is root-scope for the same reason: one finding per
+validated lexical directory, never one per component file. A root detector's
+fixed-name sibling check is also scope-aware — it asks the scanner's own
+exclusion matcher whether that sibling is in scope for this scan, so aggregate
+supporting evidence cannot ignore a `--exclude` pattern. It still opens
+nothing, lists nothing, and counts nothing.
+
+**Ownership of a marker is per detector.** gocryptfs owns its marker outright:
+a `gocryptfs.conf` that failed root validation is not evidence of another asset
+type either, so it never falls through. The NSS detector deliberately does not
+(`owns_marker=False`): only a *validated* NSS root is terminal for its
+`pkcs11.txt`. A rejected marker falls through to the later detectors, so a
+defensible certificate or private key that happens to live in a file named
+`pkcs11.txt` is still reported.
 
 **Deterministic order and terminal results.** Each detector declares a
 priority, and the registry is ordered by priority alone — never by import

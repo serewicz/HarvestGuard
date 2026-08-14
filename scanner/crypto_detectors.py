@@ -166,6 +166,30 @@ class DetectorExecutionError(RuntimeError):
         )
 
 
+@dataclass(frozen=True)
+class ScanScope:
+    """The requested scan's own scope rules, supplied by the scanner.
+
+    This exists for exactly one question (HG-041): when an aggregate detector
+    checks a fixed-name supporting sibling, is that sibling *in scope for this
+    scan*, or did the user exclude it? ``RootContext.has_regular_sibling`` can
+    only answer the filesystem half of that ("is it a genuine regular file"),
+    which would let aggregate evidence quietly ignore a ``--exclude`` pattern.
+
+    The scanner supplies its own rules as callables rather than the framework
+    reimplementing them: ``match_path_for`` is the scanner's own root-relative
+    POSIX match path for a path (the same value traversal would assign that
+    sibling, and the bare basename when the scan target is a single file), and
+    ``is_excluded`` is the scanner's own exclusion matcher. There is deliberately
+    no second exclusion grammar here, and nothing in this dataclass lists, globs,
+    walks, or opens anything.
+    """
+
+    target_path: Path
+    match_path_for: Callable[[Path], str]
+    is_excluded: Callable[[Path, str], bool]
+
+
 @dataclass
 class FileContext:
     """One regular file the scanner has already discovered, shared by every file
@@ -180,6 +204,11 @@ class FileContext:
     """
 
     path: Path
+    # The scan's scope rules, when the caller is the scanner's own traversal.
+    # None when a detector is exercised outside a scan (a direct unit test), in
+    # which case scope-aware sibling eligibility falls back to the filesystem
+    # check alone -- there are no exclusion patterns to respect.
+    scope: ScanScope | None = None
     memo: dict[str, Any] = field(default_factory=dict, repr=False)
     _data: Any = field(default=_UNSET, repr=False)
     _text: Any = field(default=_UNSET, repr=False)
@@ -254,7 +283,7 @@ class FileContext:
     def root_context(self) -> RootContext:
         """This file read as a root detector's marker file: the containing
         directory is the candidate root."""
-        return RootContext(root_path=self.path.parent, marker=self)
+        return RootContext(root_path=self.path.parent, marker=self, scope=self.scope)
 
 
 @dataclass
@@ -271,6 +300,7 @@ class RootContext:
 
     root_path: Path
     marker: FileContext
+    scope: ScanScope | None = None
 
     @property
     def marker_path(self) -> Path:
@@ -293,6 +323,27 @@ class RootContext:
             raise ValueError(f"sibling marker must be a bare filename, got: {name!r}")
         sibling = self.root_path / name
         return sibling.is_file() and not sibling.is_symlink()
+
+    def has_eligible_regular_sibling(self, name: str) -> bool:
+        """Whether ``name`` is a genuine regular non-symlink file in this root
+        *and* in scope for the scan that reached this root (HG-041).
+
+        The filesystem half is ``has_regular_sibling``, including its bare-
+        filename requirement -- no listing, globbing, recursion, arbitrary path
+        input, or file open. The scope half asks the scanner's own exclusion
+        matcher about the sibling, using the scanner's own match path, so a
+        sibling the user excluded behaves exactly as a missing one and aggregate
+        supporting evidence cannot bypass ``--exclude``.
+
+        Nothing here opens the sibling or counts it: supporting-evidence checks
+        are not inspected files, so ``files_inspected`` is untouched.
+        """
+        if not self.has_regular_sibling(name):
+            return False
+        if self.scope is None:
+            return True
+        sibling = self.root_path / name
+        return not self.scope.is_excluded(sibling, self.scope.match_path_for(sibling))
 
 
 @dataclass(frozen=True)

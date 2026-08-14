@@ -608,6 +608,74 @@ proof that no gocryptfs cipher root exists in the target — this is one narrow
 detection rule for one specific, well-defined on-disk shape, not general
 encrypted-filesystem or FUSE coverage.
 
+#### Mozilla NSS SQL database-set evidence (HG-041)
+
+A lexical directory holding all three canonical modern NSS SQL components —
+`cert9.db`, `key4.db`, and `pkcs11.txt` — where `pkcs11.txt` carries a
+structurally recognized NSS internal-module stanza is cryptographic evidence,
+and the crypto-inventory scanner owns it. A `--type crypto` (or `--type all`)
+scan reports the *containing directory* as asset type
+`NSS Cryptographic Database Set`, `rule_id: nss:sql_database_set`, confidence
+`High`, with evidence `Supported NSS SQL database set detected` and technical
+metadata limited to `Format: NSS SQL`.
+
+**This is an aggregate, set-level finding.** One validated lexical directory
+produces exactly one finding; `pkcs11.txt`, `cert9.db`, and `key4.db` are never
+reported as separate NSS assets. Two distinct lexical roots produce two
+findings, and a valid set nested inside another valid set is a separate root
+with its own finding. With `--follow-symlinks`, two lexical directory paths that
+resolve to one physical directory may each produce a finding: identity is
+lexical, and HG-041 adds no realpath, inode, or device deduplication.
+
+**Presence versus inspection.** `pkcs11.txt` is the only marker and the only
+file this rule reads. `cert9.db` and `key4.db` are **presence/eligibility
+checked only** — checked to be genuine regular non-symlink files that this
+scan's `--exclude` patterns did not remove, and never opened, read, parsed,
+copied, locked, or internally validated. An excluded sibling behaves exactly as
+a missing one, and these checks do not increment `Crypto files inspected`. In a
+normal directory scan traversal still visits all three files, so
+`Crypto files inspected` counts three while HG-041 emits one finding; a direct
+scan of `pkcs11.txt` counts one.
+
+**Support is narrow and explicit.** The marker must be a genuine regular file
+named exactly `pkcs11.txt` — a symlink alias never triggers the rule, with or
+without `--follow-symlinks`, and neither does scanning that symlink directly.
+The marker must contain one stanza that satisfies the whole bounded grammar: an
+empty `library=` value, one of the two accepted module names
+(`NSS Internal PKCS #11 Module` or `NSS Internal PKCS 11 Module`), exactly one
+non-empty `configdir` parameter, and exactly one unquoted top-level `Flags`
+argument carrying both `internal` and `critical`. Legacy DBM sets
+(`cert8.db`/`key3.db`/`secmod.db`), prefixed or renamed layouts, backup names,
+and incomplete sets produce no finding. The full supported/unsupported
+enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#mozilla-nss-sql-database-sets-hg-041).
+
+**Nothing is opened, unlocked, or executed.** No NSS or SQLite library, CLI, or
+FFI binding is loaded or invoked (`certutil`, `modutil`, `pk12util`, `sqlite3`,
+and Python's `sqlite3` included), no PKCS #11 module is loaded, no password is
+requested, accepted, read from the environment, or guessed, no certificate or
+key object is enumerated, nothing is written beside the databases, and no
+journal, WAL, or lock is created. Marker lines, `configdir`, library paths,
+module configuration, token/slot data, and database hashes never appear in a
+finding, report, or stored record.
+
+**Confidence `High` describes layout and marker structure only** — it is not a
+claim that either database is internally valid SQLite/NSS data, that any
+certificate or key exists, that a key can be unlocked, that trust is correct,
+or that any application currently uses the directory. A directory whose
+`cert9.db` and `key4.db` are arbitrary files with the canonical names, beside a
+structurally valid marker, will match; that accepted false positive is the
+price of never opening the databases. Absence of an `nss:sql_database_set`
+finding is not proof that no NSS database exists in the target.
+
+An unrelated non-NSS finding another detector defensibly observes from a
+component file (a certificate parsed out of a file named `cert9.db`, say) still
+appears alongside the aggregate finding — that is evidence coexistence, not
+duplicate NSS inventory. A `pkcs11.txt` this rule *rejects* falls through to the
+later detectors, so a certificate or private key inside it is still reported;
+a rule that ran earlier and terminally (an OpenSSL `Salted__` file named
+`pkcs11.txt`, for example) keeps its existing precedence.
+
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,
 `DefaultAzureCredential` for Azure). The CLI does not read, prompt for, or
