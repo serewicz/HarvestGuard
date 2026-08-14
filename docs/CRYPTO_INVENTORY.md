@@ -147,6 +147,48 @@ Example output shape:
   alias or certificate content is reported. The only metadata emitted is
   `Format: JKS` or `Format: JCEKS`. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#java-trusted-certificate-only-stores-hg-042)
+- OpenSSH host identity evidence — three bounded, **file-local** observations,
+  none of which pairs a private candidate with a public candidate, reads a
+  sibling file, or resolves `sshd_config`/`HostKey`:
+  - `rule_id: openssh_host_identity:private_key` (asset type
+    `OpenSSH Host Private Key Candidate`, confidence `Medium`) — a supported
+    unencrypted private key (OpenSSH, unencrypted PKCS#8, or traditional
+    RSA/EC PEM) whose complete file, apart from permitted outer ASCII
+    whitespace, is exactly one such block, at an *exact* canonical basename
+    (`ssh_host_rsa_key`, `ssh_host_ecdsa_key`, `ssh_host_ed25519_key`) whose
+    parsed key class agrees with that basename.
+  - `rule_id: openssh_host_identity:public_key` (asset type
+    `OpenSSH Host Public Key Candidate`, confidence `Medium`) — one supported
+    OpenSSH public-key record, under the same one-record grammar, at the
+    matching canonical `.pub` basename.
+  - `rule_id: openssh_host_identity:host_certificate` (asset type
+    `OpenSSH Host Certificate`, confidence `High`) — one structurally parsed
+    OpenSSH certificate record whose encoded type is `HOST`. **No filename
+    requirement.** The certificate signature is deliberately never verified
+    (an intentional accepted false positive: a structurally valid but
+    cryptographically tampered signature still matches; see
+    [what is and is not supported](DETECTION_CHARACTERIZATION.md#openssh-host-identity-evidence-hg-043)
+    for the exact tampered-signature control).
+
+  RSA, ECDSA (`secp256r1`/`secp384r1`/`secp521r1` only), and Ed25519 are the
+  only supported families for a private/public candidate and for both the
+  certified key and the signing/CA key inside a certificate. For the
+  private/public candidate rules, an unsupported algorithm/curve, a wrong
+  canonical basename, a renamed key, a custom `HostKey` path, or an encrypted
+  private key is a deliberate HG-043 no-match, and the key itself **still
+  falls through to the existing generic private-key/public-key detectors
+  unchanged** — visible there, at their own unspecialized asset type and
+  confidence, not lost. A USER certificate, and a HOST certificate this rule
+  declines (an unsupported certified or signing key, or one that fails to
+  parse), are different: they freeze at **zero findings**, because the
+  generic public-key detector never reports OpenSSH certificate content —
+  structurally valid or not — under any rule. Evidence only: `Fingerprint`
+  is always left unset for these three rules, no password is prompted for,
+  guessed, or read from the environment, no `ssh`/`sshd`/`ssh-keygen`/
+  `ssh-keyscan` process or network connection is invoked, and no comment,
+  principal, key ID, serial, validity window, extension, or certificate
+  signature is reported. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#openssh-host-identity-evidence-hg-043)
 - OpenSSL `Salted__` encrypted files (leading-byte signature only, not
   decrypted; checked before any extension-based branch above)
 - OpenPGP/GPG encrypted files, binary or ASCII-armored, identified by the
@@ -483,6 +525,26 @@ Recursive scans do not follow symbolic links by default. Use
   fingerprint, validity date, or DER byte reaches a finding. The only metadata
   emitted is `Format: JKS` or `Format: JCEKS`. Absence of a `java_truststore:*`
   finding is not proof that no Java truststore exists in the target.
+- OpenSSH host identity evidence does not establish that `sshd` is installed,
+  running, or configured to use the file, that a public candidate matches any
+  private candidate, that a certificate signature is valid or its CA trusted,
+  that certificate principals apply to the scanned machine, or host ownership.
+  It is **file-local by design**: no sibling file is read, no cross-file state
+  is kept, and two files under an unrelated key's matching canonical basenames
+  may each independently produce a candidate finding with no claim that they
+  pair. Supported algorithms are exactly RSA, ECDSA (`secp256r1`/`secp384r1`/
+  `secp521r1`), and Ed25519; DSA, Ed448, FIDO/security-key variants, and any
+  other ECDSA curve are deliberate false negatives, as are custom `HostKey`
+  paths, renamed keys, encrypted private keys, and multi-record/embedded input
+  outside the frozen one-block/one-record grammars. A user key renamed to an
+  exact canonical basename becomes a candidate finding — an explicit accepted
+  false positive, since ordinary key bytes cannot encode host-versus-user
+  role. The certificate rule deliberately never calls
+  `verify_cert_signature()`: a structurally valid HOST certificate with a
+  tampered signature still matches, and a USER certificate never does,
+  regardless of signature validity. `Fingerprint` is always unset for these
+  three rules. Absence of an `openssh_host_identity:*` finding is not proof
+  that no OpenSSH host key or certificate exists in the target.
 - Random binary files are skipped unless their extension or header indicates a
   supported crypto asset.
 - OpenPGP/GPG detection covers specific encrypted-file structures, not the

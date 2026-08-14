@@ -1428,6 +1428,145 @@ classification only; it creates no
 [internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
 and emits nothing beyond the single finding described above.
 
+#### OpenSSH host identity evidence (HG-043)
+
+Three bounded, **file-local** rules, each terminal with respect to the
+generic finding it replaces:
+
+- `rule_id: openssh_host_identity:private_key` (priority 76, asset type
+  `OpenSSH Host Private Key Candidate`, confidence `Medium`, evidence
+  `Supported private key observed at canonical OpenSSH host-key filename`).
+- `rule_id: openssh_host_identity:public_key` (priority 81, asset type
+  `OpenSSH Host Public Key Candidate`, confidence `Medium`, evidence
+  `Supported SSH public key observed at canonical OpenSSH host-public-key
+  filename`).
+- `rule_id: openssh_host_identity:host_certificate` (priority 82, asset type
+  `OpenSSH Host Certificate`, confidence `High`, evidence
+  `OpenSSH host certificate structure detected`).
+
+Technical metadata for all three is limited to `Algorithm` and `Key Size`;
+`Fingerprint` is always left unset, and no other metadata field (`Format`,
+`Subject`, `Issuer`, `Expiration`, `Signature Algorithm`) is ever populated.
+
+**What "candidate" means for the private/public rules, and what it does not.**
+Ordinary key bytes do not encode host-versus-user operational role, so these
+two rules make a narrower claim than "this is an active host key":
+
+> A supported parsed key agrees with an exact canonical OpenSSH host-key
+> filename.
+
+It does **not** mean HarvestGuard proved active `sshd` use, or that a public
+candidate and a private candidate pair. The canonical basenames are exact and
+case-sensitive — `ssh_host_rsa_key`, `ssh_host_ecdsa_key`,
+`ssh_host_ed25519_key`, and their `.pub` counterparts — and directory location
+is not evidence: `/etc/ssh` is not privileged. A user key renamed to an exact
+canonical basename becomes a candidate finding; this is an explicit accepted
+false-positive boundary, not a bug.
+
+**Private candidate: exact whole-file framing.** Apart from permitted outer
+ASCII whitespace (space, tab, LF, CR, VT, FF), the complete file must be
+exactly one supported unencrypted private-key block:
+
+- `-----BEGIN OPENSSH PRIVATE KEY-----`, parsed with
+  `serialization.load_ssh_private_key(data, password=None)`;
+- `-----BEGIN PRIVATE KEY-----` (unencrypted PKCS#8), parsed with
+  `serialization.load_pem_private_key(data, password=None)`;
+- `-----BEGIN RSA PRIVATE KEY-----` (traditional, unencrypted), parsed key
+  must be RSA;
+- `-----BEGIN EC PRIVATE KEY-----` (traditional, unencrypted), parsed key
+  must be an accepted-curve ECDSA key.
+
+A second BEGIN marker for any private-key/certificate/public-key PEM or
+OpenSSH identity anywhere in the stripped content — not only a second copy of
+the same label — ends classification, as does any non-whitespace byte before
+the BEGIN line or after the END line. DER private keys, DSA traditional PEM,
+encrypted PKCS#8, password-encrypted OpenSSH keys, legacy
+`Proc-Type: 4,ENCRYPTED` PEM, and SSH2/RFC4716 private forms are not this
+grammar and produce no `openssh_host_identity:private_key` finding.
+
+**Public candidate and host certificate: one-record grammar.** The file must
+be exactly one OpenSSH record: an optional single trailing LF or CRLF (and no
+other CR/LF anywhere), optional outer space/tab trimmed, an algorithm token,
+one or more space/tab separators, a base64 blob, and — only when at least one
+more space/tab separator follows the blob — an uninterpreted comment payload
+that may contain any byte except CR/LF, including invalid UTF-8 or nothing at
+all. The comment is never decoded, retained, or emitted. Leading/trailing
+blank lines, a second identity record, `authorized_keys` option prefixes, and
+RFC4716/SSH2 `BEGIN SSH2 PUBLIC KEY` framing all end classification. The
+public-key rule accepts exactly `ssh-rsa`, `ecdsa-sha2-nistp256`,
+`ecdsa-sha2-nistp384`, `ecdsa-sha2-nistp521`, and `ssh-ed25519`; certificate
+tokens (`*-cert-v01@openssh.com`) are excluded from it. The host-certificate
+rule accepts exactly the five matching `*-cert-v01@openssh.com` tokens and has
+**no filename requirement at all** — an arbitrary or absent basename is
+irrelevant to it, unlike the other two rules.
+
+**Host certificate: what "HOST" evidence means, and the deliberate
+signature-verification boundary.** A match requires the record to parse via
+`serialization.load_ssh_public_identity` into an `SSHCertificate` whose
+`.type` is exactly `SSHCertificateType.HOST`, whose `.public_key()` is a
+supported RSA/ECDSA/Ed25519 key, and whose `.signature_key()` is likewise
+supported (ECDSA restricted to `secp256r1`/`secp384r1`/`secp521r1`). A USER
+certificate, an ordinary (non-certificate) public key, and a certificate with
+an unsupported certified or signing key all produce no finding, and
+`UnsupportedAlgorithm` during parsing or key extraction is treated the same
+way. HG-043 **deliberately never calls `certificate.verify_cert_signature()`**
+— parsing establishes structure and encoded role, not cryptographic
+integrity. A structurally valid HOST certificate whose signature has been
+tampered with (one bit flipped in the raw Ed25519 signature payload, every
+other length, field, and framing byte unchanged) still matches: this is an
+intentional accepted false positive, verified in the test suite by
+constructing exactly such a fixture and confirming `verify_cert_signature()`
+independently raises `InvalidSignature` on it while HG-043's own structural
+detection still reports it.
+
+**Exception boundary.** Only the parser exceptions Issue #88 documents as
+expected become a clean no-match — `ValueError`/`TypeError`/
+`cryptography.exceptions.UnsupportedAlgorithm` for `load_ssh_private_key` and
+`load_pem_private_key`; `ValueError`/`UnsupportedAlgorithm` for
+`load_ssh_public_key` and `load_ssh_public_identity`; `UnsupportedAlgorithm`
+only for certificate key/signing-key extraction. No catch-all exception
+clause is used anywhere in this detection; anything else propagates through
+the existing sanitized `DetectorExecutionError`/`LocalScanError` path, which
+names the detector id, the file location, and the exception type — never the
+exception's own message, and never key, certificate, or comment content.
+
+**Negatives fall through, they are not claimed.** A file these rules decline
+is handed back to the existing generic detectors unchanged: a noncanonical
+basename, a wrong-algorithm-for-basename key, or a multi-block private file
+still produces the existing generic `private_key:pem`/`OpenSSH Private Key`
+finding (with its own SHA-256 SPKI fingerprint); a password-encrypted OpenSSH
+key at a canonical basename still produces the existing generic
+`Encrypted OpenSSH Private Key` finding; a noncanonical or wrong-algorithm
+`.pub` file still produces the existing generic `public_key:ssh` finding; and
+a USER certificate, or a HOST certificate this rule does not match, produces
+zero findings under the existing generic handling, exactly as before HG-043.
+Positive HG-043 matches are terminal specifically so the file is never also
+reported under its generic counterpart.
+
+**File-local by design — no pairing.** HG-043 never reads a sibling file,
+compares a public key with a private key, deduplicates by inode, realpath, key
+material, or fingerprint, parses `sshd_config`, resolves `HostKey`, inspects a
+process or `ssh-agent`, or opens a network connection. Two unrelated files
+under matching canonical basenames — `ssh_host_ed25519_key` holding key A,
+`ssh_host_ed25519_key.pub` holding an unrelated key B — may each independently
+produce a Medium candidate finding, and neither finding says or implies they
+match. Fixture generation for this rule's tests uses real `ssh-keygen`
+offline; the runtime detectors never invoke `ssh`, `sshd`, `ssh-keygen`,
+`ssh-keyscan`, or any other subprocess.
+
+**Privacy.** Private-key bytes, public-key base64, fingerprints, public-key
+comments, certificate principals/hostnames, key IDs, serial numbers, validity
+windows, critical options, extensions, the signing CA's public key, the
+certificate signature, and raw certificate bytes are never emitted or
+persisted. Generic normalized fields such as `Subject`, `Issuer`,
+`Expiration`, `Signature Algorithm`, and `Fingerprint` are never reused to
+carry SSH certificate contents.
+
+**No relationship output.** HG-043 adds OpenSSH host-identity classification
+only; it creates no
+[internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+and emits nothing beyond the three finding shapes described above.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:
