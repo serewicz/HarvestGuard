@@ -381,6 +381,27 @@ def test_accepted_false_positive_boundary_is_explicit(tmp_path):
         pytest.param(
             _marker(parameters="configdir=sql:/tmp/nssdb"), id="unquoted-configdir"
         ),
+        # BLOCKER 1 (PR #107 Codex review): a syntactically valid irrelevant
+        # parameters= argument -- double-quoted with an embedded space, an
+        # empty quoted value, and a bare unquoted value -- must not prevent a
+        # match alongside a valid configdir.
+        pytest.param(
+            _marker(parameters="configdir='sql:/x' other=\"abc def\""),
+            id="valid-irrelevant-parameter-double-quoted-with-space",
+        ),
+        pytest.param(
+            _marker(parameters="configdir='sql:/x' other=''"),
+            id="valid-irrelevant-parameter-empty-quoted-value",
+        ),
+        pytest.param(
+            _marker(parameters="configdir='sql:/x' other=value"),
+            id="valid-irrelevant-parameter-unquoted-value",
+        ),
+        # BLOCKER 2 (PR #107 Codex review): valid unquoted Flags permutations.
+        pytest.param(_marker(nss="Flags=critical,internal"), id="flags-reversed-order"),
+        pytest.param(
+            _marker(nss="Flags=internal,critical,other"), id="flags-extra-unquoted-token"
+        ),
     ],
 )
 def test_accepted_marker_forms(tmp_path, marker):
@@ -469,6 +490,18 @@ def test_incomplete_stanza_followed_by_valid_stanza_matches(tmp_path):
         pytest.param(_marker(parameters="configdir=abc'd ef'"), id="mixed-quoted-fragments"),
         pytest.param(_marker(parameters="configdir='abc'd"), id="trailing-unquoted-fragment"),
         pytest.param(_marker(parameters="configdir='sql:/a"), id="unmatched-quote"),
+        # BLOCKER 1 (PR #107 Codex review): a malformed *irrelevant* argument
+        # -- one with no "=" at all, or a mixed quoted/unquoted value on a
+        # non-configdir key -- must reject the stanza rather than being
+        # silently ignored just because it isn't configdir.
+        pytest.param(
+            _marker(parameters="configdir='sql:/x' BROKEN"),
+            id="malformed-irrelevant-argument-no-equals",
+        ),
+        pytest.param(
+            _marker(parameters="configdir='sql:/x' other=abc'def'"),
+            id="malformed-irrelevant-argument-mixed-quotes",
+        ),
         pytest.param(_marker(nss="Flags=critical"), id="missing-internal"),
         pytest.param(_marker(nss="Flags=internal"), id="missing-critical"),
         pytest.param(_marker(nss="Flags=notinternal,critical"), id="notinternal"),
@@ -476,6 +509,19 @@ def test_incomplete_stanza_followed_by_valid_stanza_matches(tmp_path):
         pytest.param(_marker(nss="Flags=internally,critical"), id="internally"),
         pytest.param(_marker(nss='Flags="internal,critical"'), id="double-quoted-flags"),
         pytest.param(_marker(nss="Flags='internal,critical'"), id="single-quoted-flags"),
+        # BLOCKER 2 (PR #107 Codex review): any quote character anywhere in
+        # the selected top-level Flags value rejects the stanza, not only a
+        # whole-value-wrapping quote.
+        pytest.param(
+            _marker(nss='Flags=internal,critical,"extra"'),
+            id="flags-extra-token-double-quoted",
+        ),
+        pytest.param(
+            _marker(nss="Flags=internal,'critical'"), id="flags-one-token-single-quoted"
+        ),
+        pytest.param(
+            _marker(nss='Flags="internal",critical'), id="flags-first-token-double-quoted"
+        ),
         pytest.param(
             _marker(nss='slotParams=(1={note="Flags=internal,critical"})'),
             id="flags-inside-quotes",

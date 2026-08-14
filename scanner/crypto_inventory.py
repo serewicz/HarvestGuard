@@ -1322,13 +1322,22 @@ def _nss_unquote_whole_value(value: str) -> str | None:
 
 def _nss_parameters_have_configdir(value: str) -> bool:
     """Whether ``parameters=`` carries exactly one exact-key ``configdir``
-    argument with a non-empty normalized value.
+    argument with a non-empty normalized value, and every other argument is
+    itself a syntactically valid ``key=value`` token.
 
-    The value itself is opaque: it is not required to start with ``sql:``, not
-    resolved, not expanded, not normalized to a filesystem path, not compared to
-    the scanned root, not followed, and never emitted. Only its presence,
-    uniqueness, and non-emptiness are evidence. Every other syntactically valid
-    argument is ignored.
+    Every argument must have a non-empty key before its first ``=`` and a value
+    that passes the same whole-value quoting rule ``configdir`` itself is held
+    to -- a bare token with no ``=`` at all (``BROKEN``), an empty key
+    (``=x``), or a mixed quoted/unquoted value on *any* argument
+    (``other=abc'def'``) is malformed and rejects the stanza, exactly as an
+    invalid ``configdir`` value would. A syntactically valid argument under a
+    different key is still ignored: HarvestGuard does not care what it says,
+    only that ``parameters=`` as a whole is well-formed.
+
+    The ``configdir`` value itself is opaque: it is not required to start with
+    ``sql:``, not resolved, not expanded, not normalized to a filesystem path,
+    not compared to the scanned root, not followed, and never emitted. Only its
+    presence, uniqueness, and non-emptiness are evidence.
     """
     arguments = _nss_split_parameter_arguments(value)
     if arguments is None:
@@ -1336,16 +1345,20 @@ def _nss_parameters_have_configdir(value: str) -> bool:
     configdir: str | None = None
     for argument in arguments:
         separator = argument.find("=")
-        if separator == -1:
-            continue
+        if separator <= 0:
+            # No "=" at all, or an empty key before it: not a valid key=value
+            # token under this grammar, so parameters= -- and therefore the
+            # stanza -- is malformed rather than merely carrying an argument
+            # HG-041 doesn't care about.
+            return False
+        unquoted = _nss_unquote_whole_value(argument[separator + 1 :])
+        if unquoted is None:
+            return False
         if _nss_ascii_lower(argument[:separator]) != _NSS_CONFIGDIR_KEY:
             continue
         if configdir is not None:
             # A duplicate configdir rejects the stanza -- no first-wins or
             # last-wins resolution.
-            return False
-        unquoted = _nss_unquote_whole_value(argument[separator + 1 :])
-        if unquoted is None:
             return False
         configdir = unquoted
     return bool(configdir)
@@ -1407,34 +1420,43 @@ def _nss_split_top_level_arguments(value: str) -> list[str] | None:
 
 def _nss_arguments_have_required_flags(value: str) -> bool:
     """Whether ``NSS=`` carries exactly one top-level ``Flags`` argument whose
-    unquoted, comma-separated tokens include both ``internal`` and ``critical``.
+    entire value is unquoted and whose comma-separated tokens include both
+    ``internal`` and ``critical``.
 
-    Quote characters are never stripped from a ``Flags`` value, so
-    ``Flags="internal,critical"`` and ``Flags='internal,critical'`` do not
-    satisfy this. Flag tokens are compared as whole tokens after trimming, so
-    ``notinternal``, ``internally``, and ``criticality`` are not matches, while
-    additional exact tokens alongside the two required ones are allowed. Other
+    The whole selected ``Flags`` value is rejected outright if a single or
+    double quote character appears anywhere in it -- wrapping the entire
+    value (``Flags="internal,critical"``), wrapping one token
+    (``Flags=internal,'critical'``), or trailing after the two required
+    tokens (``Flags=internal,critical,"extra"``) are all rejected the same
+    way, not only the whole-value-wrapped form. Flag tokens are otherwise
+    compared as whole tokens after trimming, so ``notinternal``,
+    ``internally``, and ``criticality`` are not matches, while additional
+    exact unquoted tokens alongside the two required ones are allowed. Other
     top-level arguments (``trustOrder``, ``cipherOrder``, ``slotParams``, ...)
     may appear in any order and are neither interpreted nor emitted.
     """
     arguments = _nss_split_top_level_arguments(value)
     if arguments is None:
         return False
-    flags: frozenset[str] | None = None
+    flags_value: str | None = None
     for argument in arguments:
         separator = argument.find("=")
         if separator == -1:
             continue
         if _nss_ascii_lower(argument[:separator]) != _NSS_FLAGS_KEY:
             continue
-        if flags is not None:
+        if flags_value is not None:
             # A duplicate top-level Flags argument rejects the stanza.
             return False
-        flags = frozenset(
-            _nss_ascii_lower(token.strip(_NSS_ASCII_WHITESPACE))
-            for token in argument[separator + 1 :].split(",")
-        )
-    return flags is not None and _NSS_REQUIRED_FLAGS.issubset(flags)
+        flags_value = argument[separator + 1 :]
+    if flags_value is None:
+        return False
+    if any(quote in flags_value for quote in _NSS_QUOTES):
+        return False
+    tokens = frozenset(
+        _nss_ascii_lower(token.strip(_NSS_ASCII_WHITESPACE)) for token in flags_value.split(",")
+    )
+    return _NSS_REQUIRED_FLAGS.issubset(tokens)
 
 
 def _nss_sql_database_set_finding(
