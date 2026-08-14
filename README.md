@@ -189,10 +189,18 @@ evidence and must remain traceable back to it.
   `sshd` uses the file, and neither private/public pairing nor certificate
   signature verification is performed (an intentionally accepted false
   positive: a structurally valid but cryptographically invalid HOST
-  certificate signature still matches). Custom `HostKey` paths, renamed keys,
-  DSA/Ed448/other ECDSA curves, encrypted keys, and USER certificates are
-  deliberate false negatives under this rule and remain visible only through
-  the existing generic private-key/public-key detectors. Evidence only: no
+  certificate signature still matches). Custom `HostKey` paths, a renamed key,
+  a supported key under the wrong canonical basename, an unsupported
+  algorithm or ECDSA curve (DSA, Ed448, or any curve outside `secp256r1`/
+  `secp384r1`/`secp521r1`), and an encrypted private key are deliberate false
+  negatives for these two candidate rules — the key itself remains visible
+  only through the existing generic private-key/public-key detectors, at
+  their own (unspecialized) asset type and confidence. A USER certificate,
+  and a HOST certificate this rule declines (an unsupported certified or
+  signing key, or one that fails to parse), are different: **zero findings**,
+  frozen by the same certificate-fallback contract this rule freezes for a
+  positive match — the generic public-key detector never reports OpenSSH
+  certificate content, structurally valid or not. Evidence only: no
   password is prompted for or accepted, no `ssh`/`sshd`/`ssh-keygen` process is
   invoked, and no comment, principal, key ID, or certificate signature is
   reported. Only

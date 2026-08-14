@@ -777,16 +777,22 @@ negatives.
 
 **Supported algorithms.** RSA, ECDSA (`secp256r1`/`secp384r1`/`secp521r1`
 only), and Ed25519 — for private/public candidates and for both the certified
-key and the signing/CA key inside a certificate. Any other algorithm, curve,
-DSA, or Ed448 is a deliberate no-match that falls through to the existing
-generic private-key/public-key detectors unchanged.
+key and the signing/CA key inside a certificate. For a private or public
+candidate, any other algorithm, curve, DSA, or Ed448 is a deliberate no-match
+that falls through to the existing generic private-key/public-key detectors
+unchanged, at their own unspecialized asset type and confidence.
 
-**The certificate signature is deliberately never verified.** HG-043 parses
+**The certificate signature is deliberately never verified — and a rejected
+or USER certificate is zero findings, not a generic finding.** HG-043 parses
 certificate structure and encoded type only; it never calls
 `verify_cert_signature()`. A structurally valid HOST certificate whose
 signature has been tampered with still matches — an intentional accepted
 false positive — while a USER certificate never matches regardless of
-signature validity.
+signature validity. Unlike an ordinary rejected private/public candidate, a
+USER certificate and a HOST certificate this rule declines (an unsupported
+certified or signing key, or a record that fails to parse) do **not** fall
+through to a generic finding: the generic `public_key:ssh` detector never
+reports OpenSSH certificate content, so both freeze at zero findings.
 
 **Nothing is decrypted and no password is involved.** HG-043 never prompts
 for, guesses, or reads a passphrase from the environment; a password-encrypted

@@ -172,12 +172,17 @@ Example output shape:
 
   RSA, ECDSA (`secp256r1`/`secp384r1`/`secp521r1` only), and Ed25519 are the
   only supported families for a private/public candidate and for both the
-  certified key and the signing/CA key inside a certificate; any other
-  algorithm, curve, DSA, Ed448, or an ECDSA curve outside that set is a
-  deliberate HG-043 no-match that still falls through to the existing
-  generic private-key/public-key detectors unchanged. Custom `HostKey`
-  paths, renamed keys, encrypted private keys, and USER certificates are
-  also deliberate false negatives under this rule. Evidence only: `Fingerprint`
+  certified key and the signing/CA key inside a certificate. For the
+  private/public candidate rules, an unsupported algorithm/curve, a wrong
+  canonical basename, a renamed key, a custom `HostKey` path, or an encrypted
+  private key is a deliberate HG-043 no-match, and the key itself **still
+  falls through to the existing generic private-key/public-key detectors
+  unchanged** — visible there, at their own unspecialized asset type and
+  confidence, not lost. A USER certificate, and a HOST certificate this rule
+  declines (an unsupported certified or signing key, or one that fails to
+  parse), are different: they freeze at **zero findings**, because the
+  generic public-key detector never reports OpenSSH certificate content —
+  structurally valid or not — under any rule. Evidence only: `Fingerprint`
   is always left unset for these three rules, no password is prompted for,
   guessed, or read from the environment, no `ssh`/`sshd`/`ssh-keygen`/
   `ssh-keyscan` process or network connection is invoked, and no comment,

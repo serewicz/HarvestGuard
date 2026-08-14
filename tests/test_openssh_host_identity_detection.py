@@ -22,6 +22,7 @@ mutated in this file or small synthetic byte sequences constructed here.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -733,6 +734,59 @@ def test_no_filename_requirement(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Host certificate: candidate gate matches the shared one-record grammar
+# (Codex principal review correction, PR #109). The registry candidate
+# previously required the accepted token at byte 0 immediately followed by a
+# literal space, which is stricter than Issue #88 Section 11's outer
+# grammar -- permitted leading SP/HT and SP/HT field separators -- so the
+# detector's own (correct) parsing logic was unreachable through the real
+# scanner/registry path for these inputs even though direct calls to its
+# detect function handled them. These exercise the full scanner path
+# (scan_crypto_inventory / the registered detector), not the detect function
+# directly, since that registry-reachability gap is exactly the bug.
+# ---------------------------------------------------------------------------
+
+
+def test_host_certificate_leading_sp_is_reachable_through_the_registry(tmp_path):
+    record = b" " + _real("ssh_host_ed25519_key-cert.pub").strip() + b"\n"
+    path = _write(tmp_path, "cert.pub", record)
+    records = _hg043_records(path)
+    assert len(records) == 1
+    assert records[0]["Rule ID"] == CERT_RULE_ID
+    assert records[0]["Algorithm"] == "Ed25519"
+
+
+def test_host_certificate_leading_ht_is_reachable_through_the_registry(tmp_path):
+    record = b"\t" + _real("ssh_host_ed25519_key-cert.pub").strip() + b"\n"
+    path = _write(tmp_path, "cert.pub", record)
+    records = _hg043_records(path)
+    assert len(records) == 1
+    assert records[0]["Rule ID"] == CERT_RULE_ID
+    assert records[0]["Algorithm"] == "Ed25519"
+
+
+def test_host_certificate_ht_field_separator_is_reachable_through_the_registry(tmp_path):
+    algo, blob = _real("ssh_host_ed25519_key-cert.pub").strip().split(b" ", 1)
+    record = algo + b"\t" + blob + b"\n"
+    path = _write(tmp_path, "cert.pub", record)
+    records = _hg043_records(path)
+    assert len(records) == 1
+    assert records[0]["Rule ID"] == CERT_RULE_ID
+    assert records[0]["Algorithm"] == "Ed25519"
+
+
+def test_host_certificate_candidate_gate_matches_detect_exactly(tmp_path):
+    """The candidate gate must never be stricter, or looser, than what
+    ``_detect_openssh_host_certificate`` itself would accept as a
+    structurally-eligible record -- both now share the same underlying
+    one-record grammar parser."""
+    path = _copy(tmp_path, "ssh_host_ed25519_key-cert.pub", "cert.pub")
+    detector = _detector(CERT_RULE_ID)
+    context = crypto_inventory.FileContext(path)
+    assert detector.candidate(context) is True
+
+
+# ---------------------------------------------------------------------------
 # Host certificate: signature boundary (Issue #88 Sections 12, 21)
 # ---------------------------------------------------------------------------
 
@@ -1088,3 +1142,115 @@ def test_pre_hg043_host_certificate_generic_fallback_zero_findings(tmp_path, mon
     unsupported = dsa.generate_private_key(key_size=1024).public_key()
     monkeypatch.setattr(serialization.SSHCertificate, "signature_key", lambda self: unsupported)
     assert _records(path) == []
+
+
+def test_generic_ecdsa_public_fallback_unchanged_for_noncanonical_filename(tmp_path):
+    """Codex principal review (PR #109): the certificate-token exclusion added
+    to the generic ``public_key:ssh`` parser must not touch its behavior for
+    ordinary (non-certificate) ECDSA public-key records -- only lines whose
+    first token is exactly one of the five certificate algorithm strings are
+    excluded. An ordinary ECDSA .pub file at a noncanonical basename must
+    still fall through to the same generic finding, with the same
+    fingerprint, exactly as before this correction."""
+    path = _copy(tmp_path, "ssh_host_ecdsa_key.pub", "id_ecdsa.pub")
+    records = _records(path)
+    assert len(records) == 1
+    record = records[0]
+    assert record["Rule ID"] is None
+    assert record["Asset Type"] == "OpenSSH Public Key"
+    assert record["Confidence"] == "High"
+    assert record["Algorithm"] == "EC (secp256r1)"
+    assert record["Fingerprint"] is not None
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["ssh_host_rsa_key-cert.pub", "ssh_host_ecdsa_key-cert.pub", "ssh_host_ed25519_key-cert.pub"],
+)
+def test_rejected_host_certificate_is_zero_findings_for_real_fixture_families(
+    tmp_path, monkeypatch, source
+):
+    """Codex principal review (PR #109): the existing rejected-HOST-certificate
+    fallback coverage only used the RSA certificate token, whose exact-prefix
+    generic check (``ssh-rsa `` with a literal trailing space) never collided
+    with ``ssh-rsa-cert-v01@openssh.com``. The generic ECDSA check
+    (``ecdsa-sha2-`` with no trailing space) did collide with
+    ``ecdsa-sha2-nistp256-cert-v01@openssh.com`` and would have produced a
+    High-confidence 'OpenSSH Public Key' finding, complete with a fingerprint,
+    for an ECDSA HOST certificate HG-043 itself correctly rejected -- exactly
+    the gap this parametrization closes, across all three real certificate
+    fixture families available (RSA, ECDSA, Ed25519)."""
+    path = _copy(tmp_path, source, source)
+    unsupported = dsa.generate_private_key(key_size=1024).public_key()
+    monkeypatch.setattr(serialization.SSHCertificate, "signature_key", lambda self: unsupported)
+    records = _records(path)
+    assert records == []
+    assert all(r.get("Asset Type") != "OpenSSH Public Key" for r in records)
+    assert all(r.get("Fingerprint") is None for r in records)
+
+
+# A syntactically well-formed one-record line (so the generic detector's own
+# line-splitting/stripping sees exactly one candidate line) whose base64
+# field is deliberately not a real certificate blob. It exists only to prove
+# the generic public_key:ssh exclusion below is keyed on the algorithm token
+# string itself, for every one of the five accepted certificate token
+# families -- including secp384r1/secp521r1, for which no real fixture is
+# committed -- independent of whether the rest of the record is a
+# structurally valid certificate. This also directly covers Issue #88 Section
+# 26's "malformed certificate record" freeze: HG-043 itself no-matches this
+# input too (the blob is not valid SSH wire format), so the only question is
+# whether the generic detector wrongly claims it, which it must not.
+_SYNTHETIC_CERT_BLOB = base64.b64encode(b"not-a-real-certificate-blob").decode("ascii")
+
+_ALL_CERT_TOKENS = [
+    "ssh-rsa-cert-v01@openssh.com",
+    "ecdsa-sha2-nistp256-cert-v01@openssh.com",
+    "ecdsa-sha2-nistp384-cert-v01@openssh.com",
+    "ecdsa-sha2-nistp521-cert-v01@openssh.com",
+    "ssh-ed25519-cert-v01@openssh.com",
+]
+
+
+@pytest.mark.parametrize("token", _ALL_CERT_TOKENS)
+def test_certificate_token_never_produces_a_generic_public_key_finding(tmp_path, token):
+    """Codex principal review (PR #109): freezes the Issue #88 Section 26
+    certificate fallback ("USER certificate: zero findings", "HOST
+    certificate before HG-043: zero findings") across all five accepted
+    certificate algorithm token families at once, at the level of the actual
+    code change -- ``_parse_ssh_public_keys`` must never emit a finding for a
+    line whose first token is a certificate algorithm token, matched or not."""
+    record = f"{token} {_SYNTHETIC_CERT_BLOB}\n".encode("ascii")
+    path = _write(tmp_path, "arbitrary-cert-name.pub", record)
+    records = _records(path)
+    assert records == []
+
+
+def test_user_certificate_all_families_zero_findings_via_generic_exclusion(tmp_path):
+    """USER certificates are never HG-043 host-certificate matches (Section
+    11: 'A USER certificate is no-match') and Section 26 freezes their
+    fallback at zero findings. The real committed USER certificate fixture is
+    Ed25519 only; this proves the same zero-findings outcome for all five
+    token families via the generic detector's exclusion (see
+    ``test_certificate_token_never_produces_a_generic_public_key_finding``),
+    and separately proves it for the one real, structurally valid USER
+    certificate fixture available."""
+    for token in _ALL_CERT_TOKENS:
+        record = f"{token} {_SYNTHETIC_CERT_BLOB}\n".encode("ascii")
+        path = _write(tmp_path, "user-cert.pub", record)
+        assert _records(path) == []
+
+    real_user_cert_path = _copy(tmp_path, "user_key-cert.pub", "real-user-cert.pub")
+    assert _records(real_user_cert_path) == []
+
+
+def test_no_generic_fingerprint_is_ever_emitted_for_certificate_input(tmp_path, monkeypatch):
+    """Explicit assertion, separate from the zero-findings checks above, that
+    no path through this code can attach a generic SHA-256 SPKI fingerprint
+    to certificate content: a rejected real ECDSA HOST certificate produces
+    no finding at all, so no Fingerprint field is ever populated for it."""
+    path = _copy(tmp_path, "ssh_host_ecdsa_key-cert.pub", "ssh_host_ecdsa_key-cert.pub")
+    unsupported = dsa.generate_private_key(key_size=1024).public_key()
+    monkeypatch.setattr(serialization.SSHCertificate, "signature_key", lambda self: unsupported)
+    records = _records(path)
+    assert records == []
+    assert not any("Fingerprint" in r and r["Fingerprint"] is not None for r in records)

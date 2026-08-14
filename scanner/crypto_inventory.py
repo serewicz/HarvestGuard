@@ -3076,7 +3076,12 @@ _OPENSSH_CERT_ALGORITHM_TOKENS = frozenset(
         b"ssh-ed25519-cert-v01@openssh.com",
     }
 )
-_OPENSSH_CERT_LEADING_BYTES = max(len(token) for token in _OPENSSH_CERT_ALGORITHM_TOKENS) + 1
+# The same five tokens, decoded, for the one caller that works in `str` rather
+# than `bytes`: the pre-HG-043 generic SSH public-key parser below. Kept as a
+# single source of truth so the two representations cannot drift apart.
+_OPENSSH_CERT_ALGORITHM_TOKENS_TEXT = frozenset(
+    token.decode("ascii") for token in _OPENSSH_CERT_ALGORITHM_TOKENS
+)
 
 _OPENSSH_METADATA_KEYS = frozenset({"Algorithm", "Key Size"})
 
@@ -3314,8 +3319,23 @@ def _detect_openssh_host_public_key(context: FileContext) -> DetectionResult:
 
 
 def _openssh_host_certificate_candidate(context: FileContext) -> bool:
-    leading = context.leading_bytes(_OPENSSH_CERT_LEADING_BYTES)
-    return leading.startswith(tuple(token + b" " for token in _OPENSSH_CERT_ALGORITHM_TOKENS))
+    """Whether ``context`` is worth handing to ``_detect_openssh_host_certificate``.
+
+    Deliberately reuses ``_openssh_one_record_fields`` -- the same shared
+    one-record grammar parser ``detect`` itself calls -- rather than a
+    separate leading-bytes prefix check, so this gate can never reject a
+    record ``detect`` would otherwise accept. A byte-literal
+    ``token + b" "`` prefix check previously rejected every real-world record
+    with a leading SP/HT (both permitted by Issue #88 Section 11's outer
+    grammar) or an HT field separator, silently making the detector
+    unreachable for those inputs even though its own parsing logic already
+    handled them correctly.
+    """
+    fields = _openssh_one_record_fields(context.data)
+    if fields is None:
+        return False
+    algorithm_token, _ = fields
+    return algorithm_token in _OPENSSH_CERT_ALGORITHM_TOKENS
 
 
 def _detect_openssh_host_certificate(context: FileContext) -> DetectionResult:
@@ -4425,6 +4445,23 @@ def _parse_ssh_public_keys(file_path: Path, text: str) -> list[CryptoInventoryFi
     findings = []
     for line in text.splitlines():
         stripped = line.strip()
+        if not stripped:
+            continue
+        # OpenSSH certificate records (Issue #88 Sections 11, 26) are never a
+        # generic public-key candidate at any confidence, matched or not: a
+        # USER certificate and a HOST certificate HG-043 rejects both freeze
+        # at zero findings, and this parser was never designed to describe
+        # certificate content -- it has no certificate-specific evidence
+        # wording, and reusing "OpenSSH Public Key"/"Malformed OpenSSH Public
+        # Key" for one would misdescribe the asset and leak a fingerprint
+        # this rule never intended to report for certificate input. Checked
+        # against the first whitespace-separated token, not a startswith
+        # prefix, so this is exact rather than relying on the loose
+        # "ecdsa-sha2-" prefix below happening not to also match an ECDSA
+        # certificate token.
+        first_token = stripped.split(None, 1)[0]
+        if first_token in _OPENSSH_CERT_ALGORITHM_TOKENS_TEXT:
+            continue
         if not stripped.startswith(("ssh-rsa ", "ssh-ed25519 ", "ecdsa-sha2-")):
             continue
         try:
