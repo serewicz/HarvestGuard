@@ -1271,6 +1271,163 @@ never invokes OpenSSL or any other external process at runtime.
 creates no internal relationship records and emits nothing beyond the single
 finding described above.
 
+#### Java trusted-certificate-only stores (HG-042)
+
+A JKS or JCEKS store whose **complete declared entry table** contains one or
+more trusted-certificate entries and no other entry type is reported as asset
+type `Java Trusted-Certificate-Only Store` at confidence `High`, with
+`rule_id: java_truststore:jks` and evidence
+`JKS trusted-certificate-only store structure detected`, or
+`rule_id: java_truststore:jceks` and evidence
+`JCEKS trusted-certificate-only store structure detected`. Technical metadata is
+`Format: JKS` or `Format: JCEKS` and nothing else.
+
+Like the `Salted__`, OpenPGP, age, BCFKS, and JCEKS checks, both rules run from
+content and ahead of the shared candidate gate, so a store saved as `cacerts`,
+`store`, `store.bin`, `truststore.p12`, or `certs.der` is classified from its
+bytes rather than missed by the gate. Each rule sits immediately ahead of its
+generic counterpart — `java_truststore:jceks` before `java_keystore:jceks`,
+`java_truststore:jks` before the generic JKS rule — and a match is terminal, so
+exactly one finding is emitted per file and the same store never also produces
+the generic keystore finding.
+
+**What "trusted-certificate-only store structure" means, and what it does not.**
+The observed fact is narrow and structural:
+
+> A structurally supported JKS or JCEKS store contains only supported
+> trusted-certificate entries.
+
+Trusted-certificate-only JKS/JCEKS stores are commonly *used* as Java
+truststores, but HG-042 does **not** establish runtime use, which is why the
+asset type is `Java Trusted-Certificate-Only Store` and deliberately never the
+unqualified `Java Truststore`. A certificate-only store may never be configured
+as a truststore, and an operational truststore may contain private-key entries,
+secret-key entries, or no entries at all. The operational interpretation is the
+reader's; the finding stays an observed structural classification.
+
+**What is detected** — the store/load framing OpenJDK's own
+`sun.security.provider.JavaKeyStore` and
+`com.sun.crypto.provider.JceKeyStore` implement, and only when every one of
+these holds:
+
+- The **magic** at offset 0 is `fe ed fe ed` (JKS) or `ce ce ce ce` (JCEKS).
+- The **format version is 1 or 2**.
+- The **declared entry count is greater than zero** and is feasible within the
+  bytes remaining once the 20-byte trailer is reserved. Feasibility uses exactly
+  19 bytes per entry for version 1 and 26 for version 2 — the minimum possible
+  supported record — and is checked *before* any entry is read, so an enormous
+  declared count costs one division rather than a loop.
+- **Every declared entry is a trusted-certificate entry** (tag `2`). Tag `1`
+  (private key), JCEKS tag `3` (secret key), and any unknown tag end
+  classification immediately.
+- **Every alias is canonical Java modified UTF** — exactly what
+  `DataOutputStream.writeUTF` emits, validated as a byte grammar over the
+  declared slice without the alias ever being decoded or retained.
+- For **version 2**, every certificate type is exactly `X.509`. Version 1 has no
+  certificate-type field at all: the type is implicitly X.509, and that absence
+  is part of the version-1 grammar rather than a tolerated omission.
+- **Every certificate payload parses as DER X.509**, used purely as a boolean
+  structural check.
+- **Exactly 20 bytes remain** after the final declared entry, and nothing
+  follows them.
+
+**The 20-byte trailer is structural evidence only.** Its length is checked; its
+content is never read, recomputed, or verified — verification requires the store
+password, which HG-042 never accepts. A store whose trailer is arbitrary bytes
+still matches.
+
+**Why confidence is `High`.** It describes this bounded structural observation:
+supported framing, supported version, a non-empty declared entry table, every
+entry a supported trusted-certificate entry, canonical alias encoding, exact
+version-2 certificate type, valid DER X.509 payloads, and the trailer present as
+the exact residual length. It does **not** mean the file is configured as a
+runtime truststore, that an application uses it for trust decisions, that the
+certificates are trustworthy, current, authorized, or appropriate, that the
+integrity trailer has been verified, that a password is known or valid, that the
+store is unlockable, that the store holds every certificate an application
+actually trusts, or that the store carries no operational, cryptographic,
+quantum, or business risk.
+
+**Known false negatives — deliberate, and not to be "fixed" by broadening
+scope.** Each produces no `java_truststore:*` finding, and never a
+lower-confidence partial finding or a "malformed truststore" asset type:
+
+- **Any store containing a private-key entry**, and any **JCEKS store containing
+  a secret-key entry** — including mixed stores that also hold trusted
+  certificates. Such a store may operationally be a truststore, but it is not
+  trusted-certificate-*only*, which is the claim being made. The protected
+  private-key body is never parsed and the JCEKS `SealedObject` is never
+  deserialized; the tag alone ends classification.
+- **Empty stores** (`entry_count == 0`). An empty keystore can be configured as
+  a truststore, but it contains no trusted-certificate-entry evidence.
+- **Version-2 trusted certificates whose certificate type is not exactly
+  `X.509`** — including valid Java types such as `PkiPath`, and near-misses such
+  as `X509`, `x.509`, and `X.509 `.
+- **Alias or certificate-type fields a permissive `DataInputStream.readUTF`
+  might accept but that are not canonical `writeUTF` output** — raw `00`,
+  overlong `C0 AF`/`C1 BF`/`E0 80 80` forms, standalone continuation bytes, and
+  ordinary four-byte UTF-8. This stricter profile is intentional: the
+  High-confidence claim rests on the field being canonically *written*, not
+  merely readable. Canonical forms are accepted, including `C0 80` for U+0000
+  and individually encoded surrogate code units.
+- **Unsupported versions**, wrong or offset magic, truncated tags, aliases,
+  timestamps, certificate-type fields, or certificate lengths, negative or zero
+  certificate lengths, certificate lengths reaching past the entry table,
+  invalid DER payloads, a missing trailer, a trailer shorter or longer than 20
+  bytes, and any bytes after the trailer.
+- **PKCS#12 and BCFKS stores**, even when Java uses them operationally as
+  truststores. Those formats keep their existing detectors and classifications;
+  this is a format-scope boundary, not a claim that Java cannot use them for
+  trust.
+- **Runtime truststore configuration** that cannot be proven from the scanned
+  store's bytes.
+
+**`cacerts` is not privileged.** Detection is content-based, never filename- or
+`$JAVA_HOME`-based. Supported bytes named `cacerts` match; the same bytes under
+any other filename produce the same classification; a file named `cacerts`
+without supported content does not match; and a PKCS#12 or otherwise unsupported
+`cacerts` stays outside this rule. HarvestGuard makes no claim that JDK
+`cacerts` files are JKS or JCEKS.
+
+**Negatives fall through, they are not claimed.** A store this rule declines is
+handed back to the existing generic detectors unchanged — `java_keystore:jceks`
+for JCEKS, the existing generic JKS classification for JKS — so HG-042 never
+becomes the authoritative parser for malformed or unsupported JKS/JCEKS stores.
+Generic JKS/JCEKS behavior, ownership, and confidence are unchanged.
+
+**No password, no key parsing, no deserialization, no external process.** The
+scanner never requests, accepts, reads from the environment, or guesses a
+password; never verifies keystore integrity; never decrypts or parses private-
+or secret-key payloads; never deserializes a Java object; never loads a security
+provider; never reads application or JVM truststore configuration or
+`$JAVA_HOME`; never writes beside the scanned store; and never invokes `keytool`,
+`java`, OpenSSL, or any other subprocess.
+
+**Certificate contents are not reported.** Aliases, raw modified-UTF bytes,
+certificate DER, certificate type, subject, issuer, serial number, SAN,
+fingerprint, validity dates, integrity-digest bytes, private/secret-key data,
+and parser exception payloads are all absent from findings, DataFrames,
+normalized findings, JSON, Markdown, evidence-store records, detector errors, and
+logs. A HG-042 finding carries exactly one metadata value, `Format: JKS` or
+`Format: JCEKS`. It makes no claim about encryption strength, decryptability,
+operational use, configuration correctness, or quantum exposure. Absence of a
+`java_truststore:*` finding is not proof that no Java truststore exists in the
+target — this is one narrow rule for one explicitly enumerated structure, not
+general truststore discovery.
+
+**Scanner ownership and accounting.** Crypto inventory owns both rules; the
+filesystem scanner emits neither and `--type filesystem` is unchanged, so there
+is nothing for `--type all` to deduplicate. A store counts once in
+`Crypto files inspected`, contributes nothing to `Files scanned`, and adds no
+rule-specific count or summary bucket. JSON remains a bare normalized-finding
+array, Markdown remains evidence-only, and DataFrame columns, CLI output, and
+Streamlit behavior are unchanged.
+
+**No relationship output.** HG-042 adds trusted-certificate-only store
+classification only; it creates no
+[internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+and emits nothing beyond the single finding described above.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:

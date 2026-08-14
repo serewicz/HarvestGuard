@@ -2065,6 +2065,299 @@ def _jceks_finding(file_path: Path) -> CryptoInventoryFinding:
     )
 
 
+# --- Java trusted-certificate-only store detection (HG-042) -----------------
+#
+# HG-037/the generic JKS detector stop at the container header, which is why
+# both are Medium confidence and why neither can say anything about entries.
+# HG-042 reads the *complete* declared entry table of a JKS or JCEKS store and
+# classifies it only when every declared entry is a supported trusted-
+# certificate entry. That is a strictly structural observation:
+#
+#   a structurally supported JKS or JCEKS store contains only supported
+#   trusted-certificate entries
+#
+# and deliberately *not* "this file is a truststore". A certificate-only store
+# may never be configured as one, and an operational truststore may hold
+# private-key entries, secret-key entries, or nothing at all. Runtime role
+# cannot be established from these bytes, so the asset type says what was
+# observed -- `Java Trusted-Certificate-Only Store` -- and the interpretation
+# stays with the reader.
+#
+# The entry framing below is OpenJDK's own store/load grammar
+# (`sun.security.provider.JavaKeyStore` and
+# `com.sun.crypto.provider.JceKeyStore`): a 4-byte entry tag, a
+# `DataOutputStream.writeUTF` alias, an 8-byte creation timestamp, then for a
+# version-2 store a `writeUTF` certificate type, and finally a 4-byte
+# certificate length and that many DER bytes. Version 1 has no certificate-type
+# field at all -- the type is implicitly X.509 -- which is the one framing
+# difference between the two supported versions.
+#
+# What this detector never does is what keeps it safe: no password is requested
+# or accepted, the trailing keyed digest is length-checked and never read,
+# recomputed, or verified, a tag-1 private-key body is never parsed, a JCEKS
+# tag-3 `SealedObject` is never deserialized, and neither Java nor keytool nor
+# any other external process is invoked. A single private-key, secret-key, or unrecognized
+# entry ends classification immediately and hands the file back to the generic
+# keystore detectors unchanged.
+
+_JKS_MAGIC = b"\xfe\xed\xfe\xed"
+# magic + version + entry count: the fixed prefix both formats share.
+_JAVA_KEYSTORE_HEADER_BYTES = 12
+# The trailing keyed digest `engineStore` appends. Only its length is used --
+# structural evidence that the store was written whole. Verifying it would
+# require the store password, which HG-042 never accepts.
+_JAVA_KEYSTORE_TRAILER_BYTES = 20
+_JAVA_KEYSTORE_SUPPORTED_VERSIONS = frozenset({1, 2})
+# The entry tag HG-042 accepts. Tag 1 (private key) and JCEKS tag 3 (secret
+# key) are recognized only well enough to disqualify the store; their payloads
+# are never touched.
+_JAVA_KEYSTORE_TAG_TRUSTED_CERTIFICATE = 2
+# The only version-2 certificate type in scope, compared as raw bytes. The
+# characters of `X.509` encode identically under Java modified UTF and ASCII,
+# so the comparison is exact once the field's UTF framing has been validated.
+# Any other type -- however valid to Java -- is a deliberate no-match.
+_JAVA_KEYSTORE_X509_CERTIFICATE_TYPE = b"X.509"
+# The smallest a supported trusted-certificate entry can be, per version, used
+# to reject an infeasible declared entry count *before* iterating it:
+#
+#   v1: tag 4 + alias length field 2 + alias 0 + timestamp 8
+#       + certificate length 4 + certificate 1 = 19
+#   v2: the same plus certificate-type length field 2 + `X.509` 5 = 26
+#
+# These are feasibility bounds only; a one-byte certificate still fails the DER
+# X.509 parse below.
+_JAVA_KEYSTORE_MIN_TRUSTED_CERTIFICATE_ENTRY_BYTES = {1: 19, 2: 26}
+
+
+def _is_canonical_java_modified_utf(encoded: bytes) -> bool:
+    """Whether ``encoded`` is exactly what ``DataOutputStream.writeUTF`` emits.
+
+    Deliberately stricter than a permissive ``DataInputStream.readUTF``: HG-042's
+    High-confidence structural claim rests on the field being *canonically*
+    encoded, so a byte sequence some reader would tolerate but no writer emits is
+    a no-match rather than an accepted alias. That makes the strictness an
+    intentional false-negative boundary, not a decoding bug.
+
+    Iterative and single-pass over the already-bounded slice, with no recursion,
+    no allocation, no normalization, no malformed-sequence replacement, no
+    CESU-8 conversion, and no escape semantics -- a byte-state validator only.
+    The decoded string is never produced, so nothing here can retain, log, or
+    leak an alias.
+
+    The grammar, over Java UTF-16 ``char`` code units rather than Unicode scalar
+    values:
+
+    - one byte: ``0x01``-``0x7F`` (raw ``0x00`` is not canonical);
+    - ``C0 80``: the only encoding of U+0000, and the only valid sequence
+      beginning with ``C0``; every ``C1`` lead is overlong and rejected;
+    - two bytes: ``C2``-``DF`` then one ``80``-``BF`` continuation
+      (U+0080-U+07FF);
+    - three bytes: ``E0``-``EF`` then two ``80``-``BF`` continuations
+      (U+0800-U+FFFF), with ``E0`` requiring ``A0``-``BF`` second byte so an
+      overlong form is rejected.
+
+    Surrogate code units are encoded individually by ``writeUTF``, so an
+    isolated high or low surrogate is accepted as one canonical three-byte
+    sequence and a pair is accepted as two; they are never combined or
+    normalized. No four-byte ordinary-UTF-8 sequence is accepted.
+    """
+    index = 0
+    length = len(encoded)
+    while index < length:
+        first = encoded[index]
+        if 0x01 <= first <= 0x7F:
+            index += 1
+        elif first == 0xC0:
+            # The single canonical two-byte form beginning with C0 is the
+            # encoded NUL; C0 followed by anything else is overlong.
+            if index + 1 >= length or encoded[index + 1] != 0x80:
+                return False
+            index += 2
+        elif 0xC2 <= first <= 0xDF:
+            if index + 1 >= length or not 0x80 <= encoded[index + 1] <= 0xBF:
+                return False
+            index += 2
+        elif 0xE0 <= first <= 0xEF:
+            if index + 2 >= length:
+                return False
+            second = encoded[index + 1]
+            if not 0x80 <= second <= 0xBF or not 0x80 <= encoded[index + 2] <= 0xBF:
+                return False
+            if first == 0xE0 and second < 0xA0:
+                return False
+            index += 3
+        else:
+            # Raw 0x00, a standalone C1 lead, a standalone continuation byte
+            # (0x80-0xBF), and every 0xF0-0xFF lead land here.
+            return False
+    return True
+
+
+def _read_java_modified_utf_field(
+    data: bytes, offset: int, limit: int
+) -> tuple[int, bytes] | None:
+    """One ``writeUTF`` field read from ``data`` at ``offset``: the cursor just
+    past it and its encoded bytes, or None when the field is truncated or not
+    canonically encoded.
+
+    The 2-byte prefix is an *encoded-byte* length, never a character count, and
+    nothing is allocated from it: exactly that many bytes must be available
+    inside ``limit`` before the slice is taken, and the whole declared slice is
+    consumed or the field is rejected.
+    """
+    if limit - offset < 2:
+        return None
+    encoded_length = int.from_bytes(data[offset : offset + 2], "big", signed=False)
+    offset += 2
+    if limit - offset < encoded_length:
+        return None
+    encoded = data[offset : offset + encoded_length]
+    if not _is_canonical_java_modified_utf(encoded):
+        return None
+    return offset + encoded_length, encoded
+
+
+def _is_der_x509_certificate(payload: bytes) -> bool:
+    """Whether ``payload`` parses as a DER X.509 certificate.
+
+    A boolean structural validation step and nothing more: the parsed
+    certificate is discarded immediately, so no subject, issuer, serial number,
+    SAN, fingerprint, validity period, or DER byte can reach a finding.
+
+    Only ``ValueError`` -- the documented, stable exception
+    ``load_der_x509_certificate`` raises for malformed input across this
+    repository's supported ``cryptography>=41.0.0`` range, and the same
+    exception the existing generic DER certificate parser
+    (``_parse_der_certificate`` below) already catches for this identical
+    call -- is treated as an expected parse failure and becomes a plain
+    no-match. Anything else is not a certificate-shaped input problem and must
+    propagate into the existing sanitized ``DetectorExecutionError`` /
+    ``LocalScanError`` path rather than being silently absorbed here.
+    """
+    try:
+        x509.load_der_x509_certificate(payload)
+    except ValueError:
+        return False
+    return True
+
+
+def _read_trusted_certificate_entry(
+    data: bytes, offset: int, limit: int, version: int
+) -> int | None:
+    """The cursor just past one supported trusted-certificate entry, or None
+    when the entry at ``offset`` is not one.
+
+    Cursor-based and bounds-checked before every read, skip, and slice, with
+    ``limit`` already excluding the reserved trailer, so a declared length can
+    never reach past the entry table. Returning None is the single disqualifying
+    outcome for the whole store: a private-key tag, a JCEKS secret-key tag, an
+    unknown tag, a malformed alias or certificate type, a non-X.509 version-2
+    type, a nonpositive or oversized certificate length, and a certificate that
+    is not valid DER X.509 all end classification here without the payload
+    being parsed, decrypted, or deserialized.
+    """
+    if limit - offset < 4:
+        return None
+    tag = int.from_bytes(data[offset : offset + 4], "big", signed=True)
+    if tag != _JAVA_KEYSTORE_TAG_TRUSTED_CERTIFICATE:
+        return None
+    offset += 4
+    alias_field = _read_java_modified_utf_field(data, offset, limit)
+    if alias_field is None:
+        return None
+    # Only the cursor is taken. The alias bytes are validated in place and then
+    # dropped -- never decoded, normalized, compared, retained, or emitted.
+    offset = alias_field[0]
+    if limit - offset < 8:
+        return None
+    # The 8-byte creation timestamp, skipped after bounds validation.
+    offset += 8
+    if version == 2:
+        certificate_type_field = _read_java_modified_utf_field(data, offset, limit)
+        if certificate_type_field is None:
+            return None
+        offset, certificate_type = certificate_type_field
+        if certificate_type != _JAVA_KEYSTORE_X509_CERTIFICATE_TYPE:
+            return None
+    if limit - offset < 4:
+        return None
+    # Signed, exactly as `DataInputStream.readInt()` reads it, so a top-bit-set
+    # length is negative rather than enormous.
+    certificate_length = int.from_bytes(data[offset : offset + 4], "big", signed=True)
+    offset += 4
+    if certificate_length <= 0:
+        return None
+    if certificate_length > limit - offset:
+        return None
+    if not _is_der_x509_certificate(data[offset : offset + certificate_length]):
+        return None
+    return offset + certificate_length
+
+
+def _looks_like_trusted_certificate_only_store(data: bytes, magic: bytes) -> bool:
+    """Whether ``data`` is a complete JKS/JCEKS store (per ``magic``) whose every
+    declared entry is a supported trusted-certificate entry.
+
+    Content only -- the filename is never consulted, so ``cacerts`` is not
+    privileged and identical bytes classify identically under any name. Bounded
+    by the already-loaded buffer, length-safe, and binary-safe: an empty,
+    truncated, or arbitrary binary file returns False rather than raising.
+
+    Every condition below is what rejects one class of near-match:
+
+    1. the format's magic at offset 0;
+    2. a supported version, 1 or 2;
+    3. a positive declared entry count -- an empty store carries no
+       trusted-certificate evidence and is not classified;
+    4. an entry count feasible within the bytes remaining once the 20-byte
+       trailer is reserved, checked before any entry is read;
+    5. every declared entry parsing as a supported trusted-certificate entry;
+    6. exactly the 20-byte trailer remaining afterwards, so a truncated,
+       overlong, or appended-to store is rejected.
+    """
+    if len(data) < _JAVA_KEYSTORE_HEADER_BYTES:
+        return False
+    if data[:4] != magic:
+        return False
+    version = int.from_bytes(data[4:8], "big", signed=True)
+    if version not in _JAVA_KEYSTORE_SUPPORTED_VERSIONS:
+        return False
+    # Signed, as `readInt()` reads it: a negative count is not a store any
+    # `engineStore` wrote, and zero entries is a deliberate no-match.
+    entry_count = int.from_bytes(data[8:12], "big", signed=True)
+    if entry_count <= 0:
+        return False
+    # The entry table ends where the reserved trailer begins. Everything below
+    # is bounded by this, never by the file length.
+    limit = len(data) - _JAVA_KEYSTORE_TRAILER_BYTES
+    offset = _JAVA_KEYSTORE_HEADER_BYTES
+    if limit < offset:
+        return False
+    minimum_entry_bytes = _JAVA_KEYSTORE_MIN_TRUSTED_CERTIFICATE_ENTRY_BYTES[version]
+    # Integer division rather than multiplication, and before the loop: a
+    # declared count of billions is rejected here without a single entry read
+    # and without allocating anything proportional to it.
+    if entry_count > (limit - offset) // minimum_entry_bytes:
+        return False
+    for _ in range(entry_count):
+        next_offset = _read_trusted_certificate_entry(data, offset, limit, version)
+        if next_offset is None:
+            return False
+        offset = next_offset
+    return offset == limit
+
+
+def _java_truststore_finding(file_path: Path, store_format: str) -> CryptoInventoryFinding:
+    return CryptoInventoryFinding(
+        asset_type="Java Trusted-Certificate-Only Store",
+        location=str(file_path),
+        evidence=f"{store_format} trusted-certificate-only store structure detected",
+        confidence="High",
+        rule_id=f"java_truststore:{store_format.lower()}",
+        format=store_format,
+    )
+
+
 # --- Encrypted PKCS#8 private-key detection (HG-038) ------------------------
 #
 # PKCS#8 `EncryptedPrivateKeyInfo` (RFC 5958) is exactly two fields:
@@ -2963,6 +3256,43 @@ def _detect_jceks(context: FileContext) -> DetectionResult:
     return DetectionResult.match([_jceks_finding(context.path)])
 
 
+def _java_truststore_jks_candidate(context: FileContext) -> bool:
+    """The cheap leading-byte gate for the JKS trusted-certificate-only
+    detector: the JKS magic at offset 0, which is the one condition the store
+    parser requires before it can return True.
+
+    Content only, and deliberately not behind ``_passes_candidate_gate``: that
+    gate admits files by extension, and a store named ``cacerts`` -- the single
+    most common name for exactly this kind of file -- has none.
+    """
+    return _looks_like_jks(context.leading_bytes(len(_JKS_MAGIC)))
+
+
+def _java_truststore_jceks_candidate(context: FileContext) -> bool:
+    """The same gate for the JCEKS trusted-certificate-only detector: the JCEKS
+    magic at offset 0. Content only, for the same reason."""
+    return context.leading_bytes(len(_JCEKS_MAGIC)) == _JCEKS_MAGIC
+
+
+def _detect_java_truststore_jks(context: FileContext) -> DetectionResult:
+    # The full bytes are required, not a prefix: the entry table is validated
+    # against the reserved trailer at the end of the file, and "exactly 20 bytes
+    # remain" is only meaningful against the whole file. The bytes are already in
+    # the shared context, so this is not an extra read.
+    if not _looks_like_trusted_certificate_only_store(context.data, _JKS_MAGIC):
+        # Not a no-match this detector can narrow: the file falls through to the
+        # generic JKS detector, which stays the owner of every malformed,
+        # unsupported, key-bearing, and mixed JKS store.
+        return DetectionResult.no_match()
+    return DetectionResult.match([_java_truststore_finding(context.path, "JKS")])
+
+
+def _detect_java_truststore_jceks(context: FileContext) -> DetectionResult:
+    if not _looks_like_trusted_certificate_only_store(context.data, _JCEKS_MAGIC):
+        return DetectionResult.no_match()
+    return DetectionResult.match([_java_truststore_finding(context.path, "JCEKS")])
+
+
 def _pkcs8_encrypted_candidate(context: FileContext) -> bool:
     """The cheap gate for the encrypted-PKCS#8 detector: either the file begins
     with a definite-length DER SEQUENCE header whose declared content ends
@@ -3287,6 +3617,31 @@ CRYPTO_DETECTORS = build_registry(
             ),
         ),
         FileDetector(
+            detector_id="java_truststore:jceks",
+            priority=36,
+            candidate=_java_truststore_jceks_candidate,
+            detect=_detect_java_truststore_jceks,
+            evidence="JCEKS trusted-certificate-only store structure detected",
+            confidence="High",
+            terminal=True,
+            rule_id="java_truststore:jceks",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "JCEKS magic at offset 0, a supported version, and the complete "
+                "declared entry table read from the file's own bytes -- every "
+                "entry a trusted-certificate entry with a canonically encoded "
+                "alias, an exact X.509 certificate type where the version "
+                "declares one, and a payload that parses as DER X.509 -- ending "
+                "exactly at the reserved 20-byte trailer. Structure only: no "
+                "password is requested or accepted, the trailer is neither read "
+                "nor verified, no private-key body is parsed, no secret-key "
+                "object is deserialized, keytool and Java are never invoked, and "
+                "no alias or certificate identity is reported. It does not "
+                "establish that any application uses the store for trust "
+                "decisions."
+            ),
+        ),
+        FileDetector(
             detector_id="java_keystore:jceks",
             priority=37,
             candidate=_jceks_candidate,
@@ -3304,6 +3659,30 @@ CRYPTO_DETECTORS = build_registry(
                 "is accepted, the keyed digest is neither verified nor reported, "
                 "and no entry, alias, certificate, or serialized Java object "
                 "inside it is read."
+            ),
+        ),
+        FileDetector(
+            detector_id="java_truststore:jks",
+            priority=39,
+            candidate=_java_truststore_jks_candidate,
+            detect=_detect_java_truststore_jks,
+            evidence="JKS trusted-certificate-only store structure detected",
+            confidence="High",
+            terminal=True,
+            rule_id="java_truststore:jks",
+            metadata_keys=frozenset({"Format"}),
+            verification_rationale=(
+                "JKS magic at offset 0, a supported version, and the complete "
+                "declared entry table read from the file's own bytes -- every "
+                "entry a trusted-certificate entry with a canonically encoded "
+                "alias, an exact X.509 certificate type where the version "
+                "declares one, and a payload that parses as DER X.509 -- ending "
+                "exactly at the reserved 20-byte trailer. Structure only: no "
+                "password is requested or accepted, the trailer is neither read "
+                "nor verified, no private-key body is parsed, keytool and Java "
+                "are never invoked, and no alias or certificate identity is "
+                "reported. It does not establish that any application uses the "
+                "store for trust decisions."
             ),
         ),
         FileDetector(
