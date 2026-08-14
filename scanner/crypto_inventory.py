@@ -15,6 +15,7 @@ from typing import Any
 
 import pandas as pd
 from cryptography import x509
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import dsa, ec, ed448, ed25519, rsa
 from cryptography.hazmat.primitives.serialization import pkcs12
@@ -3027,6 +3028,341 @@ def _legacy_encrypted_pem_finding(file_path: Path) -> CryptoInventoryFinding:
     )
 
 
+# --- OpenSSH host identity (HG-043) -----------------------------------------
+#
+# Three bounded, file-local observations (Issue #88): a supported unencrypted
+# private key at an exact canonical OpenSSH host-key basename; one supported
+# OpenSSH public-key record at the corresponding canonical basename; and one
+# structurally parsed OpenSSH certificate whose encoded type is HOST. None of
+# this pairs a private candidate with a public candidate, reads a sibling
+# file, resolves `sshd_config`/`HostKey`, or verifies a certificate signature
+# -- see the module-level detector functions below for the exact boundary
+# each one enforces.
+
+_OPENSSH_PRIVATE_RULE_ID = "openssh_host_identity:private_key"
+_OPENSSH_PUBLIC_RULE_ID = "openssh_host_identity:public_key"
+_OPENSSH_HOST_CERTIFICATE_RULE_ID = "openssh_host_identity:host_certificate"
+
+_OPENSSH_HOST_PRIVATE_BASENAMES = {
+    "ssh_host_rsa_key": "RSA",
+    "ssh_host_ecdsa_key": "ECDSA",
+    "ssh_host_ed25519_key": "Ed25519",
+}
+_OPENSSH_HOST_PUBLIC_BASENAMES = {
+    "ssh_host_rsa_key.pub": "RSA",
+    "ssh_host_ecdsa_key.pub": "ECDSA",
+    "ssh_host_ed25519_key.pub": "Ed25519",
+}
+
+# Exactly the curves the existing minimum-dependency OpenSSH parser supports
+# (Issue #88 Section 3). A parsed ECDSA key on any other curve is no-match.
+_OPENSSH_ACCEPTED_CURVES = frozenset({"secp256r1", "secp384r1", "secp521r1"})
+
+_OPENSSH_PLAIN_ALGORITHM_TOKENS = frozenset(
+    {
+        b"ssh-rsa",
+        b"ecdsa-sha2-nistp256",
+        b"ecdsa-sha2-nistp384",
+        b"ecdsa-sha2-nistp521",
+        b"ssh-ed25519",
+    }
+)
+_OPENSSH_CERT_ALGORITHM_TOKENS = frozenset(
+    {
+        b"ssh-rsa-cert-v01@openssh.com",
+        b"ecdsa-sha2-nistp256-cert-v01@openssh.com",
+        b"ecdsa-sha2-nistp384-cert-v01@openssh.com",
+        b"ecdsa-sha2-nistp521-cert-v01@openssh.com",
+        b"ssh-ed25519-cert-v01@openssh.com",
+    }
+)
+_OPENSSH_CERT_LEADING_BYTES = max(len(token) for token in _OPENSSH_CERT_ALGORITHM_TOKENS) + 1
+
+_OPENSSH_METADATA_KEYS = frozenset({"Algorithm", "Key Size"})
+
+
+def _openssh_host_identity_key_family(key: object) -> str | None:
+    """The HG-043 key family ("RSA", "ECDSA", or "Ed25519") for an already
+    parsed key, certified key, or certificate signing key, or None when its
+    class or (for ECDSA) curve falls outside the frozen boundary Issue #88
+    Section 3 declares -- DSA, Ed448, and every ECDSA curve except
+    secp256r1/secp384r1/secp521r1 are all HG-043 no-match, not a supported
+    family with unusual metadata.
+    """
+    if isinstance(key, (rsa.RSAPrivateKey, rsa.RSAPublicKey)):
+        return "RSA"
+    if isinstance(key, (ec.EllipticCurvePrivateKey, ec.EllipticCurvePublicKey)):
+        if key.curve.name in _OPENSSH_ACCEPTED_CURVES:
+            return "ECDSA"
+        return None
+    if isinstance(key, (ed25519.Ed25519PrivateKey, ed25519.Ed25519PublicKey)):
+        return "Ed25519"
+    return None
+
+
+def _openssh_host_identity_metadata(key: object, family: str) -> tuple[str, int]:
+    """The frozen Algorithm/Key Size pair (Issue #88 Section 3) for ``key``,
+    already confirmed to belong to ``family`` by
+    ``_openssh_host_identity_key_family``."""
+    if family == "RSA":
+        return "RSA", key.key_size
+    if family == "ECDSA":
+        return f"EC ({key.curve.name})", key.key_size
+    return "Ed25519", 256
+
+
+# The four private-key PEM/OpenSSH labels HG-043 itself may classify (Issue
+# #88 Section 7).
+_OPENSSH_PRIVATE_KEY_LABELS = (
+    "OPENSSH PRIVATE KEY",
+    "PRIVATE KEY",
+    "RSA PRIVATE KEY",
+    "EC PRIVATE KEY",
+)
+
+# Every private-key/certificate/public-key PEM or OpenSSH BEGIN label the
+# whole-file framing check (Issue #88 Section 8, step 6) must recognize as a
+# second identity when it appears anywhere in the stripped content, not only
+# the four labels HG-043 itself accepts.
+_OPENSSH_ANY_IDENTITY_BEGIN_LABELS = (
+    "OPENSSH PRIVATE KEY",
+    "PRIVATE KEY",
+    "ENCRYPTED PRIVATE KEY",
+    "RSA PRIVATE KEY",
+    "DSA PRIVATE KEY",
+    "EC PRIVATE KEY",
+    "PUBLIC KEY",
+    "CERTIFICATE",
+)
+
+# Permitted outer whitespace bytes for private-candidate whole-file framing
+# (Issue #88 Section 8): SP, HT, LF, CR, VT, FF -- exactly these six, no other
+# byte value.
+_OPENSSH_OUTER_WHITESPACE = bytes((0x20, 0x09, 0x0A, 0x0D, 0x0B, 0x0C))
+
+
+def _openssh_private_key_block(data: bytes) -> tuple[str, bytes] | None:
+    """The (label, complete stripped one-block bytes) a private candidate's
+    whole-file framing (Issue #88 Section 8) resolves to, or None when
+    ``data`` does not satisfy that framing.
+
+    Outer permitted whitespace is stripped from both ends first. What remains
+    must begin with exactly one accepted BEGIN line, must contain the
+    matching END line for that same label, that END line must terminate the
+    remaining content exactly (nothing, not even whitespace, follows it --
+    already guaranteed by the outer strip), and no second BEGIN marker for
+    any private-key/certificate/public-key PEM/OpenSSH identity may appear
+    anywhere in the stripped content. The full stripped block -- never a
+    truncated substring -- is what the caller passes to the parser.
+    """
+    stripped = data.strip(_OPENSSH_OUTER_WHITESPACE)
+    if not stripped:
+        return None
+    label = None
+    for candidate_label in _OPENSSH_PRIVATE_KEY_LABELS:
+        begin_line = f"-----BEGIN {candidate_label}-----".encode("ascii")
+        if stripped.startswith(begin_line):
+            label = candidate_label
+            break
+    if label is None:
+        return None
+    end_marker = f"-----END {label}-----".encode("ascii")
+    end_index = stripped.find(end_marker)
+    if end_index == -1:
+        return None
+    if end_index + len(end_marker) != len(stripped):
+        return None
+    for other_label in _OPENSSH_ANY_IDENTITY_BEGIN_LABELS:
+        other_begin = f"-----BEGIN {other_label}-----".encode("ascii")
+        occurrences = stripped.count(other_begin)
+        expected = 1 if other_label == label else 0
+        if occurrences != expected:
+            return None
+    return label, stripped
+
+
+def _openssh_load_host_private_key(label: str, block: bytes) -> object | None:
+    """Parse ``block`` (the complete stripped one-block bytes
+    ``_openssh_private_key_block`` returned for ``label``) with the exact
+    parser Issue #88 Section 7 assigns to that label, password-less.
+
+    Returns the parsed key, or None for every no-match Section 13 declares
+    expected for that parser -- absent, encrypted, unsupported, or (for the
+    two traditional PEM labels) not the algorithm class that label's own
+    grammar requires. Any other exception is not caught here and propagates
+    to the shared detector-error boundary; this function never uses a
+    catch-all exception clause.
+    """
+    if label == "OPENSSH PRIVATE KEY":
+        try:
+            return serialization.load_ssh_private_key(block, password=None)
+        except (ValueError, TypeError, UnsupportedAlgorithm):
+            return None
+    try:
+        key = serialization.load_pem_private_key(block, password=None)
+    except (ValueError, TypeError, UnsupportedAlgorithm):
+        return None
+    if label == "RSA PRIVATE KEY" and not isinstance(key, rsa.RSAPrivateKey):
+        return None
+    if label == "EC PRIVATE KEY" and not isinstance(key, ec.EllipticCurvePrivateKey):
+        return None
+    return key
+
+
+def _openssh_host_private_key_candidate(context: FileContext) -> bool:
+    return context.name in _OPENSSH_HOST_PRIVATE_BASENAMES
+
+
+def _detect_openssh_host_private_key(context: FileContext) -> DetectionResult:
+    expected_family = _OPENSSH_HOST_PRIVATE_BASENAMES[context.name]
+    block = _openssh_private_key_block(context.data)
+    if block is None:
+        return DetectionResult.no_match()
+    label, block_bytes = block
+    key = _openssh_load_host_private_key(label, block_bytes)
+    if key is None:
+        return DetectionResult.no_match()
+    family = _openssh_host_identity_key_family(key)
+    if family is None or family != expected_family:
+        return DetectionResult.no_match()
+    algorithm, key_size = _openssh_host_identity_metadata(key, family)
+    return DetectionResult.match(
+        [
+            CryptoInventoryFinding(
+                asset_type="OpenSSH Host Private Key Candidate",
+                location=context.location,
+                algorithm=algorithm,
+                key_size=key_size,
+                evidence=(
+                    "Supported private key observed at canonical OpenSSH "
+                    "host-key filename"
+                ),
+                confidence="Medium",
+                rule_id=_OPENSSH_PRIVATE_RULE_ID,
+            )
+        ],
+        terminal=True,
+    )
+
+
+_OPENSSH_ONE_RECORD_RE = re.compile(rb"\A([^ \t]+)[ \t]+([^ \t]+)(?:[ \t].*)?\Z", re.DOTALL)
+
+
+def _openssh_one_record_fields(data: bytes) -> tuple[bytes, bytes] | None:
+    """The (algorithm token, base64 blob) fields of the single OpenSSH
+    public-key or certificate record in ``data``, once every requirement of
+    the shared outer one-record grammar (Issue #88 Sections 10-11) has been
+    checked, or None when ``data`` does not satisfy that grammar.
+
+    The trailing comment field, when present, is deliberately not returned:
+    the grammar forbids decoding, retaining, or emitting comment bytes, so
+    this helper does not hand them back to its caller at all.
+    """
+    body = data
+    if body.endswith(b"\r\n"):
+        body = body[:-2]
+    elif body.endswith(b"\n"):
+        body = body[:-1]
+    if b"\r" in body or b"\n" in body:
+        return None
+    record = body.strip(b" \t")
+    if not record:
+        return None
+    match = _OPENSSH_ONE_RECORD_RE.match(record)
+    if match is None:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _openssh_host_public_key_candidate(context: FileContext) -> bool:
+    return context.name in _OPENSSH_HOST_PUBLIC_BASENAMES
+
+
+def _detect_openssh_host_public_key(context: FileContext) -> DetectionResult:
+    expected_family = _OPENSSH_HOST_PUBLIC_BASENAMES[context.name]
+    fields = _openssh_one_record_fields(context.data)
+    if fields is None:
+        return DetectionResult.no_match()
+    algorithm_token, base64_blob = fields
+    if algorithm_token not in _OPENSSH_PLAIN_ALGORITHM_TOKENS:
+        return DetectionResult.no_match()
+    try:
+        key = serialization.load_ssh_public_key(algorithm_token + b" " + base64_blob)
+    except (ValueError, UnsupportedAlgorithm):
+        return DetectionResult.no_match()
+    family = _openssh_host_identity_key_family(key)
+    if family is None or family != expected_family:
+        return DetectionResult.no_match()
+    algorithm, key_size = _openssh_host_identity_metadata(key, family)
+    return DetectionResult.match(
+        [
+            CryptoInventoryFinding(
+                asset_type="OpenSSH Host Public Key Candidate",
+                location=context.location,
+                algorithm=algorithm,
+                key_size=key_size,
+                evidence=(
+                    "Supported SSH public key observed at canonical OpenSSH "
+                    "host-public-key filename"
+                ),
+                confidence="Medium",
+                rule_id=_OPENSSH_PUBLIC_RULE_ID,
+            )
+        ],
+        terminal=True,
+    )
+
+
+def _openssh_host_certificate_candidate(context: FileContext) -> bool:
+    leading = context.leading_bytes(_OPENSSH_CERT_LEADING_BYTES)
+    return leading.startswith(tuple(token + b" " for token in _OPENSSH_CERT_ALGORITHM_TOKENS))
+
+
+def _detect_openssh_host_certificate(context: FileContext) -> DetectionResult:
+    fields = _openssh_one_record_fields(context.data)
+    if fields is None:
+        return DetectionResult.no_match()
+    algorithm_token, base64_blob = fields
+    if algorithm_token not in _OPENSSH_CERT_ALGORITHM_TOKENS:
+        return DetectionResult.no_match()
+    try:
+        identity = serialization.load_ssh_public_identity(algorithm_token + b" " + base64_blob)
+    except (ValueError, UnsupportedAlgorithm):
+        return DetectionResult.no_match()
+    if not isinstance(identity, serialization.SSHCertificate):
+        return DetectionResult.no_match()
+    if identity.type is not serialization.SSHCertificateType.HOST:
+        return DetectionResult.no_match()
+    try:
+        certified_key = identity.public_key()
+    except UnsupportedAlgorithm:
+        return DetectionResult.no_match()
+    certified_family = _openssh_host_identity_key_family(certified_key)
+    if certified_family is None:
+        return DetectionResult.no_match()
+    try:
+        signing_key = identity.signature_key()
+    except UnsupportedAlgorithm:
+        return DetectionResult.no_match()
+    if _openssh_host_identity_key_family(signing_key) is None:
+        return DetectionResult.no_match()
+    algorithm, key_size = _openssh_host_identity_metadata(certified_key, certified_family)
+    return DetectionResult.match(
+        [
+            CryptoInventoryFinding(
+                asset_type="OpenSSH Host Certificate",
+                location=context.location,
+                algorithm=algorithm,
+                key_size=key_size,
+                evidence="OpenSSH host certificate structure detected",
+                confidence="High",
+                rule_id=_OPENSSH_HOST_CERTIFICATE_RULE_ID,
+            )
+        ],
+        terminal=True,
+    )
+
+
 # --- Detector registry (HG-033) --------------------------------------------
 #
 # The static, explicit registry of every crypto-inventory detector family. It
@@ -3819,6 +4155,35 @@ CRYPTO_DETECTORS = build_registry(
             ),
         ),
         FileDetector(
+            detector_id="openssh_host_identity:private_key",
+            priority=76,
+            candidate=_openssh_host_private_key_candidate,
+            detect=_detect_openssh_host_private_key,
+            evidence=(
+                "Supported private key observed at canonical OpenSSH "
+                "host-key filename"
+            ),
+            confidence="Medium",
+            terminal=True,
+            rule_id=_OPENSSH_PRIVATE_RULE_ID,
+            metadata_keys=_OPENSSH_METADATA_KEYS,
+            verification_rationale=(
+                "Exact canonical OpenSSH host-private-key basename "
+                "(ssh_host_rsa_key/ssh_host_ecdsa_key/ssh_host_ed25519_key) "
+                "whose complete file, apart from permitted outer ASCII "
+                "whitespace, is exactly one supported unencrypted private-key "
+                "PEM/OpenSSH block, password-less parsed, and whose parsed "
+                "key class agrees with the basename. Priority 76 places this "
+                "after certificate PEM, legacy encrypted PEM, and every "
+                "dedicated encrypted/container detector, and before generic "
+                "private-key PEM at priority 80, so it never steals an "
+                "encrypted or otherwise dedicated file; a no-match here "
+                "(wrong algorithm, non-canonical name, encrypted, malformed, "
+                "or multi-block) falls straight through to that generic "
+                "detector unchanged (Issue #88)."
+            ),
+        ),
+        FileDetector(
             detector_id="private_key:pem",
             priority=80,
             candidate=_text_candidate,
@@ -3831,6 +4196,52 @@ CRYPTO_DETECTORS = build_registry(
                 "Traditional Proc-Type encrypted blocks are owned by "
                 "private_key:legacy_pem_encrypted (HG-040); encrypted PKCS#8 "
                 "is owned by private_key:pkcs8_encrypted (HG-038)."
+            ),
+        ),
+        FileDetector(
+            detector_id="openssh_host_identity:public_key",
+            priority=81,
+            candidate=_openssh_host_public_key_candidate,
+            detect=_detect_openssh_host_public_key,
+            evidence=(
+                "Supported SSH public key observed at canonical OpenSSH "
+                "host-public-key filename"
+            ),
+            confidence="Medium",
+            terminal=True,
+            rule_id=_OPENSSH_PUBLIC_RULE_ID,
+            metadata_keys=_OPENSSH_METADATA_KEYS,
+            verification_rationale=(
+                "Exact canonical OpenSSH host-public-key basename "
+                "(ssh_host_rsa_key.pub/ssh_host_ecdsa_key.pub/"
+                "ssh_host_ed25519_key.pub) whose complete file is exactly one "
+                "OpenSSH public-key record under the shared one-record "
+                "grammar, with a plain (non-certificate) accepted algorithm "
+                "token, parsed successfully, and whose parsed key class "
+                "agrees with the basename. Priority 81 places this before "
+                "generic SSH public handling at priority 90 (Issue #88)."
+            ),
+        ),
+        FileDetector(
+            detector_id="openssh_host_identity:host_certificate",
+            priority=82,
+            candidate=_openssh_host_certificate_candidate,
+            detect=_detect_openssh_host_certificate,
+            evidence="OpenSSH host certificate structure detected",
+            confidence="High",
+            terminal=True,
+            rule_id=_OPENSSH_HOST_CERTIFICATE_RULE_ID,
+            metadata_keys=_OPENSSH_METADATA_KEYS,
+            verification_rationale=(
+                "One OpenSSH certificate record under the shared one-record "
+                "grammar, with an accepted certificate algorithm token, "
+                "structurally parsed via load_ssh_public_identity into an "
+                "SSHCertificate whose encoded type is exactly HOST and whose "
+                "certified key and signature key are both a supported "
+                "RSA/ECDSA/Ed25519 family. No filename requirement; the "
+                "certificate signature itself is deliberately never "
+                "verified. Priority 82 places this before generic SSH public "
+                "handling at priority 90 (Issue #88)."
             ),
         ),
         FileDetector(

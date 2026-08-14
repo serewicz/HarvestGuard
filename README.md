@@ -178,7 +178,24 @@ evidence and must remain traceable back to it.
   trailing integrity digest is neither verified nor reported, no key payload is
   parsed, no Java serialized object is deserialized, `keytool` and Java are
   never invoked, and no alias, certificate subject, issuer, serial number, SAN,
-  fingerprint, or validity date is reported. Only
+  fingerprint, or validity date is reported. Also recognizes **OpenSSH host
+  identity evidence** — a supported unencrypted private key or public-key
+  record at an *exact* canonical OpenSSH host-key basename
+  (`ssh_host_rsa_key`, `ssh_host_ecdsa_key`, `ssh_host_ed25519_key`, and their
+  `.pub` counterparts) whose parsed algorithm agrees with that basename, and
+  any OpenSSH certificate record — no filename required — whose structure
+  encodes certificate type `HOST`. These are deliberately **file-local,
+  bounded observations**: a canonical-basename candidate is not proof that
+  `sshd` uses the file, and neither private/public pairing nor certificate
+  signature verification is performed (an intentionally accepted false
+  positive: a structurally valid but cryptographically invalid HOST
+  certificate signature still matches). Custom `HostKey` paths, renamed keys,
+  DSA/Ed448/other ECDSA curves, encrypted keys, and USER certificates are
+  deliberate false negatives under this rule and remain visible only through
+  the existing generic private-key/public-key detectors. Evidence only: no
+  password is prompted for or accepted, no `ssh`/`sshd`/`ssh-keygen` process is
+  invoked, and no comment, principal, key ID, or certificate signature is
+  reported. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See

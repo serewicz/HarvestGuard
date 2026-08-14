@@ -433,7 +433,10 @@ def test_registry_order_is_explicit_and_places_jceks_between_bcfks_and_jks():
         "certificate:der",
         "certificate:pem",
         "private_key:legacy_pem_encrypted",
+        "openssh_host_identity:private_key",
         "private_key:pem",
+        "openssh_host_identity:public_key",
+        "openssh_host_identity:host_certificate",
         "public_key:ssh",
     ]
     priorities = [d.priority for d in CRYPTO_DETECTORS]

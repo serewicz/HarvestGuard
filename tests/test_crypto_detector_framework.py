@@ -87,7 +87,10 @@ EXPECTED_DETECTOR_IDS = [
     "certificate:der",
     "certificate:pem",
     "private_key:legacy_pem_encrypted",
+    "openssh_host_identity:private_key",
     "private_key:pem",
+    "openssh_host_identity:public_key",
+    "openssh_host_identity:host_certificate",
     "public_key:ssh",
 ]
 
@@ -99,9 +102,12 @@ EXPECTED_DETECTOR_IDS = [
 # exactly one (`nss:sql_database_set`, the aggregate NSS set; there is
 # deliberately no file-level `nss:*` rule for pkcs11.txt, cert9.db, or key4.db),
 # and HG-042 introduced exactly two (`java_truststore:jks` and
-# `java_truststore:jceks`, the trusted-certificate-only store structures).
+# `java_truststore:jceks`, the trusted-certificate-only store structures), and
+# HG-043 introduced exactly three (`openssh_host_identity:private_key`,
+# `openssh_host_identity:public_key`, `openssh_host_identity:host_certificate`).
 # The generic JKS detector deliberately remains without one, unchanged by
-# HG-037, HG-038, HG-039, HG-041, and HG-042.
+# HG-037, HG-038, HG-039, HG-041, HG-042, and HG-043; the same is true of the
+# generic private_key:pem and public_key:ssh detectors HG-043 sits beside.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
@@ -116,6 +122,9 @@ EXPECTED_RULE_IDS = {
     "cms:enveloped_data",
     "cms:encrypted_data",
     "private_key:legacy_pem_encrypted",
+    "openssh_host_identity:private_key",
+    "openssh_host_identity:public_key",
+    "openssh_host_identity:host_certificate",
 }
 
 

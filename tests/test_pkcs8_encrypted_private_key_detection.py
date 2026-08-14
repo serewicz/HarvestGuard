@@ -863,7 +863,13 @@ def test_detection_reads_no_password_from_the_environment(tmp_path, monkeypatch)
 
     source = (REPO_ROOT / "scanner" / "crypto_inventory.py").read_text(encoding="utf-8")
     start = source.index("# --- Encrypted PKCS#8 private-key detection")
-    end = source.index("# --- Detector registry (HG-033)")
+    # Bounded to this section's own next sibling header, not the registry
+    # comment further down: later sections (HG-043's OpenSSH host-identity
+    # detection, in particular) legitimately call load_pem_private_key /
+    # load_ssh_private_key with a password for their own, unrelated purpose,
+    # and must not be swept into a check that is specifically about this
+    # section's own no-password-reads contract.
+    end = source.index("# --- CMS / PKCS#7 encrypted-object detection (HG-039)")
     section = source[start:end]
     # Call sites, not prose: this section's comments describe the boundary in
     # words, so only an actual password-reading or key-loading call may appear.

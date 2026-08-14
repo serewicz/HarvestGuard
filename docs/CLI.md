@@ -742,6 +742,67 @@ re-read as a certificate or PKCS#12 container. A store counts once in
 Absence of a `java_truststore:*` finding is not proof that no Java truststore
 exists in the target.
 
+#### OpenSSH host identity evidence (HG-043)
+
+Three bounded, **file-local** rules — none of which pairs a private candidate
+with a public candidate, reads a sibling file, or resolves
+`sshd_config`/`HostKey`. A `--type crypto` (or `--type all`) scan reports:
+
+- `rule_id: openssh_host_identity:private_key`, asset type
+  `OpenSSH Host Private Key Candidate`, confidence `Medium` — a supported
+  unencrypted private key (OpenSSH, unencrypted PKCS#8, or traditional
+  RSA/EC PEM) whose complete file, apart from permitted outer whitespace, is
+  exactly one such block, at an exact canonical basename (`ssh_host_rsa_key`,
+  `ssh_host_ecdsa_key`, `ssh_host_ed25519_key`) whose parsed key class agrees
+  with that basename.
+- `rule_id: openssh_host_identity:public_key`, asset type
+  `OpenSSH Host Public Key Candidate`, confidence `Medium` — one supported
+  OpenSSH public-key record at the matching canonical `.pub` basename.
+- `rule_id: openssh_host_identity:host_certificate`, asset type
+  `OpenSSH Host Certificate`, confidence `High` — one structurally parsed
+  OpenSSH certificate record whose encoded type is `HOST`. **No filename
+  requirement.**
+
+Technical metadata for all three is limited to `Algorithm` and `Key Size`;
+`Fingerprint` is always left unset.
+
+**"Candidate" is a bounded claim, not proof of active use.** A private/public
+candidate finding means a supported parsed key agrees with an exact canonical
+OpenSSH host-key filename — it does not mean `sshd` is installed, running, or
+configured to use the file, and it does not mean a public candidate matches
+any private candidate. A user key renamed to an exact canonical basename
+becomes a candidate finding; this is an explicit accepted false-positive
+boundary. Custom `HostKey` paths and renamed keys are deliberate false
+negatives.
+
+**Supported algorithms.** RSA, ECDSA (`secp256r1`/`secp384r1`/`secp521r1`
+only), and Ed25519 — for private/public candidates and for both the certified
+key and the signing/CA key inside a certificate. Any other algorithm, curve,
+DSA, or Ed448 is a deliberate no-match that falls through to the existing
+generic private-key/public-key detectors unchanged.
+
+**The certificate signature is deliberately never verified.** HG-043 parses
+certificate structure and encoded type only; it never calls
+`verify_cert_signature()`. A structurally valid HOST certificate whose
+signature has been tampered with still matches — an intentional accepted
+false positive — while a USER certificate never matches regardless of
+signature validity.
+
+**Nothing is decrypted and no password is involved.** HG-043 never prompts
+for, guesses, or reads a passphrase from the environment; a password-encrypted
+OpenSSH private key at a canonical basename is a deliberate no-match that
+falls through to the existing generic `Encrypted OpenSSH Private Key`
+finding. `ssh`, `sshd`, `ssh-keygen`, `ssh-keyscan`, and every other external
+process or network connection are never invoked at scan time.
+
+A positive match is terminal for that file, so the same file never also emits
+the generic `private_key:pem`/`public_key:ssh` finding. Existing
+`Crypto files inspected` accounting is unchanged, and no HG-043-specific count
+or summary line is added. Absence of an `openssh_host_identity:*` finding is
+not proof that no OpenSSH host key or certificate exists in the target. The
+full supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#openssh-host-identity-evidence-hg-043).
+
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,
 `DefaultAzureCredential` for Azure). The CLI does not read, prompt for, or
