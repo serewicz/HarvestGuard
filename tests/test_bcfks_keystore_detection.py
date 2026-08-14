@@ -761,7 +761,10 @@ def test_a_bcfks_match_is_terminal_for_that_file(tmp_path):
             *CRYPTO_DETECTORS,
             FileDetector(
                 detector_id="test:after-bcfks",
-                priority=36,
+                # Any free priority above BCFKS's 35 proves the same thing; 38
+                # is used rather than 36 because the registry now declares
+                # java_truststore:jceks there (HG-042) and rejects duplicates.
+                priority=38,
                 candidate=lambda context: True,
                 detect=_record,
                 evidence="",

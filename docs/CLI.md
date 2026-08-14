@@ -676,6 +676,72 @@ later detectors, so a certificate or private key inside it is still reported;
 a rule that ran earlier and terminally (an OpenSSL `Salted__` file named
 `pkcs11.txt`, for example) keeps its existing precedence.
 
+#### Java trusted-certificate-only store evidence (HG-042)
+
+A JKS or JCEKS store whose **complete declared entry table** holds only
+trusted-certificate entries is cryptographic evidence, and the crypto-inventory
+scanner owns it. A `--type crypto` (or `--type all`) scan reports it as asset
+type `Java Trusted-Certificate-Only Store` at confidence `High`, with:
+
+- `rule_id: java_truststore:jks`, evidence
+  `JKS trusted-certificate-only store structure detected`, and technical
+  metadata limited to `Format: JKS`; or
+- `rule_id: java_truststore:jceks`, evidence
+  `JCEKS trusted-certificate-only store structure detected`, and technical
+  metadata limited to `Format: JCEKS`.
+
+**This is a structural observation, not an operational-role claim.** The
+reported fact is that a structurally supported store contains only supported
+trusted-certificate entries. Trusted-certificate-only JKS/JCEKS stores are
+commonly used as Java truststores, but HG-042 does **not** establish that any
+application uses this store for trust decisions — which is why the asset type is
+`Java Trusted-Certificate-Only Store` and never the unqualified
+`Java Truststore`. It is equally not a claim that the certificates are
+trustworthy, current, authorized, or appropriate, that the store is
+authenticated or unlockable, that a password is known, or that the store holds
+every certificate an application actually trusts.
+
+**Supported scope.** JKS and JCEKS versions 1 and 2. For version 2 the entry's
+certificate type must be exactly `X.509`; a trusted certificate of any other
+Java-supported type is a **deliberate false negative**. Every accepted
+certificate payload must parse as DER X.509, every alias must be encoded in
+canonical `DataOutputStream.writeUTF` form, and exactly the 20-byte integrity
+trailer must remain after the last declared entry.
+
+**Content, not filename.** Classification comes from the store's own bytes.
+`cacerts` receives no special treatment: identical bytes match under any
+filename, a file named `cacerts` without supported content does not match, and a
+PKCS#12 `cacerts` stays outside this rule.
+
+**What stays with the generic keystore detectors.** A store containing any
+private-key entry, any JCEKS secret-key entry, an unrecognized entry tag, or a
+mix of those with trusted certificates falls through unchanged to
+`java_keystore:jceks` or the existing generic JKS classification — a mixed store
+may well be used as a truststore operationally, but it is not
+trusted-certificate-*only*, which is the bounded claim being made. An empty
+store (`entry_count == 0`) also does not match: it carries no
+trusted-certificate-entry evidence. PKCS#12 and BCFKS stores keep their existing
+classifications even when Java uses them for trust.
+
+**Nothing is opened, unlocked, or executed.** No password is requested,
+accepted, or read from the environment, the trailing keyed digest is
+length-checked as structure and never read, recomputed, or verified, protected
+private-key payloads are never parsed, JCEKS secret-key `SealedObject` payloads
+are never deserialized, no security provider is loaded, `$JAVA_HOME` and
+application/JVM truststore configuration are never inspected, and `keytool`,
+Java, OpenSSL, and every other external process are never invoked. Aliases, raw
+alias bytes, certificate DER, certificate type, subject, issuer, serial number,
+SAN, fingerprint, validity dates, and integrity-digest bytes never appear in a
+finding, report, or stored record — X.509 parsing is used only as a boolean
+structural check.
+
+A match is terminal for that file, so the same store never also emits the
+generic JKS/JCEKS finding, and a store with a misleading extension is not
+re-read as a certificate or PKCS#12 container. A store counts once in
+`Crypto files inspected`, and no HG-042-specific count or summary line is added.
+Absence of a `java_truststore:*` finding is not proof that no Java truststore
+exists in the target.
+
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,
 `DefaultAzureCredential` for Azure). The CLI does not read, prompt for, or

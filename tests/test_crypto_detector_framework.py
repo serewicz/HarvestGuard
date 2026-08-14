@@ -65,7 +65,10 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "crypto_inventory"
 # separate content types with two separate rule identities rather than one
 # detector that reports which it saw. HG-041 added exactly one, the aggregate
 # NSS SQL database-set root detector -- one root detector for the whole
-# canonical set, not one detector per component file.
+# canonical set, not one detector per component file. HG-042 added exactly two,
+# the JKS and JCEKS trusted-certificate-only store detectors: two formats, two
+# identities, each sitting immediately ahead of its own generic keystore
+# detector rather than replacing it.
 EXPECTED_DETECTOR_IDS = [
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
@@ -73,7 +76,9 @@ EXPECTED_DETECTOR_IDS = [
     "encrypted_filesystem:gocryptfs",
     "nss:sql_database_set",
     "java_keystore:bcfks",
+    "java_truststore:jceks",
     "java_keystore:jceks",
+    "java_truststore:jks",
     "java_keystore:jks_magic",
     "private_key:pkcs8_encrypted",
     "cms:enveloped_data",
@@ -92,9 +97,11 @@ EXPECTED_DETECTOR_IDS = [
 # HG-036 introduced exactly one, HG-037 introduced exactly one, HG-038
 # introduced exactly one, HG-039 introduced exactly two, and HG-041 introduced
 # exactly one (`nss:sql_database_set`, the aggregate NSS set; there is
-# deliberately no file-level `nss:*` rule for pkcs11.txt, cert9.db, or key4.db).
-# The JKS detector deliberately remains without one, unchanged by HG-037,
-# HG-038, HG-039, and HG-041.
+# deliberately no file-level `nss:*` rule for pkcs11.txt, cert9.db, or key4.db),
+# and HG-042 introduced exactly two (`java_truststore:jks` and
+# `java_truststore:jceks`, the trusted-certificate-only store structures).
+# The generic JKS detector deliberately remains without one, unchanged by
+# HG-037, HG-038, HG-039, HG-041, and HG-042.
 EXPECTED_RULE_IDS = {
     "encrypted_file:openssl",
     "encrypted_file:openpgp",
@@ -103,6 +110,8 @@ EXPECTED_RULE_IDS = {
     "nss:sql_database_set",
     "java_keystore:bcfks",
     "java_keystore:jceks",
+    "java_truststore:jks",
+    "java_truststore:jceks",
     "private_key:pkcs8_encrypted",
     "cms:enveloped_data",
     "cms:encrypted_data",

@@ -123,6 +123,30 @@ Example output shape:
   Confidence is `Medium` because the container header was identified but the
   store was not authenticated or fully parsed. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#jceks-keystore-containers-hg-037)
+- Java trusted-certificate-only stores (`rule_id: java_truststore:jks` or
+  `java_truststore:jceks`, asset type `Java Trusted-Certificate-Only Store`,
+  confidence `High`), identified by reading the **complete declared entry
+  table** of a JKS or JCEKS store (version 1 or 2) and finding only supported
+  trusted-certificate entries, with exactly the 20-byte integrity trailer
+  remaining afterwards. The observed fact is
+  **trusted-certificate-only store structure**; this does **not** establish that
+  an application uses the store as a runtime truststore, and the asset type is
+  deliberately never the unqualified `Java Truststore`. Version-2 support is
+  limited to the exact `X.509` certificate type — a trusted certificate of
+  another Java-supported type is a deliberate false negative — and every
+  accepted payload must parse as DER X.509 while every alias must be canonical
+  `DataOutputStream.writeUTF` output. A store with any private-key entry, any
+  JCEKS secret-key entry, an unknown entry tag, a mix of those with trusted
+  certificates, or no entries at all is **not** classified here and falls
+  through unchanged to the generic JKS/JCEKS classification; PKCS#12 and BCFKS
+  stores used operationally for trust stay outside this rule. Content only:
+  `cacerts` is not privileged by filename and identical bytes classify
+  identically under any name. No password is requested or accepted, the trailing
+  digest is never verified, key payloads are never parsed, JCEKS secret-key
+  objects are never deserialized, `keytool` and Java are never invoked, and no
+  alias or certificate content is reported. The only metadata emitted is
+  `Format: JKS` or `Format: JCEKS`. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#java-trusted-certificate-only-stores-hg-042)
 - OpenSSL `Salted__` encrypted files (leading-byte signature only, not
   decrypted; checked before any extension-based branch above)
 - OpenPGP/GPG encrypted files, binary or ASCII-armored, identified by the
@@ -415,8 +439,11 @@ Recursive scans do not follow symbolic links by default. Use
   content types such as `AuthEnvelopedData` produce no finding. Absence of a
   `cms:enveloped_data` or `cms:encrypted_data` finding is not proof that no CMS
   encrypted object exists in the target.
-- JKS support is limited to magic-header detection; entry-level parsing is not
-  implemented.
+- Generic JKS support is limited to magic-header detection; general entry-level
+  parsing is not implemented. The one exception is the bounded
+  trusted-certificate-only classification described below, which reads the
+  declared entry table to decide whether *every* entry is a trusted-certificate
+  entry and hands every other store back to this generic classification.
 - BCFKS support is limited to the supported encrypted-object-store outer
   container: entries are not enumerated, the store is never decrypted, no
   password is prompted for or validated, and no alias, certificate, key,
@@ -435,6 +462,27 @@ Recursive scans do not follow symbolic links by default. Use
   reported as JCEKS; this is why confidence is `Medium`. Absence of a
   `java_keystore:jceks` finding is not proof that no JCEKS store exists in the
   target.
+- Java trusted-certificate-only store classification is a **structural
+  observation about the store's declared entries, not a runtime-role claim**: it
+  does not establish that any application uses the store as a truststore, that
+  the certificates are trustworthy or current, that the store is authenticated
+  or unlockable, or that it holds every certificate an application trusts.
+  Supported versions are JKS/JCEKS 1 and 2 only, and version-2 support is
+  limited to the exact `X.509` certificate type. Deliberate false negatives:
+  trusted certificates of any other Java-supported certificate type, any store
+  containing a private-key entry, a JCEKS secret-key entry, or an unknown entry
+  tag, empty stores, PKCS#12 and BCFKS stores used operationally as truststores,
+  runtime truststore configuration that cannot be proven from the store's bytes,
+  and alias or certificate-type fields that a permissive
+  `DataInputStream.readUTF` would accept but that are not canonical
+  `DataOutputStream.writeUTF` output. The trailing 20-byte integrity trailer is
+  structural evidence only — it is never read, recomputed, or verified, which
+  would require the store password — so a store whose trailer is arbitrary bytes
+  still matches. Certificate contents are not reported: X.509 parsing is a
+  boolean structural check and no alias, subject, issuer, serial number, SAN,
+  fingerprint, validity date, or DER byte reaches a finding. The only metadata
+  emitted is `Format: JKS` or `Format: JCEKS`. Absence of a `java_truststore:*`
+  finding is not proof that no Java truststore exists in the target.
 - Random binary files are skipped unless their extension or header indicates a
   supported crypto asset.
 - OpenPGP/GPG detection covers specific encrypted-file structures, not the

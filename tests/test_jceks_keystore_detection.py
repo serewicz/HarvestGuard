@@ -45,13 +45,20 @@ FIXTURE_DIR = Path(__file__).parent / "fixtures" / "crypto_inventory"
 JCEKS_DIR = FIXTURE_DIR / "jceks"
 BCFKS_DIR = FIXTURE_DIR / "bcfks"
 
-# The four real stores, and what each one was at generation time. The generated
-# contents are recorded here only to show that the *same* public contract comes
-# out of a keystore, a truststore, a secret-key store, and an empty store:
-# HarvestGuard cannot tell them apart and never claims to.
+# The real stores this generic-detector suite exercises, and what each one was
+# at generation time. The generated contents are recorded here only to show
+# that the *same* public contract comes out of a keystore, a secret-key store,
+# and an empty store: HarvestGuard cannot tell them apart and never claims to.
+#
+# trusted_certificate_store.jceks is deliberately not included here: HG-042
+# reuses it as its own documented JCEKS v2 trusted-certificate-only positive
+# fixture (see tests/fixtures/crypto_inventory/java_truststore/PROVENANCE.md),
+# and the terminal java_truststore:jceks detector now claims it before this
+# generic rule ever sees it. Its generic-fallback behavior is no longer
+# applicable to that file; tests/test_java_truststore_detection.py covers its
+# new classification and privacy contract instead.
 REAL_FIXTURES = {
     "private_key_store.jceks": "private-key store (RSA 2048 + self-signed cert)",
-    "trusted_certificate_store.jceks": "truststore (one trusted certificate)",
     "secret_key_store.jceks": "secret-key store (AES 256, a serialized SealedObject)",
     "empty_store.jceks": "empty store (minimum valid form, 32 bytes)",
 }
@@ -120,7 +127,7 @@ def test_real_keytool_store_produces_the_exact_finding_contract(tmp_path, name):
 
 
 def test_every_real_store_produces_the_same_public_contract(tmp_path):
-    # A keystore, a truststore, a secret-key store, and an empty store: four
+    # A private-key store, a secret-key store, and an empty store: three
     # different sets of protected contents, one identical public claim, which is
     # the point -- the detector reads the container header and nothing else.
     for name in REAL_FIXTURES:
@@ -366,13 +373,22 @@ def test_jks_and_jceks_remain_distinct_detectors():
 
 
 def test_committed_non_jceks_fixtures_are_unaffected(tmp_path):
-    # A whole-directory scan of the existing fixture corpus gains no JCEKS
-    # finding and loses none of its own.
+    # A whole-directory scan of the existing fixture corpus gains no
+    # *unexpected* JCEKS finding and loses none of its own. HG-042 legitimately
+    # changes this count by one in each direction:
+    # tests/fixtures/crypto_inventory/jceks/trusted_certificate_store.jceks is
+    # now claimed by the terminal java_truststore:jceks detector instead (see
+    # REAL_FIXTURES above), while
+    # tests/fixtures/crypto_inventory/java_truststore/mixed_store.jceks -- a
+    # JCEKS store HG-042 deliberately declines because it mixes a
+    # trusted-certificate entry with a private-key and a secret-key entry --
+    # falls through to this generic rule exactly as HG-042's own contract
+    # requires.
     findings = scan_crypto_inventory_findings(str(FIXTURE_DIR))
     jceks = [f for f in findings if f.rule_id == RULE_ID]
 
-    assert {Path(f.location).parent.name for f in jceks} == {"jceks"}
-    assert len(jceks) == len(REAL_FIXTURES)
+    assert {Path(f.location).parent.name for f in jceks} == {"jceks", "java_truststore"}
+    assert len(jceks) == len(REAL_FIXTURES) + 1
 
 
 # --- 41-50. Detector registry -----------------------------------------------
@@ -406,7 +422,9 @@ def test_registry_order_is_explicit_and_places_jceks_between_bcfks_and_jks():
         "encrypted_filesystem:gocryptfs",
         "nss:sql_database_set",
         "java_keystore:bcfks",
+        "java_truststore:jceks",
         "java_keystore:jceks",
+        "java_truststore:jks",
         "java_keystore:jks_magic",
         "private_key:pkcs8_encrypted",
         "cms:enveloped_data",
@@ -684,10 +702,15 @@ def test_jceks_introduces_no_new_asset_type(tmp_path):
     findings = scan_crypto_inventory_findings(str(tmp_path))
 
     assert {f.asset_type for f in findings} == {ASSET_TYPE}
+    # HG-042 legitimately added a second "jceks" rule ID,
+    # java_truststore:jceks, for a structurally different, narrower claim
+    # (trusted-certificate-only store structure) with its own asset type. It
+    # does not introduce a new *generic* JCEKS asset type, which is what this
+    # test otherwise guards.
     jceks_rule_ids = {
         d.rule_id for d in CRYPTO_DETECTORS if d.rule_id and "jceks" in d.rule_id
     }
-    assert jceks_rule_ids == {RULE_ID}
+    assert jceks_rule_ids == {RULE_ID, "java_truststore:jceks"}
 
 
 def test_no_new_dependency_is_declared_for_jceks():

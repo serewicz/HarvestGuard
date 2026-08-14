@@ -162,7 +162,23 @@ evidence and must remain traceable back to it.
   tool or library is invoked, no password is requested or accepted, no
   certificate or key is enumerated, and the marker's `configdir` is never
   resolved or reported. Legacy DBM sets, prefixed or renamed layouts,
-  incomplete sets, and marker symlinks are unsupported. Only
+  incomplete sets, and marker symlinks are unsupported. Also recognizes
+  **Java trusted-certificate-only stores** — a JKS or JCEKS store (version 1 or
+  2) whose **complete declared entry table** holds only trusted-certificate
+  entries, read from the file's own bytes rather than its name, so `cacerts` is
+  not privileged and identical bytes classify identically under any filename.
+  This is a **structural observation, not a runtime-role claim**: it does not
+  establish that any application uses the store as a truststore. Version-2
+  support is limited to the exact `X.509` certificate type, so a trusted
+  certificate of another Java-supported type is a deliberate false negative.
+  Stores holding any private-key entry, any JCEKS secret-key entry, an
+  unrecognized entry type, or no entries at all stay under the generic keystore
+  classification, and PKCS#12 and BCFKS stores used operationally for trust are
+  outside this rule. Evidence only: no password is requested or accepted, the
+  trailing integrity digest is neither verified nor reported, no key payload is
+  parsed, no Java serialized object is deserialized, `keytool` and Java are
+  never invoked, and no alias, certificate subject, issuer, serial number, SAN,
+  fingerprint, or validity date is reported. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See
