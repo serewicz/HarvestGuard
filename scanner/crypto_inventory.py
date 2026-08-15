@@ -3882,9 +3882,11 @@ _KUBERNETES_DISPATCH_WHITESPACE = " \t\r\n"
 
 # Permitted outer/inter-block whitespace inside an effective `tls.crt`/`tls.key`
 # value: SP, HT, LF, CR, VT, FF -- exactly these six byte values. A BOM is not
-# whitespace.
-_KUBERNETES_PEM_WHITESPACE = bytes((0x20, 0x09, 0x0A, 0x0D, 0x0B, 0x0C))
-_KUBERNETES_PEM_WHITESPACE_SET = frozenset(_KUBERNETES_PEM_WHITESPACE)
+# whitespace. This set is for skipping whitespace *between* delimiter markers
+# only; a delimiter marker's own line terminator is validated separately
+# through `_kubernetes_pem_line_terminator_length`, which accepts only LF,
+# CRLF, or EOF there -- not a bare CR, and not the SP/HT/VT/FF bytes below.
+_KUBERNETES_PEM_WHITESPACE_SET = frozenset((0x20, 0x09, 0x0A, 0x0D, 0x0B, 0x0C))
 _KUBERNETES_CERTIFICATE_LABELS = ("CERTIFICATE",)
 # Exactly the three private-key labels Issue #89 accepts. `ENCRYPTED PRIVATE
 # KEY` is absent on purpose: an encrypted PKCS#8 value is a no-match here, not
@@ -4136,6 +4138,26 @@ def _kubernetes_strict_base64(value: str) -> bytes | None:
     return decoded
 
 
+def _kubernetes_pem_line_terminator_length(data: bytes, pos: int) -> int | None:
+    """The length of the line terminator starting at ``data[pos]`` immediately
+    after a BEGIN/END delimiter marker -- 1 for a bare LF, 2 for CRLF, 0 when
+    ``pos`` is exactly the end of ``data`` (EOF is itself an accepted
+    boundary there) -- or None when none of those three holds.
+
+    A bare CR not immediately followed by LF is deliberately *not* a
+    recognized terminator here: Issue #89 permits only LF, CRLF, and EOF
+    immediately after a delimiter marker, not the lone CR line ending some
+    other text formats use.
+    """
+    if pos == len(data):
+        return 0
+    if data[pos : pos + 1] == b"\n":
+        return 1
+    if data[pos : pos + 2] == b"\r\n":
+        return 2
+    return None
+
+
 def _kubernetes_pem_blocks(
     data: bytes, labels: tuple[str, ...]
 ) -> list[tuple[str, bytes]] | None:
@@ -4145,52 +4167,65 @@ def _kubernetes_pem_blocks(
     Deliberately not ``_extract_pem_blocks``: that helper searches for markers
     inside arbitrary surrounding text, which would let a decoded Secret value
     carry a prefix, a suffix, or an unrelated PEM block alongside the material
-    HG-044 claims to have validated. Here the complete value, after removing
-    only the six permitted whitespace bytes, must be consumed by adjacent
-    blocks whose BEGIN/END delimiter lines are exact, share one label, and
-    carry no leading or trailing content of their own.
+    HG-044 claims to have validated. Here the complete value must be consumed
+    by adjacent blocks whose BEGIN/END delimiter lines are exact, share one
+    label, and carry no leading or trailing content of their own.
+
+    Every delimiter marker's own line-terminator is validated directly against
+    the *unstripped* bytes at its own position -- this function never strips
+    the whole value up front -- so trailing content on a final block's END
+    line (which a whole-value strip would silently erase before any check
+    ever saw it) cannot be mistaken for ordinary outer whitespace after the
+    last block. Only a plain byte-skip loop, applied separately before the
+    first block and between/after complete blocks, treats the six permitted
+    whitespace bytes as fungible; a delimiter marker's own line ending is
+    always resolved through ``_kubernetes_pem_line_terminator_length``
+    instead, so SP/HT/VT/FF and a bare CR are never accepted there even
+    though all four remain valid *inter-block* separator bytes.
     """
-    stripped = data.strip(_KUBERNETES_PEM_WHITESPACE)
-    if not stripped:
+    if not data:
+        return None
+    size = len(data)
+    offset = 0
+    while offset < size and data[offset] in _KUBERNETES_PEM_WHITESPACE_SET:
+        offset += 1
+    if offset >= size:
         return None
     blocks: list[tuple[str, bytes]] = []
-    offset = 0
-    size = len(stripped)
     while offset < size:
-        while offset < size and stripped[offset] in _KUBERNETES_PEM_WHITESPACE_SET:
-            offset += 1
-        if offset >= size:
-            break
         label = None
         for candidate in labels:
             begin = f"-----BEGIN {candidate}-----".encode("ascii")
-            if stripped.startswith(begin, offset):
+            if data.startswith(begin, offset):
                 label = candidate
                 break
         if label is None:
             return None
-        begin_end = offset + len(f"-----BEGIN {label}-----")
-        if stripped[begin_end : begin_end + 1] not in (b"\n", b"\r"):
+        begin_marker_end = offset + len(f"-----BEGIN {label}-----")
+        # EOF is never an accepted boundary here: a BEGIN line must be
+        # followed by a body and a matching END marker, never nothing.
+        begin_term_len = _kubernetes_pem_line_terminator_length(data, begin_marker_end)
+        if not begin_term_len:
             return None
+        body_start = begin_marker_end + begin_term_len
         end_marker = f"-----END {label}-----".encode("ascii")
-        end_index = stripped.find(end_marker, begin_end)
+        end_index = data.find(end_marker, body_start)
         if end_index == -1:
             return None
-        if stripped[end_index - 1 : end_index] not in (b"\n", b"\r"):
+        # The END marker must start a fresh line: the byte immediately before
+        # it must be the LF that ended the previous line (whether that line
+        # itself ended in a bare LF or a CRLF pair), not body content or an
+        # inter-block whitespace byte glued directly onto the same line.
+        if data[end_index - 1 : end_index] != b"\n":
             return None
-        block_end = end_index + len(end_marker)
-        # The END delimiter line must be exact and carry no trailing content
-        # of its own: the byte immediately following the marker must end that
-        # line (a bare LF, or the start of a CRLF pair) or the marker must run
-        # to the exact end of the value. Anything else -- including further
-        # permitted whitespace bytes such as a trailing space or tab -- is
-        # content on the same line as "-----END <LABEL>-----" and must reject
-        # the whole value, not be silently treated as ordinary inter-block
-        # whitespace by the next iteration's whitespace-skip loop.
-        if block_end != size and stripped[block_end : block_end + 1] not in (b"\n", b"\r"):
+        end_marker_end = end_index + len(end_marker)
+        end_term_len = _kubernetes_pem_line_terminator_length(data, end_marker_end)
+        if end_term_len is None:
             return None
-        blocks.append((label, stripped[offset:block_end]))
-        offset = block_end
+        blocks.append((label, data[offset:end_marker_end]))
+        offset = end_marker_end + end_term_len
+        while offset < size and data[offset] in _KUBERNETES_PEM_WHITESPACE_SET:
+            offset += 1
     if not blocks:
         return None
     return blocks

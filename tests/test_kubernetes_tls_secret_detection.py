@@ -784,38 +784,102 @@ def test_delimiter_line_with_trailing_content_rejects(tmp_path):
     assert _match(tmp_path, manifest) == []
 
 
-def test_end_delimiter_line_with_trailing_content_rejects(tmp_path):
-    # Codex principal review (PR #110): the END-line check must reject
-    # trailing content on the "-----END <LABEL>-----" line itself, not treat
-    # it as ordinary inter-block whitespace. A single-block value's trailing
-    # whitespace is already absorbed by the outer strip regardless of this
-    # check, so the bypass is only observable with a second block following
-    # -- the byte immediately after the first block's END marker must be a
-    # line terminator, not a space that happens to precede a later newline.
-    first_block = RSA_CRT.rstrip("\n")
-    broken = first_block + "   \n" + CA_CRT
+# Codex principal review (PR #110), round 2: the first fix still stripped the
+# *whole value* for permitted outer whitespace before ever validating a final
+# block's own END line, so a genuinely final "-----END CERTIFICATE----- \n"
+# was reduced to an apparent EOF boundary before the check ever ran, and a
+# bare CR (not followed by LF) was still accepted as a line terminator
+# anywhere. `_kubernetes_pem_blocks` no longer strips the value up front: each
+# delimiter marker's own terminator is now validated directly against the
+# unstripped bytes at its own position, so this must hold for a final block,
+# not only a block a chain member follows.
+_END_DELIMITER_TRAILING_CONTENT_CASES = [
+    ("SP then LF", " \n"),
+    ("HT then LF", "\t\n"),
+    ("VT then LF", "\x0b\n"),
+    ("FF then LF", "\x0c\n"),
+    ("bare CR", "\r"),
+]
+
+
+@pytest.mark.parametrize(
+    ("case", "suffix"),
+    _END_DELIMITER_TRAILING_CONTENT_CASES,
+    ids=[case for case, _ in _END_DELIMITER_TRAILING_CONTENT_CASES],
+)
+def test_final_certificate_end_delimiter_trailing_content_rejects(tmp_path, case, suffix):
+    # An otherwise-valid single certificate whose only defect is what follows
+    # its own (final, and only) END marker.
+    broken = RSA_CRT.rstrip("\n") + suffix
     manifest = _yaml_manifest(data={"tls.crt": _b64(broken), "tls.key": _b64(RSA_KEY)})
 
     assert _match(tmp_path, manifest) == []
 
 
-def test_end_delimiter_line_with_trailing_content_rejects_for_private_key(tmp_path):
-    first_block = RSA_KEY.rstrip("\n")
-    broken = first_block + "   \n" + RSA_KEY
+@pytest.mark.parametrize(
+    ("case", "suffix"),
+    _END_DELIMITER_TRAILING_CONTENT_CASES,
+    ids=[case for case, _ in _END_DELIMITER_TRAILING_CONTENT_CASES],
+)
+def test_final_private_key_end_delimiter_trailing_content_rejects(tmp_path, case, suffix):
+    # An otherwise-valid single private-key block whose only defect is what
+    # follows its own END marker -- deliberately not a second key block or any
+    # other independent no-match condition, so a pass here can only mean the
+    # END-line check itself let it through.
+    broken = RSA_KEY.rstrip("\n") + suffix
     manifest = _yaml_manifest(data={"tls.crt": _b64(RSA_CRT), "tls.key": _b64(broken)})
 
     assert _match(tmp_path, manifest) == []
 
 
-def test_end_delimiter_line_immediately_at_end_of_value_is_still_accepted(tmp_path):
-    # The corresponding positive control: a value whose final byte is exactly
-    # the closing dash of "-----END CERTIFICATE-----", with no trailing
-    # newline at all, must remain a match -- the fix must not require a
-    # newline to always follow the END marker, only that nothing illegitimate
-    # does.
+def test_intermediate_certificate_end_delimiter_trailing_content_rejects(tmp_path):
+    # The same defect on a non-final block in a chain: trailing spaces on the
+    # first certificate's END line, immediately before a second, otherwise
+    # valid certificate.
+    broken = RSA_CRT.rstrip("\n") + "   \n" + CA_CRT
+    manifest = _yaml_manifest(data={"tls.crt": _b64(broken), "tls.key": _b64(RSA_KEY)})
+
+    assert _match(tmp_path, manifest) == []
+
+
+def test_end_delimiter_followed_by_lf_is_accepted(tmp_path):
+    manifest = _yaml_manifest(
+        data={
+            "tls.crt": _b64(RSA_CRT.rstrip("\n") + "\n"),
+            "tls.key": _b64(RSA_KEY.rstrip("\n") + "\n"),
+        }
+    )
+
+    assert len(_match(tmp_path, manifest)) == 1
+
+
+def test_end_delimiter_followed_by_crlf_is_accepted(tmp_path):
+    manifest = _yaml_manifest(
+        data={
+            "tls.crt": _b64(RSA_CRT.rstrip("\n") + "\r\n"),
+            "tls.key": _b64(RSA_KEY.rstrip("\n") + "\r\n"),
+        }
+    )
+
+    assert len(_match(tmp_path, manifest)) == 1
+
+
+def test_end_delimiter_immediately_at_end_of_value_is_accepted(tmp_path):
+    # A value whose final byte is exactly the closing dash of
+    # "-----END CERTIFICATE-----"/"-----END PRIVATE KEY-----", with no
+    # trailing newline at all, must remain a match -- the fix must not
+    # require a newline to always follow the END marker, only that nothing
+    # illegitimate does.
     manifest = _yaml_manifest(
         data={"tls.crt": _b64(RSA_CRT.rstrip("\n")), "tls.key": _b64(RSA_KEY.rstrip("\n"))}
     )
+
+    assert len(_match(tmp_path, manifest)) == 1
+
+
+def test_private_key_with_permitted_outer_whitespace_only_is_accepted(tmp_path):
+    padded = " \t\r\n" + RSA_KEY + "\x0b\x0c "
+    manifest = _yaml_manifest(data={"tls.crt": _b64(RSA_CRT), "tls.key": _b64(padded)})
 
     assert len(_match(tmp_path, manifest)) == 1
 
