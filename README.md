@@ -15,25 +15,63 @@ readiness, and remediation decisions to qualified human review.
 
 ## Quickstart
 
-Run a local scan against the repository's deliberately synthetic demo target:
+Run, review, and export a local scan of the repository's deliberately synthetic
+demo target — this is the canonical first-run sequence:
 
 ```bash
 git clone https://github.com/serewicz/HarvestGuard.git
 cd HarvestGuard
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv venv            # macOS: python3.12 -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 python -m pip install .
+
+# 1. Review the scan in the terminal
 harvestguard scan demo/sample_target --type all --summary
+
+# 2. Export the same scan as evidence artifacts (two runs; --json and
+#    --markdown cannot be combined in one command)
+harvestguard scan demo/sample_target --type all --json findings.json
 harvestguard scan demo/sample_target --type all --markdown report.md
 ```
 
-The first command prints a concise summary; the second writes a local Markdown
-evidence report. The demo contains fake patterns only—never real credentials;
+`findings.json` and `report.md` are written **relative to the directory you run
+the command in** — the repository root, if you followed the steps above.
+Nothing is uploaded anywhere, and nothing is written unless you pass a path.
+
+What to expect from the demo scan:
+
+- all three commands exit `0`. Exit `1` means a scanner failed partway through,
+  and exit `2` means invalid usage — see
+  [Exit Codes](docs/CLI.md#exit-codes).
+- the summary reports `Files scanned: 4` and `Total normalized records: 5`, and
+  the JSON array holds those same five normalized records.
+- `Errors: 1` and `Findings with finding-level errors: 1` are **expected, not a
+  failure**. The demo `.env` fixture deliberately contains a PEM header whose
+  body is fake text, so it is reported as a low-confidence
+  `Malformed PEM Private Key` record whose `errors` field names the parse
+  failure. `Scanner execution errors: 0`, and the exit code stays `0`. Read
+  *Errors and Warnings* and each finding's `errors`, not just the exit code,
+  before treating a scan as clean —
+  [reading coverage from an artifact](docs/CLI.md#reading-coverage-from-an-artifact).
+- the Markdown report's `Coverage` row reads `Bounded by configured scan scope`,
+  because `--max-depth` defaults to `3` — a configured bound, not a failure.
+- one aggregate filesystem record is host-dependent, so its volume-encryption
+  value and confidence may legitimately differ on your machine, and on a host
+  where volume status cannot be determined at all the `Coverage` row reads
+  `Not complete` instead: [what varies by host](docs/CLI.md#what-varies-by-host).
+
+This is one small selected synthetic sample. It shows the output shape; it does
+not demonstrate exhaustive discovery, runtime use, exploitability, business
+risk, compliance, remediation priority, or quantum readiness.
+
+The demo contains fake patterns only—never real credentials;
 [`demo/sample_target/README.md`](demo/sample_target/README.md) documents each
 demo file, its synthetic provenance, and the finding it is expected to produce.
 To see what that output looks like before installing anything, read the sample
 JSON and Markdown artifacts from exactly this demo scan in
-[`docs/examples/first-run/`](docs/examples/first-run/README.md).
+[`docs/examples/first-run/`](docs/examples/first-run/README.md), and the
+per-finding walkthrough in the
+[CLI demo walkthrough](docs/CLI.md#demo-walkthrough).
 Windows activation instructions, cloud targets, output formats, exit codes, and
 the optional local evidence store are covered in the
 [detailed setup and usage](#detailed-setup-and-usage) section and

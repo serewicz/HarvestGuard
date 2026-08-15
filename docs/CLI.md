@@ -1185,9 +1185,12 @@ the steps yourself:
    code `0` and the summary shown in [Demo Walkthrough](#demo-walkthrough).
    Progress lines (`Running filesystem scanner...`) go to stderr, so stdout is
    safe to pipe.
-2. **Demo artifacts.** Add `--json findings.json` and `--markdown report.md`.
-   Expect three findings in the JSON array and every section listed under
-   [Markdown output](#markdown-output) in the report.
+2. **Demo artifacts.** Add `--json findings.json` and `--markdown report.md`
+   (one per run — the two options cannot be combined). Each file is written
+   relative to the current working directory. Expect the five normalized
+   records described in [Demo Walkthrough](#demo-walkthrough) in the JSON
+   array and every section listed under [Markdown output](#markdown-output) in
+   the report.
 3. **A representative target.** Point the same commands at a real repository or
    directory (`harvestguard scan /path/to/repo --type all --json findings.json`).
    Nothing about the output shape depends on the demo fixture. Individual scan
