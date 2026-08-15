@@ -71,14 +71,38 @@ and is deliberately *not* normalized.
 
 One record in each sample is host-dependent and was **retained truthfully**
 rather than normalized: the aggregate `filesystem_context` record for the mount
-the demo corpus sits on. These samples were generated on Linux, where the
+the demo corpus sits on. **These samples were generated on Linux**, where the
 platform reported the volume as `Unencrypted` at confidence `Medium`
-(`rule_id: volume_status:unencrypted`, `Mount Point: /`). On another host —
-macOS with FileVault, for example, or a machine where the status cannot be
-determined at all — that one record's evidence text, value, confidence, and
+(`rule_id: volume_status:unencrypted`, `Mount Point: /`). On another supported
+host — macOS with FileVault, for example, or a machine where the status cannot
+be determined at all — that one record's evidence text, value, confidence, and
 rule id legitimately differ. This is documented behavior, not a defect; see
 [CLI.md § What varies by host](../../CLI.md#what-varies-by-host). Everything
 else in both samples depends only on the fixture's fixed content.
+
+On a supported macOS host in particular, volume-level encryption status can
+come back `Unknown` rather than a concrete `Encrypted`/`Unencrypted` value.
+When that happens, the aggregate context finding also gains a recorded
+limitation, and that single fact deterministically changes several places in
+the *Markdown* report beyond the one record above:
+
+- the `Coverage` field in *Scan Information* reads `Not complete` instead of
+  `Bounded by configured scan scope`;
+- a `Coverage was not complete: …` paragraph appears before *Scan Information*;
+- *Errors and Warnings* gains a `finding(s) record limitations…` bullet and a
+  nested `` `volume_status:unknown` `` count line.
+
+None of this is a fixture or detector regression — it is the report generator
+truthfully describing what that host observed. It is also why the committed
+Markdown sample here is not asserted byte-for-byte against a freshly generated
+one: `tests/test_first_run_samples.py`'s regeneration check normalizes away
+exactly this cluster of host-dependent text (the aggregate record's own row,
+the `Coverage` field, the paragraph, and the limitation bullets) before
+comparing, so the same demo scan reproduces the same *stable* evidence and
+report structure on every supported platform, without hiding or asserting
+away the platform-dependent text itself, and without ever claiming the two are
+identical. See that test's `_host_independent_lines` for the exact, named list
+of what is excluded and why.
 
 ## Privacy and evidence boundaries
 
