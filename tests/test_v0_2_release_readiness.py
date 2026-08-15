@@ -220,14 +220,40 @@ def test_audit_does_not_erase_the_existing_v0_1_tag_or_ghcr_images():
     assert "no github release or pypi package has been published" in lowered
     assert "ghcr contains signed commit-sha images and signature/attestation objects" in lowered
     assert "no `v0.1.0` or `v0.2.0` version-tagged image" in lowered
-    assert "repository's first tag" not in lowered
-    assert "repository’s first tag" not in lowered
     for broad_claim in (
         "created no tag",
         "no tag exists",
         "published release, package, or version-tagged image | none",
     ):
         assert broad_claim not in lowered
+
+
+def test_git_tags_table_preserves_the_existing_and_future_tag_distinction():
+    [tag_row] = _table_rows(AUDIT, r"Git tags")
+    current_state, future_state = tag_row[1], tag_row[2]
+    normalized_future = " ".join(future_state.lower().split())
+
+    assert "`v0.1.0` exists" in current_state
+    assert "annotated tag" in current_state
+    assert "no GitHub Release published from it" in current_state
+    assert "`v0.2.0` would be the repository's second version tag" in normalized_future
+    assert "separate maintainer decision" in normalized_future
+    assert "deleting or replacing `v0.1.0`" in normalized_future
+
+    for former_or_equivalent_claim in (
+        "second tag, or its first",
+        "second version tag, or its first",
+        "`v0.2.0` could be the first tag",
+        "`v0.2.0` could be the first version tag",
+        "`v0.2.0` would be the first tag",
+        "`v0.2.0` would be the first version tag",
+    ):
+        assert former_or_equivalent_claim not in normalized_future
+
+    assert not re.search(
+        r"v0\.2\.0.{0,80}\b(?:could|would)\b.{0,80}\bfirst(?: version)? tag\b",
+        normalized_future,
+    )
 
 
 def test_b3_covers_the_completed_first_public_use_work():

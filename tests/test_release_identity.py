@@ -226,6 +226,30 @@ def test_release_materials_record_the_existing_tag_without_claiming_a_release():
     assert "published to pypi" not in lowered_release or "not published to pypi" in lowered_release
 
 
+def test_release_materials_reject_stale_or_broad_tag_absence_claims():
+    for document, name in ((CHANGELOG, "CHANGELOG.md"), (RELEASE, "docs/RELEASE.md")):
+        normalized = " ".join(document.lower().replace("`", "").replace("*", "").split())
+        for contradiction in (
+            "tag pending",
+            "v0.1.0 tag has not been created",
+            "v0.1.0 tag has not yet been created",
+            "no v0.1.0 tag exists",
+            "no v0.1.0 git tag exists",
+            "v0.1.0 tag does not exist",
+            "v0.1.0 has not been tagged",
+            "v0.1.0 is not tagged",
+            "v0.1.0 is untagged",
+            "once the tag is cut",
+            "no tag exists",
+            "no git tag exists",
+            "no tags exist",
+            "no tag has been created",
+            "created no tag",
+            "no release tag",
+        ):
+            assert contradiction not in normalized, f"{name} contains: {contradiction!r}"
+
+
 def test_release_materials_identify_publication_as_a_pending_human_action():
     # The tag exists, but publishing a GitHub Release from it remains a
     # deliberate maintainer decision rather than an implied completed action.
@@ -238,10 +262,9 @@ def test_release_materials_identify_publication_as_a_pending_human_action():
 
 
 def test_release_readiness_reasoning_does_not_blame_a_dependency():
-    # Neither HG-010 nor HG-011 (nor any other roadmap item) may be cited as
-    # the reason the tag is absent -- every dependency is Complete, so the
-    # only accurate reason left is that a human has not yet run the tag
-    # command.
+    # The v0.1.0 tag exists, but no GitHub Release has been published from it.
+    # Release documentation must preserve that distinction and must not imply
+    # that an incomplete roadmap dependency controls the publication decision.
     gate_section = RELEASE[RELEASE.index("## Release readiness gate") :]
     for stale in (
         "hg-010 remains",
