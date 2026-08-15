@@ -23,8 +23,11 @@ appears as the *PEM Certificate* row under *Detailed Findings* in
 
 ## Layer 1 — Observed fact
 
-Everything in this layer is copied from the committed sample record. It answers
-the first three reader questions.
+The recorded technical values quoted in this layer, including the field table,
+are copied from the committed sample record. Context about the scan command,
+demo-corpus provenance, and scan-level limitations comes from separately linked
+committed documentation, not from the selected finding record. This layer
+answers the first three reader questions.
 
 **What was found?** A PEM-encoded X.509 certificate that the scanner parsed
 successfully. HarvestGuard recorded it as asset type `PEM Certificate` with
@@ -35,8 +38,13 @@ observed evidence `PEM Certificate parsed successfully` at confidence `High`.
 
 **How was it found?** The `crypto_inventory` scanner (version `0.1.0`) read the
 file during a scan of `demo/sample_target` and parsed the certificate structure
-out of its content. The command that produced this record is documented in the
-[sample provenance table](first-run/README.md#provenance).
+out of its content. The selected record supplies that scanner name and version,
+but its `collection_method` and `collection_source` fields are both `null`; it
+does not record the scan command or collection context. The command that
+produced the sample is separately documented in the
+[sample provenance table](first-run/README.md#provenance), and the input's
+synthetic provenance is separately documented in the
+[demo corpus manifest](../../demo/sample_target/README.md).
 
 | Field (as recorded) | Value |
 | --- | --- |
@@ -46,6 +54,8 @@ out of its content. The command that produced this record is documented in the
 | `confidence` | `High` |
 | `scanner_name` / `scanner_version` | `crypto_inventory` / `0.1.0` |
 | `rule_id` | `null` (this record carries no rule id) |
+| `collection_method` | `null` (not recorded for this finding) |
+| `collection_source` | `null` (not recorded for this finding) |
 | `technical_metadata.Algorithm` | `RSA` |
 | `technical_metadata.Key Size` | `2048` |
 | `technical_metadata.Signature Algorithm` | `sha256` |
@@ -62,10 +72,11 @@ Confidence describes evidence quality only — never business severity, exposure
 or urgency ([TERMINOLOGY.md](../TERMINOLOGY.md#evidence-layer-terms)).
 
 **Limitations that still apply.** This record's own `limitations` list is empty,
-which is not a statement that nothing limits it. The scan-level limitations in
-[`sample-report.md`](first-run/sample-report.md) still hold: findings are
-observed evidence rather than business conclusions, each scanner's detection
-surface is deliberately narrow
+which is not a statement that nothing limits it. The scan-level limitations
+below are separately sourced from the committed
+[`sample-report.md`](first-run/sample-report.md), not from the selected finding
+record: findings are observed evidence rather than business conclusions, each
+scanner's detection surface is deliberately narrow
 ([DETECTION_CHARACTERIZATION.md](../DETECTION_CHARACTERIZATION.md)), and absence
 of a finding is not proof of absence. The scan also observed the file on disk
 only; it did not observe any system using it.

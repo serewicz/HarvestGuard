@@ -143,9 +143,36 @@ def test_every_quoted_technical_field_matches_the_committed_sample(example, sele
     # Fields the example describes as absent must really be absent.
     assert selected_finding["rule_id"] is None
     assert "`null`" in table["`rule_id`"]
+    for field in ("collection_method", "collection_source"):
+        assert selected_finding[field] is None
+        assert "`null`" in table[f"`{field}`"]
     for empty in ("unknowns", "limitations", "errors"):
         assert selected_finding[empty] == [], empty
     assert "empty" in table["`unknowns` / `limitations` / `errors`"]
+
+
+def test_record_values_are_distinguished_from_separately_documented_context(example):
+    observed = _flat(_section(example, LAYER_HEADINGS[0]))
+
+    assert (
+        "The recorded technical values quoted in this layer, including the field table, "
+        "are copied from the committed sample record" in observed
+    )
+    assert (
+        "Context about the scan command, demo-corpus provenance, and scan-level "
+        "limitations comes from separately linked committed documentation, not from the "
+        "selected finding record" in observed
+    )
+    assert "its `collection_method` and `collection_source` fields are both `null`" in observed
+    assert "it does not record the scan command or collection context" in observed
+    assert "sample is separately documented in the [sample provenance table]" in observed
+    assert "synthetic provenance is separately documented in the [demo corpus manifest]" in observed
+    assert (
+        "scan-level limitations below are separately sourced from the committed "
+        "[`sample-report.md`](first-run/sample-report.md), not from the selected finding "
+        "record" in observed
+    )
+    assert "Everything in this layer is copied from the committed sample record" not in observed
 
 
 def test_the_example_preserves_the_findings_empty_limitations_honestly(example):
