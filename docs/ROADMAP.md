@@ -810,6 +810,33 @@ Milestone 2 is fully delivered.
 - **GitHub issue:** https://github.com/serewicz/HarvestGuard/issues/80
 - **Pull request:** https://github.com/serewicz/HarvestGuard/pull/96
 
+## Cryptographic Inventory Completion Epic
+
+- **Scope:** HG-033 through HG-044
+- **Status:** Complete
+- **Milestone:** v0.2
+- **Purpose:** Complete the bounded, format-specific cryptographic asset
+  inventory expansion while preserving evidence-only findings, conservative
+  structural validation, deterministic ownership, privacy-safe metadata, and
+  existing scan accounting. Detection alone does not establish runtime
+  exposure, exploitability, remediation priority, business risk, compliance
+  failure, HNDL exposure, quantum risk, or migration readiness.
+- **Delivered capabilities:** In addition to the framework, relationship model,
+  and age support recorded above, reviewed and merged PRs delivered BCFKS and
+  JCEKS keystore evidence (HG-036/HG-037), encrypted PKCS#8 private-key evidence
+  (HG-038), CMS and PKCS#7 encrypted-object evidence (HG-039), legacy PEM
+  encryption evidence (HG-040), Mozilla NSS database inventory (HG-041), and
+  Java trusted-certificate-only store inventory (HG-042).
+- **Final deliveries:** HG-043 added OpenSSH host identity evidence through
+  file-local private-key, public-key, and host-certificate findings, with no
+  cross-file key/certificate pairing; it was completed through reviewed
+  [PR #109](https://github.com/serewicz/HarvestGuard/pull/109). HG-044 added
+  Kubernetes TLS Secret manifest inventory for supported local JSON and YAML
+  manifest documents, without cluster, Kubernetes API, or kubeconfig access;
+  it was completed through reviewed
+  [PR #110](https://github.com/serewicz/HarvestGuard/pull/110).
+- **Epic issue:** https://github.com/serewicz/HarvestGuard/issues/77
+
 ## Preserved Product Notes
 
 These existing decisions remain part of the roadmap context:
@@ -826,10 +853,11 @@ These existing decisions remain part of the roadmap context:
   additional source languages, network, deeper binary, entropy, and runtime
   crypto analysis remain future scan surfaces and should integrate mature
   third-party scanners where appropriate.
-- Broader crypto-container and keystore coverage (for example Java keystores,
-  HSM/KMS integrations beyond current cloud provider metadata, and additional
-  certificate/key container formats) is a future scan surface, not yet
-  implemented.
+- Java keystore and truststore coverage now includes the delivered JKS, JCEKS,
+  BCFKS, and trusted-certificate-only detector contracts. Coverage remains
+  intentionally bounded; additional crypto-container, keystore, and truststore
+  formats and deeper ecosystem use cases, including HSM/KMS integrations beyond
+  current cloud provider metadata, remain future scan surfaces.
 - Filename- and path-based regulated-data classification signals, if added,
   are a heuristic classification/ownership signal only — a filename or path
   match is never proof that regulated data exists in a file, and must carry
