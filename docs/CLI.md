@@ -1185,9 +1185,12 @@ the steps yourself:
    code `0` and the summary shown in [Demo Walkthrough](#demo-walkthrough).
    Progress lines (`Running filesystem scanner...`) go to stderr, so stdout is
    safe to pipe.
-2. **Demo artifacts.** Add `--json findings.json` and `--markdown report.md`.
-   Expect three findings in the JSON array and every section listed under
-   [Markdown output](#markdown-output) in the report.
+2. **Demo artifacts.** Add `--json findings.json` and `--markdown report.md`
+   (one per run — the two options cannot be combined). Each file is written
+   relative to the current working directory. Expect the five normalized
+   records described in [Demo Walkthrough](#demo-walkthrough) in the JSON
+   array and every section listed under [Markdown output](#markdown-output) in
+   the report.
 3. **A representative target.** Point the same commands at a real repository or
    directory (`harvestguard scan /path/to/repo --type all --json findings.json`).
    Nothing about the output shape depends on the demo fixture. Individual scan
@@ -1340,8 +1343,11 @@ permissions, volume encryption, or secure deletion as your engagement requires.
 ## Exit Codes
 
 - `0`: scan completed without scanner-level failures.
-- `1`: at least one scanner failed, but other recoverable scanner results were
-  returned. Suppress with `--no-fail-on-error` to exit `0` in this case.
+- `1`: an execution or output failure — at least one scanner failed while other
+  recoverable scanner results were returned, or writing a requested output file
+  or evidence-store record failed after an otherwise successful scan.
+  `--no-fail-on-error` suppresses only the scanner-failure case, exiting `0`
+  there.
 - `2`: invalid CLI usage, such as an unknown `--type`, a negative `--max-depth`,
   a malformed Azure target, or a local path that does not exist.
 
@@ -1359,8 +1365,10 @@ Two ordering guarantees follow from persisting before emitting output:
   then fails, the command still exits `1`, but the stored run remains complete
   and retrievable with `harvestguard evidence export`.
 
-Exit code `2` always means invalid input, and `1` always means a scan
-execution failure, so automation can branch on the difference.
+Exit code `2` always means invalid input, and `1` always means an execution or
+output failure — a scanner failure, or a failure to write requested output or an
+evidence-store record after an otherwise successful scan — so automation can
+branch on the difference.
 
 **One documented exception to `1`:** a `--type code` *execution* failure —
 `semgrep` not installed, timed out, exiting non-zero, or emitting output that
