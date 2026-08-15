@@ -28,7 +28,9 @@ harvestguard scan demo/sample_target --type all --markdown report.md
 ```
 
 The first command prints a concise summary; the second writes a local Markdown
-evidence report. The demo contains fake patterns only—never real credentials.
+evidence report. The demo contains fake patterns only—never real credentials;
+[`demo/sample_target/README.md`](demo/sample_target/README.md) documents each
+demo file, its synthetic provenance, and the finding it is expected to produce.
 Windows activation instructions, cloud targets, output formats, exit codes, and
 the optional local evidence store are covered in the
 [detailed setup and usage](#detailed-setup-and-usage) section and

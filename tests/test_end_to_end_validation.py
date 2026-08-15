@@ -230,13 +230,15 @@ def test_documented_module_invocation_produces_the_documented_demo_summary():
     assert completed.returncode == 0, completed.stderr
     for documented_line in [
         "HarvestGuard Scan Complete",
-        "Files scanned: 1",
-        "Private Keys: 1",
+        "Files scanned: 4",
+        "Certificates: 1",
+        "Private Keys: 2",
+        "Encrypted Keys: 1",
         "Sensitive Files: 1",
         "Semgrep Findings: 0",
         "Malformed Assets: 1",
         "Errors: 1",
-        "Total normalized records: 3",
+        "Total normalized records: 5",
     ]:
         assert documented_line in completed.stdout
     # Progress goes to stderr, so stdout stays usable on its own.
@@ -310,13 +312,15 @@ def test_installed_console_script_produces_the_documented_demo_artifacts(
     assert summary.returncode == 0, summary.stderr[-2000:]
     for documented_line in [
         "HarvestGuard Scan Complete",
-        "Files scanned: 1",
-        "Private Keys: 1",
+        "Files scanned: 4",
+        "Certificates: 1",
+        "Private Keys: 2",
+        "Encrypted Keys: 1",
         "Sensitive Files: 1",
         "Semgrep Findings: 0",
         "Malformed Assets: 1",
         "Errors: 1",
-        "Total normalized records: 3",
+        "Total normalized records: 5",
     ]:
         assert documented_line in summary.stdout
 
@@ -325,7 +329,7 @@ def test_installed_console_script_produces_the_documented_demo_artifacts(
     )
     assert json_run.returncode == 0, json_run.stderr[-2000:]
     payload = json.loads(json_run.stdout)
-    assert isinstance(payload, list) and len(payload) == 3
+    assert isinstance(payload, list) and len(payload) == 5
     assert {record["source_type"] for record in payload} == {
         "local_filesystem",
         "crypto_inventory",
@@ -365,13 +369,14 @@ def test_demo_summary_matches_the_documented_walkthrough(capsys):
     output = capsys.readouterr().out
     assert exit_code == 0
     # The counts docs/CLI.md's demo walkthrough prints verbatim.
-    assert "Files scanned: 1" in output
-    assert "Certificates: 0" in output
-    assert "Private Keys: 1" in output
+    assert "Files scanned: 4" in output
+    assert "Certificates: 1" in output
+    assert "Private Keys: 2" in output
+    assert "Encrypted Keys: 1" in output
     assert "Sensitive Files: 1" in output
     assert "Malformed Assets: 1" in output
     assert "Errors: 1" in output
-    assert "Total normalized records: 3" in output
+    assert "Total normalized records: 5" in output
 
 
 def test_demo_json_output_is_a_valid_normalized_finding_array(capsys):
@@ -382,7 +387,7 @@ def test_demo_json_output_is_a_valid_normalized_finding_array(capsys):
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
     assert exit_code == 0
-    assert isinstance(payload, list) and len(payload) == 3
+    assert isinstance(payload, list) and len(payload) == 5
     assert {record["source_type"] for record in payload} == {
         "local_filesystem",
         "crypto_inventory",
