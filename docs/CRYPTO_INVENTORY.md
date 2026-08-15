@@ -189,6 +189,31 @@ Example output shape:
   principal, key ID, serial, validity window, extension, or certificate
   signature is reported. See
   [what is and is not supported](DETECTION_CHARACTERIZATION.md#openssh-host-identity-evidence-hg-043)
+- Kubernetes TLS Secret manifests — `rule_id: kubernetes_secret:tls` (asset
+  type `Kubernetes TLS Secret`, confidence `High`), one finding per supported
+  **manifest document**, never one per encoded field, certificate, or key. The
+  claim is exactly: *this local manifest document structurally declares a
+  Kubernetes v1 TLS Secret, and its effective `tls.crt` and `tls.key` values
+  contain a supported X.509 certificate chain and a matching unencrypted
+  private key.* Local manifest bytes only — no Kubernetes API, kubeconfig,
+  network, or `kubectl`/`helm`/`kustomize`/`openssl` subprocess. Detection is
+  content-gated (the text must literally contain `kubernetes.io/tls`,
+  `tls.crt`, and `tls.key`), never extension-gated, and covers one JSON object
+  or one or more bounded YAML documents in one physical file. The object
+  boundary is exact and case-sensitive (`apiVersion: v1`, `kind: Secret`,
+  `type: kubernetes.io/tls`); `metadata` is optional and ignored. Effective
+  values follow Kubernetes' `stringData`-over-`data` precedence, with strict
+  canonical RFC 4648 base64 required for a selected `data` value; unrelated
+  Secret values are never decoded. The effective `tls.crt` must be exactly one
+  or more complete PEM `CERTIFICATE` blocks and the effective `tls.key` exactly
+  one unencrypted PEM `PRIVATE KEY`/`RSA PRIVATE KEY`/`EC PRIVATE KEY` block
+  (RSA, ECDSA on `secp256r1`/`secp384r1`/`secp521r1`, or Ed25519), with the
+  key's public key byte-identical to the **first** certificate's. Each match
+  reports at the deterministic virtual location `<file>#document=<N>` — an
+  object inside the file, not a real filesystem path — while the physical file
+  still counts once. Only `Algorithm`, `Key Size`, and `Format` are emitted;
+  `Fingerprint` and every certificate identity field stay unset. See
+  [what is and is not supported](DETECTION_CHARACTERIZATION.md#kubernetes-tls-secret-inventory-hg-044)
 - OpenSSL `Salted__` encrypted files (leading-byte signature only, not
   decrypted; checked before any extension-based branch above)
 - OpenPGP/GPG encrypted files, binary or ASCII-armored, identified by the
@@ -545,6 +570,29 @@ Recursive scans do not follow symbolic links by default. Use
   regardless of signature validity. `Fingerprint` is always unset for these
   three rules. Absence of an `openssh_host_identity:*` finding is not proof
   that no OpenSSH host key or certificate exists in the target.
+- Kubernetes TLS Secret findings describe a **local manifest document**, not a
+  cluster. `kubernetes_secret:tls` does not establish that the Secret exists in
+  a cluster, was admitted, is mounted or projected, is referenced by an
+  Ingress, Gateway, or cert-manager object, is used by any workload, is
+  trusted, is currently valid, has a valid hostname or chain, or is safely
+  managed — and it never assigns risk, remediation, compliance, HNDL, or
+  quantum classification. Certificate trust, chain building, signature,
+  hostname, and date validation are all deliberately out of scope. Out of scope
+  entirely: the Kubernetes API and kubeconfig, Helm templates, Kustomize
+  generators, `List`/`SecretList` and top-level arrays, `SealedSecret`,
+  External Secrets, SOPS, `Opaque` Secrets with TLS-looking keys, encrypted
+  private keys, and password collection. YAML support is bounded — at most 64
+  documents, nesting depth 64, and 100,000 parse events per file, parsed with
+  safe/basic loaders only, and aliases, anchors, merge keys, explicit tags,
+  YAML/TAG directives, and duplicate mapping keys reject the complete file —
+  and a manifest above the scanner's 5 MB text limit is not inspected at all. A
+  valid manifest whose required tokens appear only through escaped spellings is
+  a deliberate false negative. Decoded `tls.crt`/`tls.key` values are
+  validation evidence only: they are never emitted, persisted, written to a
+  temporary file, or resubmitted to another detector, and no Secret name,
+  namespace, label, annotation, unrelated value, or certificate identity is
+  ever reported. Absence of a `kubernetes_secret:tls` finding is not proof that
+  no Kubernetes TLS Secret exists in the target.
 - Random binary files are skipped unless their extension or header indicates a
   supported crypto asset.
 - OpenPGP/GPG detection covers specific encrypted-file structures, not the

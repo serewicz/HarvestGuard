@@ -33,6 +33,7 @@ REQUIREMENTS = REPO_ROOT / "requirements.txt"
 EXPECTED_CLI_DEPENDENCIES = {
     "pandas",
     "cryptography",
+    "pyyaml",
     "certifi",
     "semgrep",
     "boto3",
@@ -92,6 +93,9 @@ FIRST_PARTY_NAMES = {
 IMPORT_TO_DISTRIBUTION = {
     "pandas": "pandas",
     "cryptography": "cryptography",
+    # The imported top-level module is `yaml`; the distribution that provides it
+    # is PyYAML, so the two names have to be mapped explicitly here.
+    "yaml": "pyyaml",
     "certifi": "certifi",
     "boto3": "boto3",
     "botocore": "botocore",
@@ -277,6 +281,38 @@ def test_packaged_code_does_not_import_the_unpackaged_dashboard():
     }
 
     assert not {path: names for path, names in offenders.items() if names}
+
+
+def test_pyyaml_floor_is_identical_in_both_files():
+    # HG-044 parses Kubernetes TLS Secret manifests with PyYAML's event-level
+    # parser and BaseLoader. The safe/basic loader profile it relies on is only
+    # contracted from 6.0.3, so the floor is asserted here directly rather than
+    # left to the generic drift check -- a floor that slipped in either file
+    # would silently change what the detector is allowed to assume.
+    expected = "PyYAML>=6.0.3"
+
+    assert expected in _declared_cli_dependencies()
+    assert expected in _requirements_lines()
+
+
+def test_kubernetes_manifest_parsing_uses_only_safe_basic_loaders():
+    # The dependency is approved on the condition that target input never
+    # reaches an object-constructing loader. Assert the source, not the docs.
+    source = (REPO_ROOT / "scanner" / "crypto_inventory.py").read_text(encoding="utf-8")
+
+    assert "yaml.BaseLoader" in source
+    for forbidden in (
+        "yaml.Loader",
+        "yaml.SafeLoader",
+        "yaml.FullLoader",
+        "yaml.UnsafeLoader",
+        "yaml.CBaseLoader",
+        "yaml.CSafeLoader",
+        "yaml.unsafe_load",
+        "yaml.full_load",
+        "yaml.safe_load",
+    ):
+        assert forbidden not in source
 
 
 def test_semgrep_is_declared_because_the_cli_shells_out_to_it():
