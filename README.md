@@ -168,132 +168,23 @@ evidence and must remain traceable back to it.
   Python source only**: no binary, bytecode, runtime, or network/TLS
   discovery, and equivalent weak-crypto usage in another language produces no
   finding today.
-- **Cryptographic asset inventory** — discovers local certificate and key
-  material (PEM/DER X.509 certificates, PEM and OpenSSH keys, PKCS#12
-  containers, and JKS *header* evidence only) with algorithm, key size,
-  issuer, subject, expiration, fingerprint, confidence, and parsing errors.
-  Also recognizes OpenSSL `Salted__` encrypted files by their leading-byte
-  signature, and OpenPGP/GPG encrypted files by the leading session-key packet
-  `gpg --symmetric` / `gpg --encrypt` writes, in binary or ASCII armor
-  (evidence only, not decryption — signed messages, detached signatures, and
-  key blocks are not treated as encrypted files, and OpenPGP coverage is
-  partial, not complete). Also recognizes native age v1 encrypted files by
-  their own header structure (version line, recipient stanzas, header MAC-line
-  shape, and payload presence) — evidence only, never decrypted, with no
-  recipient identity reported; ASCII-armored age files and other age versions
-  are unsupported. Also recognizes standard forward-mode gocryptfs
-  cipher roots (config format version 2 only) by their root-level
-  `gocryptfs.conf`/`gocryptfs.diriv` pair — one finding per validated root
-  directory, never per ciphertext file, and never mounted, unlocked, or
-  decrypted; reverse mode and `PlaintextNames` mode are unsupported. Also
-  recognizes BCFKS keystore containers, **the supported encrypted-object-store
-  outer structure only**, from the file's own DER content rather than its
-  extension — evidence only, never decrypted, with no password prompted for or
-  validated, no entries enumerated, and no truststore-versus-keystore claim;
-  unencrypted `ObjectStoreData` stores and signature-integrity stores are
-  unsupported. Also recognizes JCEKS keystore containers from their **top-level
-  header only** (magic, supported version, nonnegative entry count, and a
-  plausible container length) — evidence only, at `Medium` confidence because
-  the store is never opened, no password is requested or accepted, the keyed
-  digest is never verified, entries are not parsed, and no Java serialized object
-  is deserialized. Also recognizes **encrypted PKCS#8 private keys** — the outer
-  `EncryptedPrivateKeyInfo` structure only, in DER form or RFC-style PEM labelled
-  `ENCRYPTED PRIVATE KEY` — validated structurally from the file's own bytes
-  rather than from its extension or from a key-loading API's password failure;
-  evidence only, never decrypted, with no password prompted for or accepted and
-  no encryption algorithm, KDF, cipher, salt, IV, iteration count, or OID
-  reported. Also recognizes **CMS/PKCS#7 encrypted objects** — the outer
-  RFC 5652 `ContentInfo` structure only, for `EnvelopedData` and
-  `EncryptedData`, in binary DER or the textual `CMS`/`PKCS7` forms — validated
-  structurally from the object's own bytes rather than its extension, and
-  separated from certificate-only and PKCS#7/CMS `SignedData` bundles, which
-  are not classified as encrypted; evidence only, never decrypted, with no
-  password, private key, or recipient certificate accepted, no signature or
-  certificate validated, no recipient enumerated, and no algorithm, OID, IV,
-  encrypted key, or ciphertext reported. Also recognizes **legacy encrypted PEM
-  private keys** — traditional OpenSSL-style `RSA`/`DSA`/`EC PRIVATE KEY` blocks
-  that declare `Proc-Type: 4,ENCRYPTED` and a valid `DEK-Info` header with a
-  non-empty strict-base64 body — validated from exact PEM boundaries and
-  headers only; evidence only, never decrypted, with no password prompted for
-  or accepted and no cipher, IV, or ciphertext reported. Also recognizes
-  **Mozilla NSS SQL database sets** — the canonical `cert9.db` + `key4.db` +
-  `pkcs11.txt` layout in one lexical directory, plus a structurally recognized
-  NSS internal-module stanza in the marker — as **one aggregate finding per
-  validated directory**, never one per component file; the two databases are
-  presence/eligibility checked only and are never opened, so no NSS or SQLite
-  tool or library is invoked, no password is requested or accepted, no
-  certificate or key is enumerated, and the marker's `configdir` is never
-  resolved or reported. Legacy DBM sets, prefixed or renamed layouts,
-  incomplete sets, and marker symlinks are unsupported. Also recognizes
-  **Java trusted-certificate-only stores** — a JKS or JCEKS store (version 1 or
-  2) whose **complete declared entry table** holds only trusted-certificate
-  entries, read from the file's own bytes rather than its name, so `cacerts` is
-  not privileged and identical bytes classify identically under any filename.
-  This is a **structural observation, not a runtime-role claim**: it does not
-  establish that any application uses the store as a truststore. Version-2
-  support is limited to the exact `X.509` certificate type, so a trusted
-  certificate of another Java-supported type is a deliberate false negative.
-  Stores holding any private-key entry, any JCEKS secret-key entry, an
-  unrecognized entry type, or no entries at all stay under the generic keystore
-  classification, and PKCS#12 and BCFKS stores used operationally for trust are
-  outside this rule. Evidence only: no password is requested or accepted, the
-  trailing integrity digest is neither verified nor reported, no key payload is
-  parsed, no Java serialized object is deserialized, `keytool` and Java are
-  never invoked, and no alias, certificate subject, issuer, serial number, SAN,
-  fingerprint, or validity date is reported. Also recognizes **OpenSSH host
-  identity evidence** — a supported unencrypted private key or public-key
-  record at an *exact* canonical OpenSSH host-key basename
-  (`ssh_host_rsa_key`, `ssh_host_ecdsa_key`, `ssh_host_ed25519_key`, and their
-  `.pub` counterparts) whose parsed algorithm agrees with that basename, and
-  any OpenSSH certificate record — no filename required — whose structure
-  encodes certificate type `HOST`. These are deliberately **file-local,
-  bounded observations**: a canonical-basename candidate is not proof that
-  `sshd` uses the file, and neither private/public pairing nor certificate
-  signature verification is performed (an intentionally accepted false
-  positive: a structurally valid but cryptographically invalid HOST
-  certificate signature still matches). Custom `HostKey` paths, a renamed key,
-  a supported key under the wrong canonical basename, an unsupported
-  algorithm or ECDSA curve (DSA, Ed448, or any curve outside `secp256r1`/
-  `secp384r1`/`secp521r1`), and an encrypted private key are deliberate false
-  negatives for these two candidate rules — the key itself remains visible
-  only through the existing generic private-key/public-key detectors, at
-  their own (unspecialized) asset type and confidence. A USER certificate,
-  and a HOST certificate this rule declines (an unsupported certified or
-  signing key, or one that fails to parse), are different: **zero findings**,
-  frozen by the same certificate-fallback contract this rule freezes for a
-  positive match — the generic public-key detector never reports OpenSSH
-  certificate content, structurally valid or not. Evidence only: no
-  password is prompted for or accepted, no `ssh`/`sshd`/`ssh-keygen` process is
-  invoked, and no comment, principal, key ID, or certificate signature is
-  reported. Also recognizes **Kubernetes TLS Secret manifests** — a local JSON
-  or bounded-YAML manifest *document* that structurally declares a Kubernetes
-  v1 `kubernetes.io/tls` Secret whose effective `tls.crt` and `tls.key` values,
-  resolved under Kubernetes' own `stringData`-over-`data` precedence and (for
-  `data`) a strict canonical base64 profile, hold one or more parsed PEM X.509
-  certificates and exactly one supported unencrypted PEM private key (RSA,
-  ECDSA on `secp256r1`/`secp384r1`/`secp521r1`, or Ed25519) whose public key
-  matches the **first** certificate's. Detection is **content-gated, not
-  extension-gated**, and reports **one aggregate finding per Secret document**
-  — never one per encoded field, certificate, or key — at the deterministic
-  virtual location `<file>#document=<N>`, while the physical file still counts
-  once. This is **local manifest inspection only**: no Kubernetes API is
-  contacted, no kubeconfig is read, and `kubectl`, `helm`, `kustomize`,
-  `openssl`, subprocesses, and the network are never used. It does not
-  establish that the Secret exists in a cluster, is used by a workload, is
-  trusted, is currently valid, or is safely managed, and no chain, signature,
-  hostname, or date is validated. `List`/`SecretList`, top-level arrays, Helm
-  templates, Kustomize generators, `SealedSecret`, External Secrets, SOPS,
-  `Opaque` Secrets with TLS-looking keys, and encrypted private keys are out of
-  scope; YAML parsing is bounded (64 documents, depth 64, 100,000 events) and
-  uses safe/basic loaders only, with aliases, anchors, merge keys, explicit
-  tags, directives, and duplicate keys rejecting the whole file. Evidence only:
-  no Secret name, namespace, label, annotation, raw or decoded value, or
-  certificate identity is reported, and decoded values are never resubmitted to
-  another detector. Only
-  files matching a candidate gate (recognized extension, crypto header, or one
-  of those encrypted-file/filesystem/keystore signatures) are parsed, and
-  broader keystore/crypto-container coverage is not implemented. See
-  [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md).
+- **Cryptographic asset inventory** — discovers supported local cryptographic
+  asset evidence without decryption, password or passphrase prompting, key
+  recovery, or runtime-use claims. Current coverage includes:
+  - X.509 certificates and supported private/public key material;
+  - PKCS#12 containers and Java keystore/truststore evidence;
+  - OpenSSL, OpenPGP/GPG, age, CMS/PKCS#7, and legacy encrypted PEM evidence;
+  - gocryptfs cipher roots;
+  - Mozilla NSS SQL database sets;
+  - OpenSSH host identity evidence;
+  - Kubernetes TLS Secret manifests.
+
+  Coverage is intentionally detector-specific and not exhaustive. Absence of a
+  finding is not proof of absence. See
+  [docs/CRYPTO_INVENTORY.md](docs/CRYPTO_INVENTORY.md) and
+  [docs/DETECTION_CHARACTERIZATION.md](docs/DETECTION_CHARACTERIZATION.md) for
+  exact supported formats, parser and evidence boundaries, metadata fields,
+  confidence levels, and known false-positive and false-negative conditions.
 - **Unified CLI** — runs local scanners through the normalized finding model
   with summary, JSON, and Markdown report output. `--json` emits an array of
   normalized findings; `--markdown` emits a local, evidence-only report
