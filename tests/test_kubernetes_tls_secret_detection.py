@@ -784,6 +784,42 @@ def test_delimiter_line_with_trailing_content_rejects(tmp_path):
     assert _match(tmp_path, manifest) == []
 
 
+def test_end_delimiter_line_with_trailing_content_rejects(tmp_path):
+    # Codex principal review (PR #110): the END-line check must reject
+    # trailing content on the "-----END <LABEL>-----" line itself, not treat
+    # it as ordinary inter-block whitespace. A single-block value's trailing
+    # whitespace is already absorbed by the outer strip regardless of this
+    # check, so the bypass is only observable with a second block following
+    # -- the byte immediately after the first block's END marker must be a
+    # line terminator, not a space that happens to precede a later newline.
+    first_block = RSA_CRT.rstrip("\n")
+    broken = first_block + "   \n" + CA_CRT
+    manifest = _yaml_manifest(data={"tls.crt": _b64(broken), "tls.key": _b64(RSA_KEY)})
+
+    assert _match(tmp_path, manifest) == []
+
+
+def test_end_delimiter_line_with_trailing_content_rejects_for_private_key(tmp_path):
+    first_block = RSA_KEY.rstrip("\n")
+    broken = first_block + "   \n" + RSA_KEY
+    manifest = _yaml_manifest(data={"tls.crt": _b64(RSA_CRT), "tls.key": _b64(broken)})
+
+    assert _match(tmp_path, manifest) == []
+
+
+def test_end_delimiter_line_immediately_at_end_of_value_is_still_accepted(tmp_path):
+    # The corresponding positive control: a value whose final byte is exactly
+    # the closing dash of "-----END CERTIFICATE-----", with no trailing
+    # newline at all, must remain a match -- the fix must not require a
+    # newline to always follow the END marker, only that nothing illegitimate
+    # does.
+    manifest = _yaml_manifest(
+        data={"tls.crt": _b64(RSA_CRT.rstrip("\n")), "tls.key": _b64(RSA_KEY.rstrip("\n"))}
+    )
+
+    assert len(_match(tmp_path, manifest)) == 1
+
+
 # ---------------------------------------------------------------------------
 # Private-key profile (Issue #89 "`tls.key` Profile")
 # ---------------------------------------------------------------------------

@@ -4179,6 +4179,16 @@ def _kubernetes_pem_blocks(
         if stripped[end_index - 1 : end_index] not in (b"\n", b"\r"):
             return None
         block_end = end_index + len(end_marker)
+        # The END delimiter line must be exact and carry no trailing content
+        # of its own: the byte immediately following the marker must end that
+        # line (a bare LF, or the start of a CRLF pair) or the marker must run
+        # to the exact end of the value. Anything else -- including further
+        # permitted whitespace bytes such as a trailing space or tab -- is
+        # content on the same line as "-----END <LABEL>-----" and must reject
+        # the whole value, not be silently treated as ordinary inter-block
+        # whitespace by the next iteration's whitespace-skip loop.
+        if block_end != size and stripped[block_end : block_end + 1] not in (b"\n", b"\r"):
+            return None
         blocks.append((label, stripped[offset:block_end]))
         offset = block_end
     if not blocks:
