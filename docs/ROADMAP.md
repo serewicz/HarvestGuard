@@ -853,10 +853,11 @@ These existing decisions remain part of the roadmap context:
   additional source languages, network, deeper binary, entropy, and runtime
   crypto analysis remain future scan surfaces and should integrate mature
   third-party scanners where appropriate.
-- Broader crypto-container and keystore coverage (for example Java keystores,
-  HSM/KMS integrations beyond current cloud provider metadata, and additional
-  certificate/key container formats) is a future scan surface, not yet
-  implemented.
+- Java keystore and truststore coverage now includes the delivered JKS, JCEKS,
+  BCFKS, and trusted-certificate-only detector contracts. Coverage remains
+  intentionally bounded; additional crypto-container, keystore, and truststore
+  formats and deeper ecosystem use cases, including HSM/KMS integrations beyond
+  current cloud provider metadata, remain future scan surfaces.
 - Filename- and path-based regulated-data classification signals, if added,
   are a heuristic classification/ownership signal only — a filename or path
   match is never proof that regulated data exists in a file, and must carry
