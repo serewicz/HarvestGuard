@@ -8,6 +8,22 @@ HarvestGuard is pre-1.0: CLI flags, report sections, and documentation may
 change between versions. The normalized finding schema is versioned separately
 (`schema_version`, currently `1.0.0`).
 
+## Unreleased
+
+Work merged to `main` since the `0.1.0` entry below — the `v0.1.1
+Stabilization` and `v0.2` cryptographic-inventory milestones in
+[docs/ROADMAP.md](docs/ROADMAP.md) (HG-028 through HG-044), plus the demo
+corpus, first-run sample output, quickstart, and executive-readable evidence
+example — is **not yet described by a version entry here**. The declared
+version is still `0.1.0` in both `pyproject.toml` and `harvestguard_version.py`.
+
+Drafting a `0.2.0` entry is a listed open item (B-3) in the
+[v0.2 pre-1.0 release readiness audit](docs/RELEASE.md#v02-pre-10-release-readiness-audit),
+which records the current version identity, the reproducible readiness checks
+and their results, every remaining open item with an owner, and the exact
+commands a later authorized release action would run. No tag, release, package
+publication, or version change has been made.
+
 ## 0.1.0 — Controlled Diligence Pilot (approved, tag pending)
 
 v0.1.0's implementation and closure review are complete: HG-008, HG-009,
