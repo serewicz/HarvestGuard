@@ -134,13 +134,11 @@ def test_audit_separates_the_current_state_from_the_proposed_release():
     lowered = AUDIT.lower()
     assert "the repository is **not** at v0.2" in lowered
     # A v0.1.0 tag genuinely exists (verified against git ls-remote / the
-    # GitHub API while completing this audit -- see B-9), so the audit must
-    # say so plainly rather than repeat the stale "no tag exists" claim the
-    # pre-existing Release readiness gate section and CHANGELOG.md's "tag
-    # pending" label still carry.
+    # GitHub API while completing this audit), so the audit must say so plainly
+    # and distinguish it from the missing GitHub Release.
     assert "a `v0.1.0` tag already exists" in lowered
     assert "no github release published from it" in lowered
-    assert "the tag itself is real" in lowered
+    assert "the annotated `v0.1.0` tag already exists" in lowered
 
 
 # --- Every unresolved item is owned ----------------------------------------
@@ -148,7 +146,8 @@ def test_audit_separates_the_current_state_from_the_proposed_release():
 
 def test_every_open_item_has_an_id_blocking_state_and_owner_action():
     rows = _table_rows(_section(RELEASE_TEXT, AUDIT_HEADING), r"B-\d+")
-    assert len(rows) >= 5, "the audit records fewer open items than it claims to"
+    expected = {f"B-{number}" for number in range(1, 10)}
+    assert {row[0] for row in rows} == expected
 
     identifiers = [row[0] for row in rows]
     assert len(set(identifiers)) == len(identifiers), f"duplicate open-item ids: {identifiers}"
@@ -164,6 +163,19 @@ def test_open_items_referenced_in_the_audit_text_are_all_defined():
     defined = {row[0] for row in _table_rows(AUDIT, r"B-\d+")}
     referenced = set(re.findall(r"\bB-\d+\b", AUDIT))
     assert referenced <= defined, f"undefined open items referenced: {sorted(referenced - defined)}"
+
+
+def test_every_blocking_open_item_is_named_in_the_release_checklist():
+    rows = _table_rows(AUDIT, r"B-\d+")
+    blocking = {row[0] for row in rows if row[2].lower().startswith("yes")}
+    checklist = AUDIT[AUDIT.index("### Proposed v0.2 release checklist") :]
+
+    assert blocking == {"B-1", "B-2", "B-3", "B-4", "B-5", "B-9"}
+    for identifier in blocking:
+        assert re.search(rf"\b{re.escape(identifier)}\b", checklist), (
+            f"the release checklist omits blocking item {identifier}"
+        )
+    assert "B-1 through B-5 and B-9" in checklist
 
 
 # --- The checklist identifies release commands without executing them -------
@@ -189,7 +201,7 @@ def test_checklist_states_that_none_of_it_was_run():
 
 
 def test_audit_claims_no_tag_release_publication_or_version_change():
-    lowered = AUDIT.lower()
+    lowered = " ".join(AUDIT.lower().split())
     for forbidden in (
         "v0.2.0 has been released",
         "tag has been created",
@@ -198,8 +210,32 @@ def test_audit_claims_no_tag_release_publication_or_version_change():
         "the release has been published",
     ):
         assert forbidden not in lowered, f"the audit falsely claims: {forbidden!r}"
-    assert "created no tag" in lowered
+    assert "created no `v0.2.0` tag" in lowered
     assert "changed no version literal" in lowered
+
+
+def test_audit_does_not_erase_the_existing_v0_1_tag_or_ghcr_images():
+    lowered = " ".join(AUDIT.lower().split())
+    assert "the annotated `v0.1.0` tag already exists" in lowered
+    assert "no github release or pypi package has been published" in lowered
+    assert "ghcr contains signed commit-sha images and signature/attestation objects" in lowered
+    assert "no `v0.1.0` or `v0.2.0` version-tagged image" in lowered
+    assert "repository's first tag" not in lowered
+    assert "repository’s first tag" not in lowered
+    for broad_claim in (
+        "created no tag",
+        "no tag exists",
+        "published release, package, or version-tagged image | none",
+    ):
+        assert broad_claim not in lowered
+
+
+def test_b3_covers_the_completed_first_public_use_work():
+    [b3] = _table_rows(AUDIT, r"B-3")
+    owner_action = b3[3]
+    assert "HG-028…HG-044" in owner_action
+    assert "Issues #115 through #118" in owner_action
+    assert "#119 release-readiness audit" in owner_action
 
 
 def test_audit_stays_an_operational_readiness_record():
@@ -255,6 +291,8 @@ def test_changelog_records_the_undescribed_merged_work_and_points_at_the_audit()
     assert "not yet described by a version entry here" in unreleased
     assert f"`{__version__}` in both `pyproject.toml` and `harvestguard_version.py`" in unreleased
     assert "docs/RELEASE.md#v02-pre-10-release-readiness-audit" in unreleased
-    assert "no tag, release, package publication, or version change has been made" in (
-        " ".join(unreleased.lower().split())
-    )
+    normalized = " ".join(unreleased.lower().split())
+    assert "no `v0.2.0` tag or github release has been created" in normalized
+    assert "no pypi, wheel, or sdist publication has been made" in normalized
+    assert "no version change has been made" in normalized
+    assert "no tag, release, package publication" not in normalized

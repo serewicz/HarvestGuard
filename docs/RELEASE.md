@@ -74,7 +74,7 @@ at that commit:
 ```bash
 git clone https://github.com/serewicz/HarvestGuard.git
 cd HarvestGuard
-git checkout v0.1.0          # once the tag is cut, see Release readiness below
+git checkout v0.1.0          # the existing annotated tag; see Release readiness below
 git rev-parse HEAD           # the exact commit an artifact was produced from
 ```
 
@@ -173,24 +173,22 @@ share. Every item is now `Complete`; the milestone is fully delivered.
 | HG-010 Product claims and trust audit | Complete | [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md) |
 | HG-011 Release identity and reproducibility | Complete | This document + [CHANGELOG.md](../CHANGELOG.md) |
 
-**The `v0.1.0` tag has not been created.** HG-008 through HG-011 are all
+**The annotated `v0.1.0` git tag exists.** HG-008 through HG-011 are all
 `Complete`, and the controlled-pilot implementation and closure reviews are
-finished. Creating and pushing the `v0.1.0` tag, and publishing the GitHub
-release for it, is a separate, deliberate human release action performed
-after this post-closure documentation reconciliation is reviewed and merged
-— not a sign that any roadmap dependency remains incomplete. The repository
-is ready for that action once this change lands. No release tag, GitHub
-Release, PyPI artifact, or version-tagged (`:v0.1.0`) container image exists
-yet.
-`tests/test_release_identity.py` enforces this deterministically from
-repository content: it checks that HG-008 through HG-011 all read `Complete`,
-and that release documentation neither claims the tag already exists nor
-blames an incomplete dependency for its absence.
+finished. No GitHub Release has been published from that tag. Deciding whether
+to publish one is a separate, deliberate maintainer release action — not a
+sign that any roadmap dependency remains incomplete. HarvestGuard is not
+published to PyPI, no released wheel or sdist exists, and neither `v0.1.0` nor
+`v0.2.0` has a version-tagged container image.
+`tests/test_release_identity.py` enforces this distinction deterministically
+from repository documentation and local version identity, without network
+access.
 
 ## v0.2 pre-1.0 release readiness audit
 
 A bounded go/no-go evidence record for a **possible** v0.2 release. Producing it
-created no tag, published no release or package, and changed no version literal;
+created no `v0.2.0` tag, published no GitHub Release or PyPI/wheel/sdist
+artifact, and changed no version literal;
 every command in the [proposed v0.2 release checklist](#proposed-v02-release-checklist)
 below is written for a later, explicitly authorized human release action and was
 deliberately not executed.
@@ -224,23 +222,20 @@ The repository is **not** at v0.2 and does not describe itself as v0.2.
 | `pyproject.toml` `[project] version` | `0.1.0` | a deliberate bump to `0.2.0`; not performed by this audit |
 | `harvestguard_version.py` `__version__` | `0.1.0` | the same bump, in step |
 | `harvestguard --version` | `harvestguard 0.1.0` | `harvestguard 0.2.0` |
-| Git tags | `v0.1.0` exists — an annotated tag on commit `4598a4b`, an ancestor of the audited `main` — with no GitHub Release published from it | `v0.2.0` would be this repository's second tag, or its first if `v0.1.0` is superseded rather than released |
-| Published release, package, or version-tagged image | none | out of scope for this audit; a later authorized action |
-| [CHANGELOG.md](../CHANGELOG.md) | a `0.1.0` entry labeled "tag pending" (now inaccurate, see **B-9**) and an `Unreleased` section | a drafted `0.2.0` entry |
+| Git tags | `v0.1.0` exists — an annotated tag on commit `4598a4b`, an ancestor of the audited `main` — with no GitHub Release published from it | Given the existing `v0.1.0` tag, `v0.2.0` would be the repository's second version tag. Deleting or replacing `v0.1.0` would require a separate maintainer decision outside this audit |
+| Release and package publication | No GitHub Release and no PyPI, wheel, or sdist publication exists. GHCR does contain commit-SHA container images plus signature/attestation objects, but no `v0.1.0` or `v0.2.0` version-tagged container image | out of scope for this audit; a later authorized action |
+| [CHANGELOG.md](../CHANGELOG.md) | a `0.1.0` entry that accurately records the existing tag and missing GitHub Release, plus an `Unreleased` section that records no `0.2.0` entry or tag yet | a drafted `0.2.0` entry |
 | Roadmap milestones since the `0.1.0` entry | `v0.1.1 Stabilization` (HG-028…HG-032) and the `v0.2` cryptographic-inventory work (HG-033…HG-044) read `Complete` in [ROADMAP.md](ROADMAP.md) | those entries are the source material for the `0.2.0` release notes |
 
 This audit checked tag existence directly — `git ls-remote --tags origin` and
 `gh api repos/serewicz/HarvestGuard/tags` — rather than trusting prose, and
-found a `v0.1.0` tag already exists. That contradicts this document's own
-[Release readiness gate](#release-readiness-gate) section below, which states
-**"The `v0.1.0` tag has not been created"**, and the "tag pending" label on the
-`0.1.0` entry in [CHANGELOG.md](../CHANGELOG.md); neither has been updated
-since the tag was pushed. No GitHub Release, PyPI package, or version-tagged
-container image has been published from that tag or any other, so nothing has
-actually been *released* — but the tag itself is real, and the stale claim is
-now open item **B-9**. Whether a `v0.1.0` GitHub Release is published from the
-existing tag before or instead of a `v0.2.0` release is a maintainer decision
-(**B-1** below); nothing in the repository decides it.
+found that the annotated `v0.1.0` tag already exists. No GitHub Release or
+PyPI package has been published. GHCR contains signed commit-SHA images and
+signature/attestation objects, but no `v0.1.0` or `v0.2.0` version-tagged
+image. Whether a `v0.1.0` GitHub Release is published from the existing tag
+before or instead of a `v0.2.0` release is a maintainer decision (**B-1**
+below); the factual release-surface state must be rechecked and recorded before
+release action (**B-9**).
 
 ### Public-use prerequisites
 
@@ -267,12 +262,12 @@ checkout. Confirming it is **B-5** below.
 | Surface | Check | Result at the audited commit |
 | --- | --- | --- |
 | Version identity | `python -m harvestguard --version`; `python -m pytest -v tests/test_release_identity.py` | `harvestguard 0.1.0`; the `pyproject.toml` literal and `harvestguard_version.__version__` agree and nothing else hard-codes the product version. Pass |
-| Changelog | Read [CHANGELOG.md](../CHANGELOG.md) | The newest version entry is `0.1.0`, labeled tag-pending — inaccurate, since a `v0.1.0` tag exists (**B-9**). Work merged since it has no drafted entry; the `Unreleased` section now records that gap. **B-3** |
+| Changelog | Read [CHANGELOG.md](../CHANGELOG.md) | The newest version entry is `0.1.0`, accurately records the existing tag and missing GitHub Release, and is followed by an `Unreleased` section. Work merged since it has no drafted version entry. **B-3** |
 | Installation | `python -m pytest -v tests/test_clean_install.py` (needs network; `HARVESTGUARD_SKIP_CLEAN_INSTALL_TESTS=1` skips it) | Both documented forms — `python -m pip install .` and `-e .` — install into a clean virtual environment, record their runtime dependencies, and run every local scan type from outside the checkout. Pass |
-| Release documentation | `python -m pytest -v tests/test_release_identity.py` | This document covers identity, source/package/container artifacts, pre-1.0 support, procedure, and gate; its no-lock-file and no-SLSA-attestation assertions hold, but its Release readiness gate section's tag-existence claim does not (**B-9**). `tests/test_release_identity.py` still passes because it checks that claim's wording, not the tag's actual existence, so it did not catch this |
+| Release documentation | `python -m pytest -v tests/test_release_identity.py` | This document covers identity, source/package/container artifacts, pre-1.0 support, procedure, and gate. It distinguishes the existing `v0.1.0` tag from the missing GitHub Release, package publications, and version-tagged images. Pass; final external state still requires the B-9 recheck |
 | Supported Python | `pyproject.toml` `requires-python`; `.github/workflows/ci.yml` matrix; `scripts/check_required_ci.py` `REQUIRED_CHECKS`; README prerequisites | All four say 3.10+, tested on 3.10/3.11/3.12, with `Test (Python 3.10)`, `Test (Python 3.11)`, and `Test (Python 3.12)` as the required checks. Consistent |
 | License | `LICENSE` (Apache License 2.0 full text); `pyproject.toml` `license = { text = "Apache-2.0" }`; README badge | Consistent. Pass |
-| Security reporting | Read [SECURITY.md](../SECURITY.md) | Private report channel and a pre-1.0 *Supported Versions* table (`main` only) that stays accurate for v0.2. Its container-signing paragraph states no verifiable published image existed as of that commit, which repository content cannot confirm or refute today. **B-6** |
+| Security reporting | Read [SECURITY.md](../SECURITY.md) | Private report channel and a pre-1.0 *Supported Versions* table (`main` only) that stays accurate for v0.2. Signed commit-SHA GHCR images have been observed and verified, so its older container-signing paragraph is stale; correcting `SECURITY.md` remains a separately owned follow-up outside this audit's allowed files. **B-6** |
 | Sample-output provenance | Read [`docs/examples/first-run/README.md`](examples/first-run/README.md); `python -m pytest -v tests/test_first_run_samples.py` | Input, both commands, working directory, generating version (`harvestguard 0.1.0`), repository state, and the exact normalization applied are recorded, and the committed artifacts still match live output on their host-independent lines. Pass at `0.1.0`; a version bump makes the recorded version stale. **B-4** |
 | Claims | `python -m pytest -v tests/test_product_claims.py` | Passes. [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md) classifies each claim and its `Needs Validation` section is scoped to v0.1; it is a maintainer input to the v0.2 go/no-go, not a blocker this audit can close. **B-7** |
 | Release procedure | Read [Release procedure](#release-procedure-v01) | Present and executable, but written with literal `v0.1.0` commands. The [checklist below](#proposed-v02-release-checklist) is its v0.2 instance |
@@ -288,13 +283,13 @@ v0.2 release action runs. None is resolved by this audit.
 | --- | --- | --- | --- |
 | B-1 | A `v0.1.0` tag already exists (commit `4598a4b`) but no GitHub Release has been published from it | Yes | Maintainer: decide whether to publish a `v0.1.0` GitHub Release from the existing tag before or instead of a `v0.2.0` release, and record the decision in [CHANGELOG.md](../CHANGELOG.md) |
 | B-2 | Bumping `__version__` to `0.2.0` fails `tests/test_first_run_samples.py::test_json_sample_matches_the_normalized_finding_contract`, which asserts each committed sample finding's `scanner_version == __version__`. Per-scanner `ScannerIdentity` versions in `finding_adapters.py` are independent `0.1.0` literals that only coincide with the product version today, and this document states provenance `scanner_version` does not track it. Reproduce with `python -c "import finding_adapters as fa, harvestguard_version as v; print(v.__version__, fa.FILESYSTEM_SCANNER.version)"` | Yes | Maintainer: as part of the version-bump change, either bump the scanner identity literals deliberately and regenerate the samples, or decouple that assertion from `__version__`. Production code is outside this audit's scope, so neither was done here |
-| B-3 | No `0.2.0` changelog entry is drafted | Yes | Maintainer: draft it from the `Complete` HG-028…HG-044 entries in [ROADMAP.md](ROADMAP.md), following the `0.1.0` entry's structure |
+| B-3 | No `0.2.0` changelog entry is drafted | Yes | Maintainer: draft it from the relevant `Complete` HG-028…HG-044 entries in [ROADMAP.md](ROADMAP.md), the completed first-public-use work in Issues #115 through #118, and this #119 release-readiness audit if it belongs in the release narrative, following the `0.1.0` entry's structure |
 | B-4 | The committed first-run samples and their provenance record `0.1.0` | Yes, once a bump happens | Maintainer: after the bump, run `python docs/examples/first-run/generate_samples.py` and update the generating-version and repository-state rows in `docs/examples/first-run/README.md` |
 | B-5 | Prerequisite issue closure, review approval, and green required checks cannot be read from repository content | Yes | Maintainer: confirm with `gh issue view <n>` and `gh pr checks <n>` for the four public-use prerequisite issues, then record the confirmation in the release decision |
-| B-6 | [SECURITY.md](../SECURITY.md) states no published, verifiable signed image existed as of its commit; whether one exists now is unknown here | No — evidence accuracy, not a release gate | Maintainer: run the `cosign verify` command in [SECURITY.md](../SECURITY.md#verifying-the-container-image) against an image published from `main` and correct that paragraph, and the two `Experimental / Needs Validation` rows in [SBOM, signing, and provenance status](#sbom-signing-and-provenance-status), if stale. `SECURITY.md` is outside this audit's allowed files |
+| B-6 | [SECURITY.md](../SECURITY.md) predates the observed and verified signed commit-SHA GHCR images | No — evidence accuracy, not a release gate | Maintainer: correct that paragraph and the two stale `Experimental / Needs Validation` rows in [SBOM, signing, and provenance status](#sbom-signing-and-provenance-status). `SECURITY.md` is outside this audit's allowed files; no version-tagged image has been observed |
 | B-7 | [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md)'s `Needs Validation` section is scoped to v0.1 | No | Maintainer: re-read it against v0.2 content and either rescope it or accept it unchanged |
 | B-8 | The deferred release-engineering work above — no lock file or hash-pinned requirements, no source/package SBOM, no SLSA provenance, unsigned tags, no published wheel or version-tagged image — is unchanged for v0.2 | No, if accepted | Maintainer: accept explicitly as the pre-1.0 posture already documented in [Deferred work](#deferred-work), or move an item into v0.2 scope through its own issue |
-| B-9 | [Release readiness gate](#release-readiness-gate) states "The `v0.1.0` tag has not been created," and the `0.1.0` entry in [CHANGELOG.md](../CHANGELOG.md) is labeled "tag pending" — both contradicted by the `v0.1.0` tag this audit found already exists. `tests/test_release_identity.py` enforces the documents' wording, not the tag's actual existence, so it does not catch this | Yes | Maintainer: once B-1 is decided, correct both labels to state the tag exists (and, if a Release is published, that too); consider whether `tests/test_release_identity.py` should check tag existence via the GitHub API rather than only the documents' own wording |
+| B-9 | Release, tag, package, and container publication state is external and may change after this audit | Yes | Maintainer: immediately before release action, recheck and record the bounded facts: the `v0.1.0` tag state, GitHub Releases, `v0.2.0` tag state, PyPI/wheel/sdist publication, and GHCR commit-SHA and version-tagged images |
 
 ### Proposed v0.2 release checklist
 
@@ -303,8 +298,10 @@ authorized release action is exact and reviewable rather than improvised.
 Steps 1–4 are decisions and changes that go through ordinary review; only steps
 5–7 are the release action itself.
 
-1. Resolve or explicitly accept B-1 through B-5, and record B-6 through B-8 as
-   accepted or scoped.
+1. Resolve or explicitly accept every blocking item — B-1 through B-5 and B-9
+   — before any release action, and record B-6 through B-8 as accepted or
+   scoped. Resolving B-9 requires a fresh release-surface check after the B-1
+   decision and immediately before the release action.
 2. In a reviewed change: bump `version` in `pyproject.toml` and `__version__` in
    `harvestguard_version.py` to `0.2.0` together, handle B-2 in the same change,
    draft the `0.2.0` changelog entry (B-3), and regenerate the first-run samples
