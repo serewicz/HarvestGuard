@@ -1128,6 +1128,11 @@ Markdown (professional evidence report):
 harvestguard scan demo/sample_target --type all --markdown --quiet
 ```
 
+The artifacts both commands produce are committed, with their provenance and
+the volatile values normalized to make them stable, in
+[docs/examples/first-run/](examples/first-run/README.md) — useful for seeing
+the output shape without running a scan first.
+
 Both report exactly the same five findings as structured evidence records
 (`Detailed Findings` in the Markdown report) — never the raw matched
 sensitive value, the fixture's fake password, its fake PEM body text, the

@@ -31,6 +31,9 @@ The first command prints a concise summary; the second writes a local Markdown
 evidence report. The demo contains fake patterns only—never real credentials;
 [`demo/sample_target/README.md`](demo/sample_target/README.md) documents each
 demo file, its synthetic provenance, and the finding it is expected to produce.
+To see what that output looks like before installing anything, read the sample
+JSON and Markdown artifacts from exactly this demo scan in
+[`docs/examples/first-run/`](docs/examples/first-run/README.md).
 Windows activation instructions, cloud targets, output formats, exit codes, and
 the optional local evidence store are covered in the
 [detailed setup and usage](#detailed-setup-and-usage) section and
