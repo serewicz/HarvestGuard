@@ -1003,16 +1003,20 @@ The Markdown report's sections are listed under
 
 ## Demo Walkthrough
 
-`demo/sample_target/` (GitHub issue [#18](https://github.com/serewicz/HarvestGuard/issues/18),
-roadmap [HG-006](ROADMAP.md)) is a small, deterministic fixture so anyone can
-see real HarvestGuard output without scanning real confidential data.
+`demo/sample_target/` (GitHub issues [#18](https://github.com/serewicz/HarvestGuard/issues/18)
+and [#115](https://github.com/serewicz/HarvestGuard/issues/115), roadmap
+[HG-006](ROADMAP.md)) is a small, deterministic fixture so anyone can see real
+HarvestGuard output without scanning real confidential data.
 
 **All values in the fixture are synthetic and intentionally fake.** Do not
 copy anything from it into a real `.env` file or substitute real credentials
-or sensitive data into it. It exists only so the scanners have something
-evidence-shaped to find, and its contents are documented in full in
-[`demo/sample_target/sensitive/leaked_config.env`](../demo/sample_target/sensitive/leaked_config.env)'s
-own header comment. It requires no credentials and no network access.
+or sensitive data into it, and do not reuse its demo certificate or demo key
+anywhere. It exists only so the scanners have something evidence-shaped to
+find. [`demo/sample_target/README.md`](../demo/sample_target/README.md) is the
+corpus manifest: every file, how it was generated, and the finding it is
+expected to produce. The `.env` fixture additionally documents its own values
+in [its header comment](../demo/sample_target/sensitive/leaked_config.env).
+The corpus requires no credentials and no network access.
 
 Run every local scanner against it:
 
@@ -1026,7 +1030,8 @@ Expected output (files scanned and finding counts are deterministic; see
 ```text
 HarvestGuard Scan Complete
 
-Files scanned: 1
+Files scanned: 4
+Crypto files inspected: 4
 
 Record Categories
 
@@ -1034,16 +1039,16 @@ Aggregate filesystem context records: 1
 Per-file filesystem evidence records: 0
 Coverage limitation records: 0
 Skipped or inaccessible entry records: 0
-Cryptographic inventory records: 1
+Cryptographic inventory records: 3
 Sensitive-data records: 1
 Code-analysis records: 0
 Cloud storage records: 0
 
 Findings
 
-Certificates: 0
-Private Keys: 1
-Encrypted Keys: 0
+Certificates: 1
+Private Keys: 2
+Encrypted Keys: 1
 SSH Keys: 0
 PKCS#12: 0
 Expired Certificates: 0
@@ -1052,36 +1057,55 @@ Semgrep Findings: 0
 Malformed Assets: 1
 Errors: 1
 
-Material evidence records: 2
-Total normalized records: 3
+Material evidence records: 4
+Total normalized records: 5
 Findings with finding-level errors: 1
 Scanner execution errors: 0
 ```
 
-Three normalized records, one from each of three scanners:
+Five normalized records, from three scanners:
 
-- **Filesystem context** (`--type filesystem`) — `leaked_config.env` is an
-  ordinary file with no file-level encrypted-format signature and no
-  file-specific failure, so it produces no record of its own. It is
+- **Filesystem context** (`--type filesystem`) — every file in the corpus is
+  an ordinary file with no file-level encrypted-format signature and no
+  file-specific failure (an encrypted PKCS#8 key is a cryptographic asset,
+  not an encrypted container), so none produces a record of its own. They are
   represented instead by one aggregate `filesystem_context` finding for the
   demo fixture's mount, with `Evidence` starting `"Volume-level encryption
   status observed for mount <path>: <value>"` (or, if the status could not be
   determined on your host, `"...could not be determined for mount
   <path>..."`), a populated `Confidence` (`Medium` or `Low`) plus
   `Confidence Rationale`, and `technical_metadata["Files Represented By This
-  Context"] == 1`. The exact `<value>` and confidence level depend on how
+  Context"] == 4`. The exact `<value>` and confidence level depend on how
   encryption status was determined on your host (see "What varies by host"
   below) — this is expected, not a bug. See [Design: Aggregate Filesystem
   Context](DETECTION_CHARACTERIZATION.md#local-filesystem-encryption-evidence)
   for why ordinary files are represented this way.
-- **Cryptographic inventory evidence** (`--type crypto`) — one finding, asset
-  type `Malformed PEM Private Key`, confidence `Low`. The fixture's PEM
-  header (`-----BEGIN RSA PRIVATE KEY-----`) is real enough to be detected as
-  a PEM block, but its body is plain fake text, not valid base64/DER, so
-  parsing correctly fails. The `errors` field is non-empty and names the
-  parse failure; `technical_metadata` (algorithm, key size, fingerprint,
-  etc.) stays unset because parsing never succeeded. This is the intended,
-  deterministic outcome for this fixture, not a scanner defect.
+- **Cryptographic inventory evidence** (`--type crypto`) — three findings,
+  all deterministic because they depend only on the fixtures' fixed content:
+  - `PEM Certificate`, confidence `High`, from
+    `crypto/demo_tls_certificate.pem` — a synthetic certificate generated for
+    this repository (its own issuer, never issued by any CA, bound to the
+    reserved-for-testing `.invalid` TLD), reported with its parsed algorithm
+    (`RSA`), key size (`2048`), signature algorithm, expiration, issuer,
+    subject (`CN=demo.harvestguard.invalid`) and fingerprint.
+  - `Encrypted PKCS#8 Private Key`, confidence `High`, rule
+    `private_key:pkcs8_encrypted`, from
+    `crypto/demo_encrypted_private_key.pem` — a synthetic passphrase-encrypted
+    key generated for this repository. HarvestGuard records that an encrypted
+    PKCS#8 structure is present and its `Format`; the key material itself is
+    never included in output.
+  - `Malformed PEM Private Key`, confidence `Low`, from
+    `sensitive/leaked_config.env`. That fixture's PEM header
+    (`-----BEGIN RSA PRIVATE KEY-----`) is real enough to be detected as a
+    PEM block, but its body is plain fake text, not valid base64/DER, so
+    parsing correctly fails. The `errors` field is non-empty and names the
+    parse failure; `technical_metadata` (algorithm, key size, fingerprint,
+    etc.) stays unset because parsing never succeeded. This is the intended
+    outcome for this fixture, not a scanner defect.
+
+  Two supported categories are shown here, not all of them: the corpus is a
+  deliberately small sample, not complete cryptographic coverage. See
+  [docs/SCAN_COVERAGE.md](SCAN_COVERAGE.md) for what else is supported.
 - **Sensitive-data categories** (`--type sensitive-data`) — one finding for
   `leaked_config.env` with `Categories: Email, Generic Secret, Private Key`.
   `Slack Token`, `GitHub Token`, and `AWS Access Key` do **not** appear: the
@@ -1104,11 +1128,12 @@ Markdown (professional evidence report):
 harvestguard scan demo/sample_target --type all --markdown --quiet
 ```
 
-Both report exactly the same three findings as structured evidence records
+Both report exactly the same five findings as structured evidence records
 (`Detailed Findings` in the Markdown report) — never the raw matched
-sensitive value, the fixture's fake password, or its fake PEM body text, only
-category names, counts, and evidence-layer fields such as confidence and
-rule ID.
+sensitive value, the fixture's fake password, its fake PEM body text, the
+demo certificate's or demo key's encoded material, or the demo key's
+passphrase, only category names, counts, parsed certificate metadata, and
+evidence-layer fields such as confidence and rule ID.
 
 ### What varies by host
 
