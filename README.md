@@ -173,7 +173,8 @@ evidence and must remain traceable back to it.
   recovery, or runtime-use claims. Current coverage includes:
   - X.509 certificates and supported private/public key material;
   - PKCS#12 containers and Java keystore/truststore evidence;
-  - OpenSSL, OpenPGP/GPG, age, CMS/PKCS#7, and legacy encrypted PEM evidence;
+  - OpenSSL, OpenPGP/GPG, age, encrypted PKCS#8, CMS/PKCS#7
+    `EnvelopedData`, and legacy encrypted PEM evidence;
   - gocryptfs cipher roots;
   - Mozilla NSS SQL database sets;
   - OpenSSH host identity evidence;
