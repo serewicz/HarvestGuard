@@ -4,7 +4,7 @@ These tests protect the properties a controlled-pilot reviewer depends on:
 that HarvestGuard states one version everywhere, that a shared evidence
 artifact names the release that produced it, that adding version identity did
 not put an envelope around the JSON contract, and that release documentation
-does not claim a release that has not been cut.
+distinguishes an existing tag from an unpublished GitHub Release.
 """
 
 from __future__ import annotations
@@ -214,42 +214,57 @@ def test_release_materials_do_not_claim_hg_011_is_still_pending():
             assert stale not in lowered, f"{name} still claims HG-011 is pending: {stale!r}"
 
 
-def test_release_materials_do_not_claim_the_tag_already_exists():
+def test_release_materials_record_the_existing_tag_without_claiming_a_release():
     lowered_release = RELEASE.lower()
     lowered_changelog = CHANGELOG.lower()
-    for forbidden in (
-        "tag has been cut",
-        "tag has been created",
-        "tag has been pushed",
-        "tagged as v0.1.0",
-        "v0.1.0 has been released",
-    ):
-        assert forbidden not in lowered_release, f"docs/RELEASE.md falsely claims: {forbidden!r}"
-        assert forbidden not in lowered_changelog, f"CHANGELOG.md falsely claims: {forbidden!r}"
-    # A GitHub Release or PyPI/container artifact would only exist once the
-    # tag does; neither release document may claim one already exists.
-    assert "github release" not in lowered_changelog
+    assert "the annotated `v0.1.0` git tag exists" in lowered_release
+    assert "the annotated `v0.1.0` git tag exists" in lowered_changelog
+    assert "no github release has been published" in lowered_release
+    assert "no github release has been published" in lowered_changelog
+    assert "v0.1.0 has been released" not in lowered_release
+    assert "v0.1.0 has been released" not in lowered_changelog
     assert "published to pypi" not in lowered_release or "not published to pypi" in lowered_release
 
 
-def test_release_materials_identify_the_tag_as_a_pending_human_action():
-    # Positive counterpart to the "does not claim it exists" check above:
-    # both documents must explicitly say the tag has not been created yet,
-    # and RELEASE.md must say why in terms of a deliberate human action, not
-    # an open roadmap dependency.
-    assert "not yet been created" in CHANGELOG.lower()
-    assert "has not been created" in RELEASE.lower()
+def test_release_materials_reject_stale_or_broad_tag_absence_claims():
+    for document, name in ((CHANGELOG, "CHANGELOG.md"), (RELEASE, "docs/RELEASE.md")):
+        normalized = " ".join(document.lower().replace("`", "").replace("*", "").split())
+        for contradiction in (
+            "tag pending",
+            "v0.1.0 tag has not been created",
+            "v0.1.0 tag has not yet been created",
+            "no v0.1.0 tag exists",
+            "no v0.1.0 git tag exists",
+            "v0.1.0 tag does not exist",
+            "v0.1.0 has not been tagged",
+            "v0.1.0 is not tagged",
+            "v0.1.0 is untagged",
+            "once the tag is cut",
+            "no tag exists",
+            "no git tag exists",
+            "no tags exist",
+            "no tag has been created",
+            "created no tag",
+            "no release tag",
+        ):
+            assert contradiction not in normalized, f"{name} contains: {contradiction!r}"
+
+
+def test_release_materials_identify_publication_as_a_pending_human_action():
+    # The tag exists, but publishing a GitHub Release from it remains a
+    # deliberate maintainer decision rather than an implied completed action.
+    assert "whether to publish one" in CHANGELOG.lower()
 
     gate_section = RELEASE[RELEASE.index("## Release readiness gate") :]
-    assert "human release action" in gate_section.lower()
-    assert "not a sign that any roadmap dependency remains incomplete" in gate_section.lower()
+    normalized_gate = " ".join(gate_section.lower().split())
+    assert "maintainer release action" in normalized_gate
+    assert "not a sign that any roadmap dependency remains incomplete" in normalized_gate
 
 
 def test_release_readiness_reasoning_does_not_blame_a_dependency():
-    # Neither HG-010 nor HG-011 (nor any other roadmap item) may be cited as
-    # the reason the tag is absent -- every dependency is Complete, so the
-    # only accurate reason left is that a human has not yet run the tag
-    # command.
+    # The v0.1.0 tag exists, but no GitHub Release has been published from it.
+    # Release documentation must preserve that distinction and must not imply
+    # that an incomplete roadmap dependency controls the publication decision.
     gate_section = RELEASE[RELEASE.index("## Release readiness gate") :]
     for stale in (
         "hg-010 remains",
