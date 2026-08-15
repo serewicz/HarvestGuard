@@ -1567,6 +1567,186 @@ only; it creates no
 [internal relationship records](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
 and emits nothing beyond the three finding shapes described above.
 
+#### Kubernetes TLS Secret inventory (HG-044)
+
+One rule, deliberately **non-terminal**:
+
+- `rule_id: kubernetes_secret:tls` (priority 83, asset type
+  `Kubernetes TLS Secret`, confidence `High`, evidence
+  `Kubernetes TLS Secret manifest with matching certificate and private key
+  detected`).
+
+Technical metadata is limited to `Algorithm`, `Key Size`, and `Format`
+(`Kubernetes JSON Manifest` or `Kubernetes YAML Manifest`). `Fingerprint`,
+`Subject`, `Issuer`, `Expiration`, `Signature Algorithm`, `Config Version`, and
+`Mode` are always left unset.
+
+**What the finding claims, and what it does not.** The complete claim is:
+
+> This local manifest document structurally declares a Kubernetes v1 TLS
+> Secret, and its effective `tls.crt` and `tls.key` values contain a supported
+> X.509 certificate chain and a matching unencrypted private key.
+
+`High` confidence means HarvestGuard parsed a supported local manifest
+document, resolved the effective TLS values under Kubernetes `stringData`
+precedence, parsed the supported certificate and private-key structures, and
+verified that the private key's public key equals the first certificate's. It
+does **not** mean the object was admitted, exists in a cluster, is mounted or
+projected, is referenced by an Ingress/Gateway/cert-manager object, is used by
+any workload, is trusted, is current, has a valid hostname or chain, or is
+securely managed. HarvestGuard is deliberately stricter than Kubernetes
+admission here: Kubernetes checks only that the two key names are present for
+this Secret type, while this rule additionally validates both structures and
+requires them to correspond.
+
+**Local manifest inspection only.** The Kubernetes API, kubeconfig, `kubectl`,
+`helm`, `kustomize`, `openssl`, every other subprocess, and the network are
+never used at scan time. Nothing is decrypted, no password is prompted for,
+guessed, or read from the environment, no decoded value is written to disk or a
+temporary file, and no second scan or referenced-file resolution occurs.
+Fixture generation for this rule's tests uses real `kubectl create secret tls
+--dry-run=client` and OpenSSL offline.
+
+**Content-gated, never extension-gated.** The file's bounded text view must
+literally contain all three of `kubernetes.io/tls`, `tls.crt`, and `tls.key`.
+`.yaml`, `.yml`, `.json`, and `.pem` are not evidence, and an extensionless
+manifest classifies identically to any unprivileged extension carrying the same
+content. Established earlier terminal ownership is unchanged: a file claimed by
+`pkcs12:container` under `.p12`/`.pfx`, or by `certificate:der` under
+`.cer`/`.crt`/`.der`, never reaches priority 83 and produces no HG-044 finding
+— which says nothing about whether its contents are valid PKCS#12 or DER. A
+valid manifest whose required tokens appear only through escaped spellings that
+omit these literal tokens is a deliberate false negative.
+
+**Serialization dispatch.** After removing only SP, HT, CR, and LF from the
+front: a leading `{` selects JSON-only handling; a leading `[` selects JSON-only
+handling solely to confirm and reject the unsupported top-level array; every
+other candidate uses YAML-only handling. A JSON candidate that fails strict
+parsing never falls back to YAML. A UTF BOM rejects.
+
+**JSON grammar.** Python standard library only. Exactly one JSON value plus
+JSON whitespace, which must be a top-level object; arrays and every other
+top-level type are non-matches. A repeated exact string key rejects at *every*
+nested object level rather than resolving last-wins, and `NaN`, `Infinity`, and
+`-Infinity` reject. `List`/`SecretList` shapes are ordinary non-matches.
+
+**YAML grammar and bounds.** Parsed with `yaml.parse(..., Loader=yaml.BaseLoader)`
+for preflight and a `yaml.BaseLoader` subclass for construction — never
+`SafeLoader`, `FullLoader`, `UnsafeLoader`, `Loader`, a C loader, or
+`yaml.unsafe_load`, so no Python object is ever constructed. `BaseLoader`
+scalar text is authoritative: implicit spellings such as `null`, `true`, `123`,
+and `~` remain their exact scalar text, which is intentional and does not claim
+Kubernetes API admission equivalence. Preflight rejects the **complete file**
+— before any document is evaluated — on any of: more than 64 documents, more
+than 100,000 parse events, collection nesting deeper than 64, a mismatched
+collection close, any alias, any anchor, any explicit tag, or any YAML or TAG
+directive. Construction additionally rejects the complete file on a complex or
+non-string mapping key at any level, a key exactly equal to `<<` however
+quoted, or a duplicate mapping key at any level.
+
+**Object and value boundary.** All three comparisons are exact and
+case-sensitive: `apiVersion == "v1"`, `kind == "Secret"`,
+`type == "kubernetes.io/tls"`. Missing fields are never inferred and case
+variants are never accepted. `metadata` is optional, and when present its
+contents — name, namespace, labels, annotations, UID, owner references,
+resource version — are ignored and never emitted. At least one of `data` /
+`stringData` must exist; each present section must be a mapping whose keys and
+values are all scalar strings, or the document is a non-match. For each of
+`tls.crt` and `tls.key` the effective value is `stringData[key]` if present,
+otherwise `data[key]`, otherwise missing; both must exist and be non-empty. A
+winning `stringData` value that is empty or unusable rejects the document and
+never falls back to `data`. A selected `data` value must be ASCII, whitespace-
+free, standard RFC 4648 alphabet and padding, strictly validated, non-empty
+when decoded, and byte-identical when re-encoded — so URL-safe encoding,
+missing or noncanonical padding, CR/LF, and SP/HT all reject. Unrelated Secret
+values are shape-checked and never decoded.
+
+**Certificate and key profiles.** After removing only SP, HT, LF, CR, VT, and
+FF from the outside (a BOM is not whitespace), the effective `tls.crt` must be
+consumed entirely by one or more complete `CERTIFICATE` blocks separated only
+by those same whitespace bytes, each of which parses; no unrelated PEM block,
+prefix, or suffix is tolerated, and the generic marker-search helper used
+elsewhere in the scanner is deliberately not reused. The effective `tls.key`
+must likewise be consumed entirely by exactly one block labelled
+`PRIVATE KEY`, `RSA PRIVATE KEY`, or `EC PRIVATE KEY`, parsed with
+`load_pem_private_key(..., password=None)`. Accepted key classes are RSA, ECDSA
+on `secp256r1`/`secp384r1`/`secp521r1`, and Ed25519 via PKCS#8. Encrypted
+PKCS#8, encrypted traditional PEM, DSA, Ed448, other curves, DER, multiple key
+blocks, and a key alongside any other block are all non-matches. Correspondence
+requires the **first** certificate's public key and the private key's public
+key to be byte-identical as DER `SubjectPublicKeyInfo`; neither serialization
+nor any hash of it is emitted. Additional certificates are parsed structurally
+only — no chain is built or validated, and no signature, order, trust, subject,
+SAN, or date is checked.
+
+**One finding per Secret document.** Never one per `tls.crt`, `tls.key`,
+certificate, or key. Each YAML document is evaluated independently and reports
+at the deterministic virtual location `<physical file location>#document=<N>`,
+where `N` is the one-based ordinal of the document in source order; empty and
+non-matching documents still consume an index, consecutive `---` markers create
+consecutive empty documents, a trailing `---` creates a counted empty final
+document, and comments alone create none. JSON always uses `#document=1`. The
+Secret's name and namespace never appear in the location, so two documents in
+one file yield two findings with distinct identities and moving an object to a
+different index changes its identity. The virtual location identifies an object
+inside the file and is not claimed as a real filesystem path. Schema, base64,
+PEM, unsupported-key, or correspondence failures affect only their own
+document; whole-file YAML rejections affect all of them.
+
+**Accounting.** One physical manifest file counts once in
+`Crypto files inspected` regardless of how many documents, findings,
+certificates, or parser passes it produced. Virtual document locations add no
+count, and no Secret/certificate/key summary counter is added.
+
+**Coexistence, not suppression.** Decoded `tls.crt`/`tls.key` values are
+validation evidence only and are never resubmitted to the detector registry, so
+no child certificate or private-key finding is created from them. The rule is
+non-terminal, however, because the generic detectors inspect the *physical
+manifest source text* independently: a matching `stringData` Secret whose PEM
+material is embedded literally may therefore report three findings — the HG-044
+aggregate finding at `<file>#document=<N>`, the existing `certificate:pem`
+finding at the physical file location, and the existing `private_key:pem`
+finding at the physical file location. A base64 `data` manifest carries no
+literal PEM text and so produces the aggregate finding alone. A non-match falls
+through to later detectors unchanged.
+
+**Expected non-matches versus defects.** Malformed or unsupported target input
+— malformed JSON, rejected YAML, duplicate mappings, unsupported object shape,
+invalid base64, certificate or private-key parse failure, an unsupported key or
+curve, or a certificate/key mismatch — is an ordinary non-match. Only the
+documented parser exception families are treated that way, including the
+`ValueError`/`UnsupportedAlgorithm` pair `cryptography` uses before and from
+47.0.0 respectively for an unsupported certificate public-key algorithm. Any
+other exception is a defect: it propagates through the shared sanitized
+detector-error path, which names only the detector id, the **physical** file
+location, and the exception type — never `#document=N`, metadata, Secret
+contents, or the exception message — and the HG-044 findings accumulated for
+earlier documents in that file are not returned, while findings earlier
+detectors already produced are preserved as partial findings.
+
+**Privacy.** Raw base64, decoded `tls.crt`/`tls.key` bytes, `stringData`
+values, unrelated Secret values, `metadata` name/namespace/labels/annotations/
+UID, certificate Subject/Issuer/SAN/serial/dates/fingerprint, key
+fingerprints, certificate or key PEM/DER, and parser payload text are never
+emitted, persisted, logged, or included in an error.
+
+**No relationship output.** HG-044 adds Kubernetes TLS Secret classification
+only. The certificate/key correspondence is an internal boolean validation
+step for one aggregate finding, no child findings exist to form an endpoint
+pair, and no
+[internal relationship record](CRYPTO_INVENTORY.md#internal-relationship-model-internal-only-no-output)
+is created.
+
+**Out of scope.** Kubernetes API and network access, kubeconfig, Helm
+templates, Kustomize generators, `SecretList`/`kind: List`, top-level arrays,
+`SealedSecret`, External Secrets, SOPS, `Opaque` Secrets with TLS-looking keys,
+mounted or projected Secret volumes, Ingress/Gateway/cert-manager references,
+active workload references, encrypted private keys, password collection,
+certificate trust and chain building, hostname/date/risk validation, Kubernetes
+posture scanning, and risk/remediation/compliance/HNDL/quantum scoring. Absence
+of a `kubernetes_secret:tls` finding is not proof that no Kubernetes TLS Secret
+exists in the target.
+
 ### Confidence semantics
 
 `confidence` varies per parse outcome, not per file:

@@ -33,6 +33,9 @@ dependencies = [
     "pandas>=2.2.0",
     # scanner/crypto_inventory.py: x509 and hazmat.primitives.
     "cryptography>=41.0.0",
+    # scanner/crypto_inventory.py imports `yaml` for HG-044's bounded, safe/basic
+    # Kubernetes TLS Secret manifest parsing (BaseLoader only).
+    "PyYAML>=6.0.3",
     # code_analysis/scanner.py calls certifi.where() for semgrep's CA bundle.
     "certifi>=2024.2.2",
     # `--type code` runs the `semgrep` console script off PATH, so it has to be

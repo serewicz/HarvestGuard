@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import yaml
 from cryptography import x509
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
@@ -3832,6 +3833,550 @@ def _detect_legacy_encrypted_pem(context: FileContext) -> DetectionResult:
     return DetectionResult.match([_legacy_encrypted_pem_finding(context.path)])
 
 
+# --- HG-044: Kubernetes TLS Secret manifest evidence (Issue #89) ------------
+#
+# One aggregate finding per supported local `kubernetes.io/tls` Secret
+# *document*: this manifest document structurally declares a Kubernetes v1 TLS
+# Secret whose effective `tls.crt`/`tls.key` values hold a supported X.509
+# certificate chain and a matching unencrypted private key. It establishes
+# nothing about cluster existence, workload use, trust, validity, or safety --
+# the manifest is read from the bytes the scanner already loaded, and no
+# Kubernetes API, kubeconfig, kubectl, Helm, Kustomize, OpenSSL, external
+# process, or network is ever touched.
+
+_KUBERNETES_TLS_RULE_ID = "kubernetes_secret:tls"
+_KUBERNETES_TLS_ASSET_TYPE = "Kubernetes TLS Secret"
+_KUBERNETES_TLS_EVIDENCE = (
+    "Kubernetes TLS Secret manifest with matching certificate and private key "
+    "detected"
+)
+_KUBERNETES_TLS_METADATA_KEYS = frozenset({"Algorithm", "Key Size", "Format"})
+_KUBERNETES_JSON_FORMAT = "Kubernetes JSON Manifest"
+_KUBERNETES_YAML_FORMAT = "Kubernetes YAML Manifest"
+
+# The content gate (Issue #89 "Candidate Gate"): all three literal tokens must
+# appear in the file's bounded text view. Extension is never evidence -- a
+# manifest saved with no extension, or with a misleading one no earlier
+# terminal detector claims, classifies identically.
+_KUBERNETES_TLS_GATE_TOKENS = ("kubernetes.io/tls", "tls.crt", "tls.key")
+
+# The two required Secret keys, in the fixed order the effective-value
+# resolution walks them.
+_KUBERNETES_TLS_CERTIFICATE_KEY = "tls.crt"
+_KUBERNETES_TLS_PRIVATE_KEY_KEY = "tls.key"
+
+# Preflight resource bounds (Issue #89 "Preflight bounds"). The text-size bound
+# is the scanner's existing MAX_TEXT_BYTES, already applied by `FileContext`.
+_KUBERNETES_MAX_YAML_DOCUMENTS = 64
+_KUBERNETES_MAX_YAML_DEPTH = 64
+_KUBERNETES_MAX_YAML_EVENTS = 100_000
+
+# The ECDSA curves HG-044 accepts. Every other curve -- and DSA, Ed448, and
+# every other key class -- is an ordinary no-match, not a supported key with
+# unusual metadata.
+_KUBERNETES_ACCEPTED_CURVES = frozenset({"secp256r1", "secp384r1", "secp521r1"})
+
+# Serialization dispatch strips only these four bytes from the front (Issue #89
+# "Serialization Dispatch"); a BOM is deliberately not among them.
+_KUBERNETES_DISPATCH_WHITESPACE = " \t\r\n"
+
+# Permitted outer/inter-block whitespace inside an effective `tls.crt`/`tls.key`
+# value: SP, HT, LF, CR, VT, FF -- exactly these six byte values. A BOM is not
+# whitespace.
+_KUBERNETES_PEM_WHITESPACE = bytes((0x20, 0x09, 0x0A, 0x0D, 0x0B, 0x0C))
+_KUBERNETES_PEM_WHITESPACE_SET = frozenset(_KUBERNETES_PEM_WHITESPACE)
+_KUBERNETES_CERTIFICATE_LABELS = ("CERTIFICATE",)
+# Exactly the three private-key labels Issue #89 accepts. `ENCRYPTED PRIVATE
+# KEY` is absent on purpose: an encrypted PKCS#8 value is a no-match here, not
+# a password prompt.
+_KUBERNETES_PRIVATE_KEY_LABELS = (
+    "PRIVATE KEY",
+    "RSA PRIVATE KEY",
+    "EC PRIVATE KEY",
+)
+_UTF8_BOM_TEXT = "﻿"
+
+
+class _KubernetesJsonRejected(Exception):
+    """A deterministic HG-044 rejection of JSON manifest text: a repeated exact
+    string key at some nested object level, or a non-finite JSON constant.
+
+    Private to this module and raised only from the ``json.loads`` hooks, so
+    the JSON no-match boundary can name it explicitly instead of widening to a
+    bare ``except Exception``. Carries no manifest content.
+    """
+
+
+class _KubernetesYamlRejected(Exception):
+    """A deterministic HG-044 rejection of YAML manifest text raised by this
+    module's own preflight or construction rules -- a bound exceeded, an alias,
+    anchor, explicit tag, or directive, a non-string or complex mapping key, a
+    ``<<`` merge key, or a duplicate mapping key.
+
+    Private to this module, deliberately *not* a ``yaml.YAMLError``, and
+    carrying no manifest content.
+    """
+
+
+class _KubernetesDocumentCountMismatch(RuntimeError):
+    """The constructed YAML document count disagreed with the preflight
+    ``DocumentStartEvent`` count.
+
+    Issue #89 declares this an implementation defect rather than a no-match, so
+    it is never suppressed: it reaches the shared detector-error boundary and
+    surfaces as a sanitized ``DetectorExecutionError`` naming only the detector
+    id, the physical file location, and this exception's type.
+    """
+
+
+def _kubernetes_json_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """``json.loads``'s ``object_pairs_hook``: reject a repeated exact string key
+    *before* constructing the object, at every nesting level.
+
+    Python's decoder is last-wins by default, which would silently pick one of
+    two conflicting ``tls.key`` values. HG-044 refuses to guess.
+    """
+    seen: set[str] = set()
+    for key, _value in pairs:
+        if key in seen:
+            raise _KubernetesJsonRejected("duplicate JSON object key")
+        seen.add(key)
+    return dict(pairs)
+
+
+def _kubernetes_json_reject_constant(name: str) -> Any:
+    """``json.loads``'s ``parse_constant``: reject ``NaN``, ``Infinity``, and
+    ``-Infinity``, which Python's decoder accepts by default and strict JSON
+    does not define."""
+    raise _KubernetesJsonRejected("non-finite JSON constant")
+
+
+def _kubernetes_json_documents(text: str) -> list[tuple[int, Any]] | None:
+    """The single JSON manifest document in ``text`` as ``[(1, object)]``, or
+    None for every expected JSON no-match.
+
+    Standard library only. Exactly one JSON value plus JSON whitespace is
+    permitted (``json.loads`` already enforces that), the value must be a
+    top-level object, and duplicate keys and non-finite constants reject
+    through the two hooks above. A top-level array -- the unsupported
+    ``SecretList``/``kind: List`` shape's usual spelling -- is parsed only to be
+    rejected here; it never falls back to YAML handling.
+    """
+    try:
+        value = json.loads(
+            text,
+            object_pairs_hook=_kubernetes_json_object_pairs,
+            parse_constant=_kubernetes_json_reject_constant,
+        )
+    except (
+        json.JSONDecodeError,
+        RecursionError,
+        ValueError,
+        _KubernetesJsonRejected,
+    ):
+        # ValueError covers the standard decoder's own bounded numeric
+        # conversion failure; JSONDecodeError is its subclass. Nothing broader
+        # is suppressed.
+        return None
+    if not isinstance(value, dict):
+        return None
+    return [(1, value)]
+
+
+class _KubernetesManifestLoader(yaml.BaseLoader):
+    """The only loader HG-044 ever points at target input.
+
+    ``yaml.BaseLoader`` -- never ``Loader``, ``FullLoader``, ``UnsafeLoader``,
+    ``SafeLoader``, or their C variants -- so no Python object is ever
+    constructed and every scalar stays its exact constructed text. The one
+    override tightens mapping construction: every key at every level must
+    construct as a scalar string, a key exactly equal to ``<<`` is rejected
+    however it was quoted, and a duplicate key rejects rather than last-wins.
+    """
+
+    def construct_mapping(self, node: Any, deep: bool = False) -> dict[str, Any]:
+        mapping: dict[str, Any] = {}
+        for key_node, value_node in node.value:
+            if not isinstance(key_node, yaml.ScalarNode):
+                raise _KubernetesYamlRejected("complex YAML mapping key")
+            key = self.construct_object(key_node, deep=deep)
+            if not isinstance(key, str):
+                raise _KubernetesYamlRejected("non-string YAML mapping key")
+            if key == "<<":
+                raise _KubernetesYamlRejected("YAML merge key")
+            if key in mapping:
+                raise _KubernetesYamlRejected("duplicate YAML mapping key")
+            mapping[key] = self.construct_object(value_node, deep=deep)
+        return mapping
+
+
+def _kubernetes_yaml_preflight(text: str) -> int | None:
+    """The number of YAML documents in ``text`` once every preflight bound and
+    prohibition holds, or None when the *complete file* is rejected.
+
+    Event-level only: nothing is constructed here. Every event is counted;
+    aliases, anchors, explicit tags, and YAML/TAG directives are refused
+    outright; collection starts and ends are matched on one typed stack; and
+    the document, depth, and event bounds are enforced as the stream is read.
+    Rejection is always whole-file, before any document is evaluated.
+    """
+    events = 0
+    documents = 0
+    depth: list[type] = []
+    try:
+        for event in yaml.parse(text, Loader=yaml.BaseLoader):
+            events += 1
+            if events > _KUBERNETES_MAX_YAML_EVENTS:
+                return None
+            if isinstance(event, yaml.events.AliasEvent):
+                return None
+            if getattr(event, "anchor", None) is not None:
+                return None
+            if isinstance(
+                event,
+                (
+                    yaml.events.ScalarEvent,
+                    yaml.events.MappingStartEvent,
+                    yaml.events.SequenceStartEvent,
+                ),
+            ) and event.tag is not None:
+                return None
+            if isinstance(event, yaml.events.DocumentStartEvent):
+                if event.version is not None or event.tags is not None:
+                    return None
+                documents += 1
+                if documents > _KUBERNETES_MAX_YAML_DOCUMENTS:
+                    return None
+            elif isinstance(
+                event,
+                (yaml.events.MappingStartEvent, yaml.events.SequenceStartEvent),
+            ):
+                depth.append(type(event))
+                if len(depth) > _KUBERNETES_MAX_YAML_DEPTH:
+                    return None
+            elif isinstance(event, yaml.events.MappingEndEvent):
+                if not depth or depth.pop() is not yaml.events.MappingStartEvent:
+                    return None
+            elif isinstance(event, yaml.events.SequenceEndEvent):
+                if not depth or depth.pop() is not yaml.events.SequenceStartEvent:
+                    return None
+    except yaml.YAMLError:
+        return None
+    if depth:
+        return None
+    return documents
+
+
+def _kubernetes_yaml_documents(text: str) -> list[tuple[int, Any]] | None:
+    """Every YAML document in ``text`` as ``[(one-based index, object), ...]``,
+    or None when the complete file is rejected.
+
+    Document numbering is the one-based ordinal of each ``DocumentStartEvent``
+    in the preflight stream, so empty and non-matching documents still consume
+    an index and source order alone decides identity. Construction runs only
+    after the whole stream passed preflight; a disagreement between the two
+    counts is a defect, not a no-match, and is raised rather than swallowed.
+    """
+    document_count = _kubernetes_yaml_preflight(text)
+    if document_count is None:
+        return None
+    try:
+        documents = list(yaml.load_all(text, Loader=_KubernetesManifestLoader))
+    except (yaml.YAMLError, _KubernetesYamlRejected):
+        return None
+    if len(documents) != document_count:
+        raise _KubernetesDocumentCountMismatch(
+            "constructed YAML document count disagreed with the preflight count"
+        )
+    return list(enumerate(documents, start=1))
+
+
+def _kubernetes_manifest_documents(text: str) -> list[tuple[int, Any, str]] | None:
+    """Every manifest document in ``text`` as ``(index, object, Format)``, or
+    None when the file is not a supported manifest serialization at all.
+
+    Dispatch is by first non-whitespace byte after removing only SP/HT/CR/LF:
+    ``{`` or ``[`` selects JSON-only handling (the second only to confirm and
+    reject the unsupported top-level array), and everything else selects
+    YAML-only handling. A JSON candidate that fails strict JSON parsing never
+    falls back to YAML. A UTF BOM rejects outright.
+    """
+    if text.startswith(_UTF8_BOM_TEXT):
+        return None
+    leading = text.lstrip(_KUBERNETES_DISPATCH_WHITESPACE)
+    if leading[:1] in ("{", "["):
+        documents = _kubernetes_json_documents(text)
+        manifest_format = _KUBERNETES_JSON_FORMAT
+    else:
+        documents = _kubernetes_yaml_documents(text)
+        manifest_format = _KUBERNETES_YAML_FORMAT
+    if documents is None:
+        return None
+    return [(index, document, manifest_format) for index, document in documents]
+
+
+def _kubernetes_strict_base64(value: str) -> bytes | None:
+    """The bytes a ``data`` value decodes to under HG-044's strict canonical
+    RFC 4648 profile, or None when it does not qualify.
+
+    ASCII only, no whitespace of any kind, standard alphabet and padding,
+    non-empty decoded output, and a standard padded re-encoding that reproduces
+    the source byte for byte -- which is what rejects the noncanonical final
+    quantum an ordinary decoder would accept.
+    """
+    if not value or not value.isascii():
+        return None
+    encoded = value.encode("ascii")
+    try:
+        decoded = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    if not decoded or base64.b64encode(decoded) != encoded:
+        return None
+    return decoded
+
+
+def _kubernetes_pem_blocks(
+    data: bytes, labels: tuple[str, ...]
+) -> list[tuple[str, bytes]] | None:
+    """Every complete PEM block in ``data`` under HG-044's whole-value framing,
+    or None when ``data`` is not exactly a sequence of such blocks.
+
+    Deliberately not ``_extract_pem_blocks``: that helper searches for markers
+    inside arbitrary surrounding text, which would let a decoded Secret value
+    carry a prefix, a suffix, or an unrelated PEM block alongside the material
+    HG-044 claims to have validated. Here the complete value, after removing
+    only the six permitted whitespace bytes, must be consumed by adjacent
+    blocks whose BEGIN/END delimiter lines are exact, share one label, and
+    carry no leading or trailing content of their own.
+    """
+    stripped = data.strip(_KUBERNETES_PEM_WHITESPACE)
+    if not stripped:
+        return None
+    blocks: list[tuple[str, bytes]] = []
+    offset = 0
+    size = len(stripped)
+    while offset < size:
+        while offset < size and stripped[offset] in _KUBERNETES_PEM_WHITESPACE_SET:
+            offset += 1
+        if offset >= size:
+            break
+        label = None
+        for candidate in labels:
+            begin = f"-----BEGIN {candidate}-----".encode("ascii")
+            if stripped.startswith(begin, offset):
+                label = candidate
+                break
+        if label is None:
+            return None
+        begin_end = offset + len(f"-----BEGIN {label}-----")
+        if stripped[begin_end : begin_end + 1] not in (b"\n", b"\r"):
+            return None
+        end_marker = f"-----END {label}-----".encode("ascii")
+        end_index = stripped.find(end_marker, begin_end)
+        if end_index == -1:
+            return None
+        if stripped[end_index - 1 : end_index] not in (b"\n", b"\r"):
+            return None
+        block_end = end_index + len(end_marker)
+        blocks.append((label, stripped[offset:block_end]))
+        offset = block_end
+    if not blocks:
+        return None
+    return blocks
+
+
+def _kubernetes_certificates(data: bytes) -> list[x509.Certificate] | None:
+    """Every X.509 certificate in an effective ``tls.crt`` value, or None when
+    the value is not exactly one or more complete, parsable ``CERTIFICATE``
+    blocks. The first certificate is the key-match target; the rest are parsed
+    structurally and otherwise unused -- no chain is built, no signature,
+    subject, hostname, or date is checked, and no certificate identity is
+    reported."""
+    blocks = _kubernetes_pem_blocks(data, _KUBERNETES_CERTIFICATE_LABELS)
+    if blocks is None:
+        return None
+    certificates = []
+    for _label, block in blocks:
+        try:
+            certificates.append(x509.load_pem_x509_certificate(block))
+        except ValueError:
+            return None
+    return certificates
+
+
+def _kubernetes_private_key(data: bytes) -> Any | None:
+    """The single unencrypted private key in an effective ``tls.key`` value, or
+    None for every expected no-match: not exactly one accepted-label block, an
+    encrypted or malformed body, or an unsupported algorithm. Parsed
+    password-less; no password is ever prompted for, guessed, read from the
+    environment, or accepted."""
+    blocks = _kubernetes_pem_blocks(data, _KUBERNETES_PRIVATE_KEY_LABELS)
+    if blocks is None or len(blocks) != 1:
+        return None
+    try:
+        return serialization.load_pem_private_key(blocks[0][1], password=None)
+    except (ValueError, TypeError, UnsupportedAlgorithm):
+        return None
+
+
+def _kubernetes_key_metadata(key: Any) -> tuple[str, int] | None:
+    """The frozen Algorithm/Key Size pair for an accepted HG-044 private key, or
+    None when the key's class or (for ECDSA) curve falls outside the accepted
+    profile.
+
+    The class and curve boundary is checked here, independently, *before*
+    deferring to the repository's shared ``_key_algorithm_and_size`` for the
+    values themselves -- so HG-044 cannot silently inherit a future widening of
+    that helper (DSA and Ed448, which the helper does describe, are HG-044
+    no-matches).
+    """
+    if isinstance(key, rsa.RSAPrivateKey):
+        pass
+    elif isinstance(key, ec.EllipticCurvePrivateKey):
+        if key.curve.name not in _KUBERNETES_ACCEPTED_CURVES:
+            return None
+    elif not isinstance(key, ed25519.Ed25519PrivateKey):
+        return None
+    algorithm, key_size = _key_algorithm_and_size(key)
+    if key_size is None:
+        return None
+    return algorithm, key_size
+
+
+def _kubernetes_effective_tls_values(document: dict) -> dict[str, bytes] | None:
+    """The effective ``tls.crt``/``tls.key`` bytes for one supported Secret
+    document, or None when the document does not qualify.
+
+    ``stringData`` wins over ``data`` for the same key, exactly as Kubernetes
+    resolves a write-time Secret, and the win is unconditional: an empty or
+    otherwise unusable ``stringData`` value overrides and rejects the document
+    rather than falling back to ``data``. A selected ``stringData`` scalar is
+    encoded as UTF-8 exactly as the parser constructed it, with no further
+    Unicode or newline normalization; a selected ``data`` value goes through the
+    strict canonical base64 profile. Unrelated Secret values are shape-checked
+    and never decoded.
+    """
+    sections: dict[str, dict] = {}
+    for name in ("data", "stringData"):
+        if name not in document:
+            continue
+        section = document[name]
+        if not isinstance(section, dict):
+            return None
+        for key, value in section.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                return None
+        sections[name] = section
+    if not sections:
+        return None
+    resolved: dict[str, bytes] = {}
+    for key in (_KUBERNETES_TLS_CERTIFICATE_KEY, _KUBERNETES_TLS_PRIVATE_KEY_KEY):
+        string_data = sections.get("stringData", {})
+        data = sections.get("data", {})
+        if key in string_data:
+            value = string_data[key].encode("utf-8")
+        elif key in data:
+            value = _kubernetes_strict_base64(data[key])
+        else:
+            return None
+        if not value:
+            return None
+        resolved[key] = value
+    return resolved
+
+
+def _kubernetes_tls_secret_finding(
+    location: str, document: Any
+) -> tuple[str, int] | None:
+    """The Algorithm/Key Size pair for one qualifying TLS Secret document, or
+    None when this document is an ordinary no-match.
+
+    ``location`` is accepted only to keep the caller's shape obvious; nothing
+    from the document -- name, namespace, labels, annotations, unrelated Secret
+    values, certificate identity, or key material -- is read into it or into
+    anything this function returns.
+    """
+    if not isinstance(document, dict):
+        return None
+    if document.get("apiVersion") != "v1":
+        return None
+    if document.get("kind") != "Secret":
+        return None
+    if document.get("type") != "kubernetes.io/tls":
+        return None
+    values = _kubernetes_effective_tls_values(document)
+    if values is None:
+        return None
+    certificates = _kubernetes_certificates(values[_KUBERNETES_TLS_CERTIFICATE_KEY])
+    if not certificates:
+        return None
+    key = _kubernetes_private_key(values[_KUBERNETES_TLS_PRIVATE_KEY_KEY])
+    if key is None:
+        return None
+    metadata = _kubernetes_key_metadata(key)
+    if metadata is None:
+        return None
+    try:
+        certificate_public_key = certificates[0].public_key()
+    except (ValueError, UnsupportedAlgorithm):
+        # A certificate public-key algorithm `cryptography` does not support:
+        # ValueError before 47.0.0, UnsupportedAlgorithm from 47.0.0 on. Both
+        # are ordinary HG-044 no-matches.
+        return None
+    encoding = serialization.Encoding.DER
+    public_format = serialization.PublicFormat.SubjectPublicKeyInfo
+    if certificate_public_key.public_bytes(encoding, public_format) != key.public_key(
+        ).public_bytes(encoding, public_format):
+        return None
+    return metadata
+
+
+def _kubernetes_tls_secret_candidate(context: FileContext) -> bool:
+    """HG-044's content gate: a bounded text view that literally contains all
+    three required tokens. Extension is never evidence, and the gate only limits
+    how often the manifest parsers run -- it is not itself a finding
+    condition."""
+    text = context.text
+    if text is None:
+        return False
+    return all(token in text for token in _KUBERNETES_TLS_GATE_TOKENS)
+
+
+def _detect_kubernetes_tls_secret(context: FileContext) -> DetectionResult:
+    text = context.text
+    if text is None:
+        return DetectionResult.no_match()
+    documents = _kubernetes_manifest_documents(text)
+    if documents is None:
+        return DetectionResult.no_match()
+    findings: list[CryptoInventoryFinding] = []
+    for index, document, manifest_format in documents:
+        # The virtual document location identifies one object inside the file.
+        # It is never claimed as a real filesystem path, and never carries the
+        # Secret's name or namespace.
+        location = f"{context.location}#document={index}"
+        metadata = _kubernetes_tls_secret_finding(location, document)
+        if metadata is None:
+            continue
+        algorithm, key_size = metadata
+        findings.append(
+            CryptoInventoryFinding(
+                asset_type=_KUBERNETES_TLS_ASSET_TYPE,
+                location=location,
+                algorithm=algorithm,
+                key_size=key_size,
+                evidence=_KUBERNETES_TLS_EVIDENCE,
+                confidence="High",
+                rule_id=_KUBERNETES_TLS_RULE_ID,
+                format=manifest_format,
+            )
+        )
+    if not findings:
+        return DetectionResult.no_match()
+    return DetectionResult.match(findings)
+
+
 def _text_candidate(context: FileContext) -> bool:
     return _passes_candidate_gate(context) and context.text is not None
 
@@ -4262,6 +4807,39 @@ CRYPTO_DETECTORS = build_registry(
                 "certificate signature itself is deliberately never "
                 "verified. Priority 82 places this before generic SSH public "
                 "handling at priority 90 (Issue #88)."
+            ),
+        ),
+        FileDetector(
+            detector_id=_KUBERNETES_TLS_RULE_ID,
+            priority=83,
+            candidate=_kubernetes_tls_secret_candidate,
+            detect=_detect_kubernetes_tls_secret,
+            evidence=_KUBERNETES_TLS_EVIDENCE,
+            confidence="High",
+            terminal=False,
+            rule_id=_KUBERNETES_TLS_RULE_ID,
+            metadata_keys=_KUBERNETES_TLS_METADATA_KEYS,
+            verification_rationale=(
+                "One local manifest document that structurally declares a "
+                "Kubernetes v1 `kubernetes.io/tls` Secret -- exact "
+                "apiVersion/kind/type strings -- whose effective tls.crt and "
+                "tls.key values, resolved under Kubernetes stringData-over-data "
+                "precedence and (for data) a strict canonical RFC 4648 base64 "
+                "profile, hold one or more complete PEM CERTIFICATE blocks and "
+                "exactly one supported unencrypted PEM private key, with the "
+                "key's public key byte-identical to the first certificate's in "
+                "DER SubjectPublicKeyInfo form. Manifest bytes only: no "
+                "Kubernetes API, kubeconfig, kubectl, Helm, Kustomize, OpenSSL, "
+                "external process, or network is used, no password is "
+                "accepted, and no Secret value, metadata, or certificate "
+                "identity is reported. It establishes nothing about cluster "
+                "existence, workload use, trust, validity, or safety. Priority 83 places "
+                "this after every dedicated encrypted/container detector and "
+                "after the generic certificate/private-key PEM detectors, so "
+                "the independent physical-file findings those produce from the "
+                "manifest's own source text coexist with this aggregate "
+                "finding rather than being suppressed; decoded Secret values "
+                "are validation-only and are never redispatched (Issue #89)."
             ),
         ),
         FileDetector(

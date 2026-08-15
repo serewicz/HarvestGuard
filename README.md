@@ -203,7 +203,31 @@ evidence and must remain traceable back to it.
   certificate content, structurally valid or not. Evidence only: no
   password is prompted for or accepted, no `ssh`/`sshd`/`ssh-keygen` process is
   invoked, and no comment, principal, key ID, or certificate signature is
-  reported. Only
+  reported. Also recognizes **Kubernetes TLS Secret manifests** — a local JSON
+  or bounded-YAML manifest *document* that structurally declares a Kubernetes
+  v1 `kubernetes.io/tls` Secret whose effective `tls.crt` and `tls.key` values,
+  resolved under Kubernetes' own `stringData`-over-`data` precedence and (for
+  `data`) a strict canonical base64 profile, hold one or more parsed PEM X.509
+  certificates and exactly one supported unencrypted PEM private key (RSA,
+  ECDSA on `secp256r1`/`secp384r1`/`secp521r1`, or Ed25519) whose public key
+  matches the **first** certificate's. Detection is **content-gated, not
+  extension-gated**, and reports **one aggregate finding per Secret document**
+  — never one per encoded field, certificate, or key — at the deterministic
+  virtual location `<file>#document=<N>`, while the physical file still counts
+  once. This is **local manifest inspection only**: no Kubernetes API is
+  contacted, no kubeconfig is read, and `kubectl`, `helm`, `kustomize`,
+  `openssl`, subprocesses, and the network are never used. It does not
+  establish that the Secret exists in a cluster, is used by a workload, is
+  trusted, is currently valid, or is safely managed, and no chain, signature,
+  hostname, or date is validated. `List`/`SecretList`, top-level arrays, Helm
+  templates, Kustomize generators, `SealedSecret`, External Secrets, SOPS,
+  `Opaque` Secrets with TLS-looking keys, and encrypted private keys are out of
+  scope; YAML parsing is bounded (64 documents, depth 64, 100,000 events) and
+  uses safe/basic loaders only, with aliases, anchors, merge keys, explicit
+  tags, directives, and duplicate keys rejecting the whole file. Evidence only:
+  no Secret name, namespace, label, annotation, raw or decoded value, or
+  certificate identity is reported, and decoded values are never resubmitted to
+  another detector. Only
   files matching a candidate gate (recognized extension, crypto header, or one
   of those encrypted-file/filesystem/keystore signatures) are parsed, and
   broader keystore/crypto-container coverage is not implemented. See

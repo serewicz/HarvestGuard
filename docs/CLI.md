@@ -809,6 +809,86 @@ not proof that no OpenSSH host key or certificate exists in the target. The
 full supported/unsupported enumeration is in
 [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#openssh-host-identity-evidence-hg-043).
 
+#### Kubernetes TLS Secret inventory (HG-044)
+
+One rule, `rule_id: kubernetes_secret:tls`, asset type
+`Kubernetes TLS Secret`, confidence `High`, reported by `--type crypto` (or
+`--type all`) for each supported **manifest document** on the local
+filesystem:
+
+> This local manifest document structurally declares a Kubernetes v1 TLS
+> Secret, and its effective `tls.crt` and `tls.key` values contain a supported
+> X.509 certificate chain and a matching unencrypted private key.
+
+**Local manifest inspection only.** No Kubernetes API is contacted, no
+kubeconfig is read, and `kubectl`, `helm`, `kustomize`, `openssl`, subprocesses,
+and the network are never used. Only the manifest bytes the scan already read
+are parsed.
+
+**Serialization.** One JSON object, or one or more YAML documents in one
+physical file. Dispatch is by the first non-whitespace byte: `{` or `[` selects
+strict JSON (a JSON candidate that fails to parse never falls back to YAML), and
+everything else selects YAML. A UTF BOM rejects. Detection is **content-gated**,
+never extension-gated: the file's text must literally contain
+`kubernetes.io/tls`, `tls.crt`, and `tls.key`. Files claimed by an earlier
+terminal detector (`.p12`/`.pfx` for PKCS#12, `.cer`/`.crt`/`.der` for DER)
+never reach this rule.
+
+**Object boundary.** Exact, case-sensitive `apiVersion: v1`, `kind: Secret`, and
+`type: kubernetes.io/tls`. `metadata` is optional and its contents are ignored.
+`Opaque` Secrets with TLS-looking keys, `List`/`SecretList`, top-level arrays,
+Helm templates, Kustomize generators, `SealedSecret`, External Secrets, and SOPS
+are all out of scope.
+
+**Value resolution.** Kubernetes' own precedence: for each of `tls.crt` and
+`tls.key`, `stringData` wins over `data`. A `stringData` value that wins but is
+empty or malformed rejects the document rather than falling back to `data`. A
+selected `data` value must be strict canonical RFC 4648 base64 — ASCII, no
+whitespace, standard alphabet, canonical padding, and a re-encoding that
+reproduces the source exactly. Unrelated Secret values are never decoded.
+
+**Cryptographic profile.** The effective `tls.crt` must be exactly one or more
+complete PEM `CERTIFICATE` blocks (no surrounding text, no unrelated block); the
+effective `tls.key` must be exactly one unencrypted PEM `PRIVATE KEY`,
+`RSA PRIVATE KEY`, or `EC PRIVATE KEY` block. Supported key classes are RSA,
+ECDSA on `secp256r1`/`secp384r1`/`secp521r1`, and Ed25519. The private key's
+public key must be byte-identical, in DER `SubjectPublicKeyInfo` form, to the
+**first** certificate's. Encrypted keys are a deliberate no-match: nothing is
+decrypted and no password is prompted for, guessed, or read from the
+environment.
+
+**One finding per Secret document.** Never one per field, certificate, or key.
+Each matching document reports at the deterministic virtual location
+`<file>#document=<N>`, where `N` is the one-based ordinal of the document in
+the file (empty and non-matching documents still consume an index). That virtual
+location identifies an object inside the file and is not a real filesystem path.
+The physical file still counts once in `Crypto files inspected`.
+
+**Technical metadata is limited to `Algorithm`, `Key Size`, and `Format`**
+(`Kubernetes JSON Manifest` or `Kubernetes YAML Manifest`). `Fingerprint`,
+`Subject`, `Issuer`, `Expiration`, and `Signature Algorithm` are always unset:
+no Secret name, namespace, label, annotation, raw or decoded value, or
+certificate identity is ever emitted, persisted, logged, or included in an
+error.
+
+**No trust, validity, or use claim.** HG-044 does not build or validate a chain,
+check a signature, hostname, or date, or establish that the Secret exists in a
+cluster, is used by a workload, is trusted, is current, or is safely managed.
+Decoded values are validation evidence only and are never resubmitted to another
+detector — but the rule is non-terminal, so literal PEM text embedded in a
+`stringData` manifest still produces the independent `certificate:pem` and
+`private_key:pem` findings at the physical file location alongside the aggregate
+finding.
+
+**Limitations.** YAML parsing is bounded (at most 64 documents, nesting depth
+64, and 100,000 parse events per file) and uses safe/basic loaders only; aliases,
+anchors, merge keys, explicit tags, YAML/TAG directives, and duplicate mapping
+keys reject the complete file. A manifest larger than the scanner's 5 MB text
+limit is not inspected. Absence of a `kubernetes_secret:tls` finding is not
+proof that no Kubernetes TLS Secret exists in the target. The full
+supported/unsupported enumeration is in
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#kubernetes-tls-secret-inventory-hg-044).
+
 Cloud scans use the provider SDK's default credential resolution (for example
 `AWS_PROFILE`/instance role for S3, application-default credentials for GCS,
 `DefaultAzureCredential` for Azure). The CLI does not read, prompt for, or
