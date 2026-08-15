@@ -153,6 +153,11 @@ as HarvestGuard's reporting capabilities mature.
 
 ## Evidence Principles
 
+For a worked example of one committed demo finding presented to an executive
+reader with observation, scanner inference, business interpretation, and human
+action kept in separate labeled layers, see
+[Executive-readable evidence example](examples/executive-evidence-example.md).
+
 Evidence is primary.
 
 Assessment is secondary.
