@@ -1365,8 +1365,10 @@ Two ordering guarantees follow from persisting before emitting output:
   then fails, the command still exits `1`, but the stored run remains complete
   and retrievable with `harvestguard evidence export`.
 
-Exit code `2` always means invalid input, and `1` always means a scan
-execution failure, so automation can branch on the difference.
+Exit code `2` always means invalid input, and `1` always means an execution or
+output failure — a scanner failure, or a failure to write requested output or an
+evidence-store record after an otherwise successful scan — so automation can
+branch on the difference.
 
 **One documented exception to `1`:** a `--type code` *execution* failure —
 `semgrep` not installed, timed out, exiting non-zero, or emitting output that
