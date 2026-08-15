@@ -4,9 +4,71 @@
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.38%2B-FF4B4B)](https://streamlit.io/)
 
-**Open-source cryptographic evidence scanner for technology diligence and post-quantum migration planning.**
+**Open-source, local-first cryptographic asset inventory and evidence collection for technology diligence and post-quantum migration planning.**
 
 Built by [Timothy Serewicz](https://www.linkedin.com/in/serewicz/). Executive Technology Advisor & Fractional CTO.
+
+HarvestGuard helps teams answer three practical questions: **what cryptographic
+assets are present, where were they observed, and what evidence supports each
+finding?** It keeps observed facts separate from inference and leaves risk,
+readiness, and remediation decisions to qualified human review.
+
+## Quickstart
+
+Run a local scan against the repository's deliberately synthetic demo target:
+
+```bash
+git clone https://github.com/serewicz/HarvestGuard.git
+cd HarvestGuard
+python3 -m venv venv
+source venv/bin/activate
+python -m pip install .
+harvestguard scan demo/sample_target --type all --summary
+harvestguard scan demo/sample_target --type all --markdown report.md
+```
+
+The first command prints a concise summary; the second writes a local Markdown
+evidence report. The demo contains fake patterns only—never real credentials.
+Windows activation instructions, cloud targets, output formats, exit codes, and
+the optional local evidence store are covered in the
+[detailed setup and usage](#detailed-setup-and-usage) section and
+[CLI reference](docs/CLI.md).
+
+## PQC readiness starts with inventory
+
+Post-quantum migration planning needs a defensible inventory before teams can
+reason about dependencies, timelines, or change. HarvestGuard contributes that
+first layer: bounded observations from supported targets, confidence and
+coverage limits, and evidence that reviewers can inspect.
+
+It does **not** measure runtime exposure, crypto-agility, exploitability, or
+business impact, and it does not determine quantum readiness or prescribe a
+migration plan. Those conclusions require context and human judgment beyond a
+local evidence scan.
+
+## Supported capabilities at a glance
+
+- local filesystem and cloud-provider encryption metadata inventory;
+- category-and-count-only sensitive-data classification;
+- bounded Python source analysis for selected weak or legacy crypto usage;
+- local cryptographic asset evidence across supported certificate, key,
+  keystore, truststore, encrypted-container, OpenSSH host identity, and
+  Kubernetes TLS Secret manifest formats;
+- CLI summary, JSON, and Markdown output, plus an optional local evidence store;
+- a separate Streamlit dashboard, including an explicitly experimental HNDL
+  inference that is not emitted in CLI evidence reports.
+
+Coverage is intentionally detector-specific rather than a claim of exhaustive
+discovery. See [Detailed capability coverage](#detailed-capability-coverage) and
+[detection characterization](docs/DETECTION_CHARACTERIZATION.md) for the exact
+supported evidence, boundaries, and known false-positive and false-negative
+conditions.
+
+HarvestGuard is licensed under
+[Apache License 2.0](LICENSE), is pre-1.0 and under active development, and
+welcomes contributions. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before
+starting non-trivial work; scoped issue-first changes help keep claims and
+detector contracts reviewable.
 
 ## Why HarvestGuard?
 
@@ -79,7 +141,7 @@ Executive-facing reporting vision is documented in
 produces technical evidence first; executive deliverables are derived from that
 evidence and must remain traceable back to it.
 
-## Features (MVP)
+## Detailed capability coverage
 
 - **Local filesystem** — real encryption detection: file-signature checks for
   common encrypted formats (OpenSSL, PGP/GPG, age, LUKS containers, encrypted
@@ -258,7 +320,7 @@ Not yet built: CBOM/PDF export and network-level crypto scanning
 [docs/ROADMAP.md](docs/ROADMAP.md) for what's next and why, in rough
 priority order.
 
-## Quick Start (macOS / Linux / Windows)
+## Detailed setup and usage
 
 ### Prerequisites
 - **Python 3.10 or newer** (`python3 --version`). macOS ships Python 3.9.6 as
