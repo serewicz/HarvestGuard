@@ -36,13 +36,18 @@ harvestguard scan demo/sample_target --type all --markdown report.md
 
 `findings.json` and `report.md` are written **relative to the directory you run
 the command in** — the repository root, if you followed the steps above.
-Nothing is uploaded anywhere, and nothing is written unless you pass a path.
+Nothing is uploaded anywhere, and no evidence artifact is written unless you
+pass a path. A `--type all` scan does create one scratch directory,
+`harvestguard-semgrep/` under your system temp directory, which the bundled
+Semgrep code analysis uses for its own settings and cache. It holds no scan
+output and is created even for `--summary`.
 
 What to expect from the demo scan:
 
-- all three commands exit `0`. Exit `1` means a scanner failed partway through,
-  and exit `2` means invalid usage — see
-  [Exit Codes](docs/CLI.md#exit-codes).
+- all three commands exit `0`. Exit `1` means an execution or output failure —
+  a scanner failed partway through, or writing a requested JSON/Markdown file
+  or evidence-store record failed after the scan — and exit `2` means invalid
+  usage. See [Exit Codes](docs/CLI.md#exit-codes) for the individual cases.
 - the summary reports `Files scanned: 4` and `Total normalized records: 5`, and
   the JSON array holds those same five normalized records.
 - `Errors: 1` and `Findings with finding-level errors: 1` are **expected, not a

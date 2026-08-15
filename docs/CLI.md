@@ -1343,8 +1343,11 @@ permissions, volume encryption, or secure deletion as your engagement requires.
 ## Exit Codes
 
 - `0`: scan completed without scanner-level failures.
-- `1`: at least one scanner failed, but other recoverable scanner results were
-  returned. Suppress with `--no-fail-on-error` to exit `0` in this case.
+- `1`: an execution or output failure — at least one scanner failed while other
+  recoverable scanner results were returned, or writing a requested output file
+  or evidence-store record failed after an otherwise successful scan.
+  `--no-fail-on-error` suppresses only the scanner-failure case, exiting `0`
+  there.
 - `2`: invalid CLI usage, such as an unknown `--type`, a negative `--max-depth`,
   a malformed Azure target, or a local path that does not exist.
 
