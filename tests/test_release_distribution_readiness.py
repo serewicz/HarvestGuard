@@ -36,7 +36,7 @@ from harvestguard_version import __version__
 
 ROOT = Path(__file__).parent.parent
 RELEASE = ROOT / "docs" / "RELEASE.md"
-RELEASE_NOTES = ROOT / "docs" / "release-notes" / "v0.2.0-draft.md"
+RELEASE_NOTES = ROOT / "docs" / "release-notes" / "v0.2.0.md"
 SUPPORT = ROOT / "SUPPORT.md"
 CHANGELOG = ROOT / "CHANGELOG.md"
 README = ROOT / "README.md"
@@ -159,12 +159,12 @@ PINNED_REPOSITORY_LINK = re.compile(
 def _release_notes_body() -> str:
     """The part of the draft a maintainer pastes into the GitHub Release form.
 
-    The preamble and the maintainer checklist are deleted before publishing and
-    are only ever read from the repository, so their links stay
-    repository-relative; everything between them is read from a Release page,
-    where a relative path does not resolve.
+    The preamble above the rule is deleted before publishing and is only ever
+    read from the repository, so its links stay repository-relative; everything
+    below it is read from a Release page, where a relative path does not
+    resolve.
     """
-    _preamble, body, _checklist = RELEASE_NOTES.read_text(encoding="utf-8").split("\n---\n")
+    _preamble, body = RELEASE_NOTES.read_text(encoding="utf-8").split("\n---\n", 1)
     return body
 
 
@@ -233,16 +233,16 @@ def test_decision_records_that_preparation_published_nothing():
         assert falsehood not in normalized, f"the decision falsely claims: {falsehood!r}"
 
 
-def test_version_literals_were_not_bumped_by_this_preparation():
-    # Issue #125 explicitly excludes a version bump: the bump is part of the
-    # separately authorized release action. If this ever fails, the drafted
-    # changelog entry and the release-notes draft both stop being drafts and
-    # have to be revisited rather than left standing.
+def test_the_authorized_version_bump_landed_in_both_literals():
+    # Issue #125 excluded the bump; issue #127 authorized it and it happened.
+    # What matters now is that the two literals moved together -- a half-done
+    # bump would make `pip show harvestguard` and `harvestguard --version`
+    # disagree about the same install.
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
     assert match is not None
-    assert match.group(1) == "0.1.0"
-    assert __version__ == "0.1.0"
+    assert match.group(1) == __version__
+    assert __version__ == "0.2.0"
 
 
 def test_release_surface_facts_match_the_issue_125_baseline():
@@ -279,18 +279,24 @@ def test_b3_points_at_the_drafted_changelog_entry_and_release_notes():
     [b3] = _table_rows(DECISION, r"B-3")
     disposition = b3[1]
     assert "CHANGELOG.md" in disposition
-    assert "release-notes/v0.2.0-draft.md" in disposition
+    assert "release-notes/v0.2.0.md" in disposition
 
 
 # --- Deferrals stay recorded as deferrals ----------------------------------
 
 
-def test_pypi_timing_is_explicitly_decided_as_deferred():
+def test_pypi_deferral_records_that_it_was_superseded_rather_than_silently_dropped():
+    # Issue #125 deferred PyPI; issue #127 authorized it. The #125 row is a
+    # record of a decision that was made, so it is not rewritten as though the
+    # deferral never happened -- it has to say what superseded it and point
+    # there, or a reader takes the stale deferral as current.
     [pypi_row] = _table_rows(DECISION, r"PyPI \(wheel/sdist\)")
     decision, rationale = _normalized(pypi_row[1]), pypi_row[2]
-    assert "deferred" in decision
-    assert "not part of this release" in decision
-    assert rationale.strip(), "the PyPI deferral records no reason"
+    assert "deferred by this preparation" in decision
+    assert "superseded" in decision
+    assert "issue #127" in decision
+    assert "#v020-release-preparation-issue-127" in decision
+    assert rationale.strip(), "the superseded PyPI deferral records no reason"
 
 
 def test_version_tagged_container_image_is_deferred_to_commit_sha_images():
@@ -330,18 +336,19 @@ def test_metadata_actions_fix_the_topic_typo_and_leave_the_homepage_unset():
 # --- The changelog entry is a draft while the version says 0.1.0 -----------
 
 
-def test_changelog_drafts_an_unreleased_0_2_0_entry():
+def test_changelog_carries_a_released_0_2_0_entry_without_asserting_external_state():
     assert "## 0.2.0" in CHANGELOG_TEXT
     heading = _draft_entry_heading()
-    assert "drafted" in heading.lower() and "unreleased" in heading.lower(), heading
+    assert "drafted" not in heading.lower() and "unreleased" not in heading.lower(), heading
 
     unreleased = _plain(_section(CHANGELOG_TEXT, "## Unreleased"))
-    assert "a draft for a release that has not happened" in unreleased
-    assert f"the declared version is still `{__version__}`" in unreleased
-    assert "no `v0.2.0` tag has been created" in unreleased
-    assert "no github release has been published from any tag" in unreleased
-    assert "no pypi, wheel, or sdist publication has been made" in unreleased
-    assert "docs/release-notes/v0.2.0-draft.md" in unreleased
+    assert "a draft for a release that has not happened" not in unreleased
+    assert f"declares `{__version__}`" in unreleased
+    # Tag, Release, and PyPI state live outside the repository; the changelog
+    # must point a reader at those sources instead of asserting them.
+    assert "it cannot record external publication state" in unreleased
+    assert "pypi.org/project/harvestguard" in unreleased
+    assert "docs/release-notes/v0.2.0.md" in unreleased
 
 
 def test_drafted_entry_covers_the_work_the_release_would_describe():
@@ -364,22 +371,28 @@ def test_drafted_entry_covers_the_work_the_release_would_describe():
     assert "hg-045" in normalized
 
 
-def test_drafted_entry_does_not_claim_it_was_released():
+def test_entry_describes_the_release_without_asserting_publication_it_cannot_see():
     entry = _normalized(_draft_entry())
-    assert "drafting this entry published nothing" in entry
+    assert "publication itself is not performed by any change in this repository" in entry
+    assert "no version-tagged container image is part of this release" in entry
+    # The entry may say what version the repository declares; it may not assert
+    # that a tag, Release, or upload exists, because it cannot observe them.
     for falsehood in ("v0.2.0 has been released", "released on", "tagged as v0.2.0"):
-        assert falsehood not in entry, f"the drafted entry falsely claims: {falsehood!r}"
+        assert falsehood not in entry, f"the entry falsely claims: {falsehood!r}"
 
 
 # --- The release-notes draft is usable and marked as a draft ---------------
 
 
-def test_release_notes_draft_exists_and_says_it_is_unpublished():
+def test_release_notes_are_final_and_publish_nothing_themselves():
+    # Issue #127 finalized the draft: the draft-only preamble and the
+    # maintainer checklist are gone, but the file is still repository content,
+    # so it must not read as though its own presence published the release.
     normalized = _normalized(RELEASE_NOTES.read_text(encoding="utf-8"))
-    assert "status: draft. not published." in normalized
-    assert "no `v0.2.0` tag has been created" in normalized
-    assert f"the declared version is still `{__version__}`" in normalized
-    assert "nothing in this file publishes anything" in normalized
+    assert "status: draft. not published." not in normalized
+    assert "this file publishes nothing by itself" in normalized
+    assert "tagging and publishing are separate maintainer actions" in normalized
+    assert f"harvestguard v{__version__}" in normalized
 
 
 @pytest.mark.parametrize(
@@ -398,20 +411,20 @@ def test_release_notes_draft_covers_every_required_section(topic, heading):
     )
 
 
-def test_release_notes_draft_states_the_evidence_only_boundary():
+def test_release_notes_state_the_evidence_only_boundary():
     normalized = _normalized(RELEASE_NOTES.read_text(encoding="utf-8"))
     assert "harvestguard is **evidence only**" in normalized
     for boundary in (
         "complete or exhaustive inventory",
         "absence of a finding proves absence",
-        "runtime exposure or exploitability",
+        "runtime use, runtime exposure, or exploitability",
         "business risk",
         "compliance or audit conclusions",
         "remediation advice or remediation priority",
         "migration readiness or quantum readiness",
         "hndl (harvest now, decrypt later) exposure",
     ):
-        assert boundary in normalized, f"the draft release notes do not disclaim {boundary!r}"
+        assert boundary in normalized, f"the release notes do not disclaim {boundary!r}"
 
 
 def test_release_notes_draft_promises_no_support_beyond_the_stated_channels():
@@ -421,12 +434,22 @@ def test_release_notes_draft_promises_no_support_beyond_the_stated_channels():
     assert "only `main` is supported" in normalized
 
 
-def test_release_notes_draft_does_not_offer_a_pypi_install_or_version_tagged_image():
+def test_release_notes_offer_the_pypi_install_but_no_version_tagged_image():
+    # PyPI publication is authorized for v0.2.0 (issue #127); a version-tagged
+    # container image still is not, so the notes must not imply one exists.
     normalized = _plain(RELEASE_NOTES.read_text(encoding="utf-8"))
-    assert "not published to pypi" in normalized
-    assert "pip install harvestguard" not in normalized, "that would imply a PyPI release"
+    assert "python -m pip install harvestguard" in normalized
+    assert "pypi.org/project/harvestguard" in normalized
     assert "harvestguard:v0.2.0" not in normalized, "no version-tagged image exists"
     assert "harvestguard:latest" not in normalized
+
+
+def test_release_notes_keep_the_demo_on_the_clone_path():
+    # `demo/` is not in the wheel or sdist, so the notes must not imply the
+    # demo corpus exists after `pip install harvestguard`.
+    normalized = _plain(RELEASE_NOTES.read_text(encoding="utf-8"))
+    assert "is not included in the pypi package" in normalized
+    assert "git clone https://github.com/serewicz/harvestguard.git" in normalized
 
 
 # --- Support and advisory path ---------------------------------------------
@@ -479,7 +502,7 @@ def test_readme_points_at_support_and_the_distribution_decision():
     normalized = _normalized(README_TEXT)
     assert "[support.md](support.md)" in normalized
     assert "no service-level agreement" in normalized
-    assert "not published to pypi" in normalized
+    assert "python -m pip install harvestguard" in normalized
     assert "release-and-distribution-decision-v02-preparation" in normalized
     # The advisory mention in the README stays a pointer, not a pitch.
     readme_support = _section(README_TEXT, "## Support")
@@ -492,7 +515,7 @@ def test_readme_points_at_support_and_the_distribution_decision():
 
 @pytest.mark.parametrize(
     "surface",
-    ["SUPPORT.md", "docs/release-notes/v0.2.0-draft.md", "CHANGELOG.md", "README.md"],
+    ["SUPPORT.md", "docs/release-notes/v0.2.0.md", "CHANGELOG.md", "README.md"],
 )
 @pytest.mark.parametrize("assertion", FORBIDDEN_ASSERTIONS)
 def test_release_surfaces_assert_no_out_of_boundary_conclusion(surface, assertion):
@@ -510,7 +533,7 @@ def test_the_release_decision_asserts_no_out_of_boundary_conclusion(assertion):
 
 @pytest.mark.parametrize(
     "document",
-    ["SUPPORT.md", "docs/release-notes/v0.2.0-draft.md"],
+    ["SUPPORT.md", "docs/release-notes/v0.2.0.md"],
 )
 def test_new_document_links_and_anchors_resolve(document):
     path = ROOT / document
@@ -547,15 +570,16 @@ def test_release_notes_body_pins_its_repository_links_and_they_resolve():
             )
 
 
-def test_release_notes_placeholders_the_preamble_names_are_present():
+def test_release_notes_carry_no_unreplaced_placeholders():
+    # The draft carried `<commit-sha>` and `<image-digest>` for a container pull
+    # command. No version-tagged image is part of this release, so that command
+    # was removed rather than filled in -- either way, nothing angle-bracketed
+    # may survive into published text.
     text = RELEASE_NOTES.read_text(encoding="utf-8")
-    for placeholder in ("<commit-sha>", "<image-digest>"):
-        # The preamble tells the maintainer to replace these before publishing;
-        # each one has to exist somewhere in the pasted text to be replaceable.
-        assert placeholder in _release_notes_body(), (
-            f"the preamble names {placeholder}, which the release text does not contain"
+    for placeholder in ("<commit-sha>", "<image-digest>", "<commit", "<digest"):
+        assert placeholder not in text, (
+            f"unreplaced placeholder in the release notes: {placeholder}"
         )
-        assert placeholder in text
 
 
 def test_release_decision_links_and_anchors_resolve():

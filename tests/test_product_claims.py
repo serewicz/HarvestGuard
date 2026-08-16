@@ -20,6 +20,7 @@ from dashboard.visualizations import (
     NO_SENSITIVE_DATA_MESSAGE,
     RISK_SCORE_LABEL,
 )
+from harvestguard_version import __version__
 from reports import format_markdown_report, make_report_context
 
 ROOT = Path(__file__).parent.parent
@@ -56,11 +57,14 @@ def test_pyproject_description_does_not_claim_quantum_risk_scanning():
     assert "quantum risk scanner" not in PYPROJECT.lower()
 
 
-def test_pyproject_version_was_not_bumped_by_this_audit():
-    # HG-011 owns release/versioning; HG-010 must only touch claims wording.
+def test_pyproject_version_is_the_declared_release_identity():
+    # Claims wording must not drift the packaging version away from the one the
+    # CLI reports: `pip show harvestguard` and `harvestguard --version` describe
+    # the same install. The bump to 0.2.0 was made deliberately, under issue
+    # #127, and is recorded in docs/RELEASE.md.
     match = re.search(r'^version\s*=\s*"([^"]+)"', PYPROJECT, re.MULTILINE)
     assert match is not None
-    assert match.group(1) == "0.1.0"
+    assert match.group(1) == __version__
 
 
 # --- Network/TLS and binary/runtime analysis are not claimed as shipped ---

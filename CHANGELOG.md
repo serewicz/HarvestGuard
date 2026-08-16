@@ -10,30 +10,30 @@ change between versions. The normalized finding schema is versioned separately
 
 ## Unreleased
 
-The `0.2.0` entry below is a **draft for a release that has not happened**. It
-describes work already merged to `main`; it does not describe a published
-version. Specifically, at the time of writing:
+No changes since the `0.2.0` entry below.
 
-- the declared version is still `0.1.0` in both `pyproject.toml` and
-  `harvestguard_version.py`, and `harvestguard --version` prints
-  `harvestguard 0.1.0`;
-- no `v0.2.0` tag has been created, and no GitHub Release has been published
-  from any tag;
-- no PyPI, wheel, or sdist publication has been made, and no version-tagged
-  container image exists.
+The repository now declares `0.2.0` in both `pyproject.toml` and
+`harvestguard_version.py`, and `harvestguard --version` prints
+`harvestguard 0.2.0`. That version bump was authorized by issue #127, which
+also authorized tagging `v0.2.0`, publishing a GitHub Release, and publishing
+the wheel and sdist to PyPI.
 
-Drafting that entry closes open item B-3 of the
-[v0.2 pre-1.0 release readiness audit](docs/RELEASE.md#v02-pre-10-release-readiness-audit).
-The chosen release path, the disposition of every other open item, and the
-maintainer actions still required are recorded in
-[release and distribution decision](docs/RELEASE.md#release-and-distribution-decision-v02-preparation);
-the draft GitHub Release notes are in
-[docs/release-notes/v0.2.0-draft.md](docs/release-notes/v0.2.0-draft.md).
+Repository content records the version the code declares; it cannot record
+external publication state. Whether the `v0.2.0` tag, GitHub Release, and PyPI
+package exist at the moment you read this is verifiable only at their own
+sources — the repository's tags and releases, and
+[pypi.org/project/harvestguard](https://pypi.org/project/harvestguard/) — and
+each was a deliberate maintainer action taken from the merged commit, not
+something any change in this repository performs.
 
-Nothing here bumps a version literal, creates a tag, or publishes anything;
-each of those remains a separate, explicitly authorized maintainer action.
+The chosen release path, the disposition of every audit open item, and the
+release and packaging validation are recorded in
+[release and distribution decision](docs/RELEASE.md#release-and-distribution-decision-v02-preparation)
+and [v0.2.0 release preparation](docs/RELEASE.md#v020-release-preparation-issue-127);
+the GitHub Release notes are in
+[docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md).
 
-## 0.2.0 — Cryptographic Inventory and First Public Use (drafted, unreleased)
+## 0.2.0 — Cryptographic Inventory and First Public Use
 
 Covers the `v0.1.1 Stabilization` (HG-028…HG-032) and `v0.2` cryptographic
 inventory (HG-033…HG-044) milestones in
@@ -137,13 +137,20 @@ The v0.1 limitations below still apply in full, unchanged. In addition:
 
 ### Release state
 
-Drafting this entry published nothing. The declared version literal is
-unchanged at `0.1.0`, no `v0.2.0` tag has been created, no GitHub Release
-exists, HarvestGuard is not published to PyPI, and container images remain
-tagged by commit SHA. Before this entry can describe an actual release, the
-version literals must be bumped in step and the blocking items in
-[docs/RELEASE.md](docs/RELEASE.md#open-items-for-the-v02-gono-go) resolved —
-see [release and distribution decision](docs/RELEASE.md#release-and-distribution-decision-v02-preparation).
+`0.2.0` is the version this repository declares, in both `pyproject.toml` and
+`harvestguard_version.py`. It is a **pre-1.0 pilot release**: it is offered so
+that HarvestGuard is exercised in more environments than the maintainer's own,
+and it carries no service-level agreement, no guaranteed response time, and no
+support promise beyond [SUPPORT.md](SUPPORT.md).
+
+Publication itself is not performed by any change in this repository. Tagging
+`v0.2.0`, publishing the GitHub Release, and uploading the wheel and sdist to
+PyPI are deliberate maintainer actions taken from the merged commit; the
+authorization for them, the packaging validation that preceded them, and what
+remains out of scope are recorded in
+[v0.2.0 release preparation](docs/RELEASE.md#v020-release-preparation-issue-127).
+No version-tagged container image is part of this release — container images
+remain tagged by commit SHA.
 
 ## 0.1.0 — Controlled Diligence Pilot (approved, tagged)
 

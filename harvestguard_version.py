@@ -16,7 +16,7 @@ never drift apart.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # What `harvestguard --version` prints, and what a report records as the tool
 # that produced it.
@@ -24,5 +24,5 @@ PROGRAM_NAME = "harvestguard"
 
 
 def version_string() -> str:
-    """Human-readable program identity, e.g. ``harvestguard 0.1.0``."""
+    """Human-readable program identity, e.g. ``harvestguard 0.2.0``."""
     return f"{PROGRAM_NAME} {__version__}"

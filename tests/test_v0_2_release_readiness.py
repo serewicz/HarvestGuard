@@ -2,7 +2,7 @@
 
 The audit in docs/RELEASE.md is a go/no-go *evidence record*, so the properties
 worth protecting are the ones that would let it quietly stop being evidence:
-that it still states the version identity the repository actually declares,
+that it still states the version identity declared at the commit it audited,
 that every open item still names an owner rather than trailing off, that its
 release commands are recorded as unexecuted rather than performed, and that
 nothing in it claims a release, tag, or publication that does not exist.
@@ -18,8 +18,6 @@ import re
 from pathlib import Path
 
 import pytest
-
-from harvestguard_version import __version__
 
 ROOT = Path(__file__).parent.parent
 RELEASE = ROOT / "docs" / "RELEASE.md"
@@ -120,14 +118,16 @@ def test_surface_audit_records_a_result_for_each_audited_surface(surface):
 # --- The audit still describes the version the repository declares ----------
 
 
-def test_audit_records_the_version_identity_that_is_actually_declared():
-    # The audit is the record of a *pre-release* state. If the version literal
-    # is ever bumped, this fails on purpose: the audit then describes a version
-    # the repository no longer declares, and has to be revisited (its own open
-    # item B-4 covers the sample artifacts that go stale for the same reason)
-    # rather than left standing as evidence for a state that has passed.
-    assert f"| Declared version at that commit | `{__version__}` |" in AUDIT
-    assert f"| `harvestguard --version` | `harvestguard {__version__}` |" in AUDIT
+def test_audit_records_the_version_identity_declared_at_the_commit_it_audited():
+    # The audit is a record of a *past* state: it audited commit `89c7bb8`,
+    # where the declared version was `0.1.0`. The version has since been bumped
+    # to `0.2.0` under issue #127, and the audit is deliberately not rewritten
+    # to match -- editing it would destroy the evidence it exists to preserve.
+    # What must stay true is that it says which commit it audited and pins its
+    # version identity to that commit rather than to the current literal.
+    assert "| Commit audited | `89c7bb8` |" in AUDIT
+    assert "| Declared version at that commit | `0.1.0` |" in AUDIT
+    assert "| `harvestguard --version` | `harvestguard 0.1.0` |" in AUDIT
 
 
 def test_audit_separates_the_current_state_from_the_proposed_release():
@@ -312,18 +312,16 @@ def test_audit_links_and_anchors_resolve():
 # --- The changelog surface the audit reports on -----------------------------
 
 
-def test_changelog_records_the_merged_work_as_unreleased_and_points_at_the_audit():
-    # Issue #125 drafted the `0.2.0` entry this audit listed as open item B-3,
-    # so the changelog now *describes* the merged work — but the entry is a
-    # draft, and the Unreleased section above it still has to say so, still
-    # name the version the repository actually declares, and still point back
-    # at this audit.
+def test_changelog_no_longer_describes_the_0_2_0_entry_as_an_unhappened_release():
+    # Issue #125 drafted the `0.2.0` entry and the Unreleased section above it
+    # said so. Issue #127 authorized the release, so that framing is gone: the
+    # changelog now records the version the repository actually declares, and
+    # points at the preparation record instead of at a draft.
     unreleased = _section(CHANGELOG_TEXT, "## Unreleased")
-    assert "a **draft for a release that has not happened**" in unreleased
-    assert "docs/RELEASE.md#v02-pre-10-release-readiness-audit" in unreleased
     normalized = " ".join(unreleased.lower().split())
-    assert f"`{__version__}` in both `pyproject.toml` and `harvestguard_version.py`" in normalized
-    assert "no `v0.2.0` tag has been created" in normalized
-    assert "no github release has been published from any tag" in normalized
-    assert "no pypi, wheel, or sdist publication has been made" in normalized
-    assert "no tag, release, package publication" not in normalized
+    assert "a **draft for a release that has not happened**" not in unreleased
+    assert "0.2.0` in both `pyproject.toml` and `harvestguard_version.py`" in normalized
+    assert "docs/release.md#v020-release-preparation-issue-127" in normalized
+    # Publication is external state the repository cannot assert either way.
+    assert "repository content records the version the code declares" in normalized
+    assert "it cannot record external publication state" in normalized

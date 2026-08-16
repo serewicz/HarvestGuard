@@ -22,8 +22,21 @@ from pathlib import Path
 
 import pytest
 
+import finding_adapters
 from findings import SCHEMA_VERSION, NormalizedFinding
 from harvestguard_version import __version__
+
+# Provenance `scanner_version` is the *scanner's* identity, declared per scanner
+# in finding_adapters.py, and docs/RELEASE.md states plainly that it does not
+# track the product version. Asserting it equals `__version__` only worked while
+# the two literals happened to coincide, and broke the moment the product
+# version moved (the v0.2 audit's open item B-2). The samples are checked
+# against the identities the code actually declares instead.
+SCANNER_VERSIONS = {
+    identity.name: identity.version
+    for identity in vars(finding_adapters).values()
+    if isinstance(identity, finding_adapters.ScannerIdentity)
+}
 
 ROOT = Path(__file__).parent.parent
 EXAMPLES_DIR = ROOT / "docs" / "examples" / "first-run"
@@ -83,7 +96,7 @@ def test_json_sample_matches_the_normalized_finding_contract(sample_findings):
     for finding in sample_findings:
         assert set(finding) == expected, finding["location"]
         assert finding["schema_version"] == SCHEMA_VERSION
-        assert finding["scanner_version"] == __version__
+        assert finding["scanner_version"] == SCANNER_VERSIONS[finding["scanner_name"]]
         # The nested provenance block still mirrors the flat fields.
         assert finding["provenance"]["scanner_name"] == finding["scanner_name"]
         assert finding["provenance"]["rule_id"] == finding["rule_id"]
