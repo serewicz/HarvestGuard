@@ -136,6 +136,24 @@ def _draft_entry() -> str:
 
 DECISION = _section(RELEASE_TEXT, DECISION_HEADING)
 
+# A repository link inside the pasted release text, pinned to the `v0.2.0` tag.
+PINNED_REPOSITORY_LINK = re.compile(
+    r"\]\(https://github\.com/serewicz/HarvestGuard/(?:blob|tree)/v0\.2\.0/"
+    r"([^)\s#]+?)/?(?:#([^)\s]+))?\)"
+)
+
+
+def _release_notes_body() -> str:
+    """The part of the draft a maintainer pastes into the GitHub Release form.
+
+    The preamble and the maintainer checklist are deleted before publishing and
+    are only ever read from the repository, so their links stay
+    repository-relative; everything between them is read from a Release page,
+    where a relative path does not resolve.
+    """
+    _preamble, body, _checklist = RELEASE_NOTES.read_text(encoding="utf-8").split("\n---\n")
+    return body
+
 
 # --- The decision exists, is a decision, and is reviewable ------------------
 
@@ -491,6 +509,40 @@ def test_new_document_links_and_anchors_resolve(document):
             markdown = resolved / "README.md" if resolved.is_dir() else resolved
             assert markdown.is_file(), f"{document} cannot resolve an anchor target: {target}"
             assert fragment in _anchors(markdown), f"{document} has a broken anchor: {target}"
+
+
+def test_release_notes_body_carries_no_file_relative_repository_links():
+    # A Release page renders the notes outside any file context, so
+    # `../RELEASE.md` and `../../CHANGELOG.md` would publish as broken links.
+    assert not _local_links(_release_notes_body()), (
+        "the pasted release text must link with absolute repository URLs, not "
+        "file-relative paths, because those do not resolve from a Release page"
+    )
+
+
+def test_release_notes_body_pins_its_repository_links_and_they_resolve():
+    matches = PINNED_REPOSITORY_LINK.findall(_release_notes_body())
+    assert matches, "the pasted release text no longer pins repository links to `v0.2.0`"
+    for path_part, fragment in matches:
+        resolved = (ROOT / path_part).resolve()
+        assert resolved.exists(), f"the release notes link to a missing path: {path_part}"
+        if fragment:
+            markdown = resolved / "README.md" if resolved.is_dir() else resolved
+            assert markdown.is_file(), f"the release notes cannot anchor into {path_part}"
+            assert fragment in _anchors(markdown), (
+                f"the release notes have a broken anchor: {path_part}#{fragment}"
+            )
+
+
+def test_release_notes_placeholders_the_preamble_names_are_present():
+    text = RELEASE_NOTES.read_text(encoding="utf-8")
+    for placeholder in ("<commit-sha>", "<image-digest>"):
+        # The preamble tells the maintainer to replace these before publishing;
+        # each one has to exist somewhere in the pasted text to be replaceable.
+        assert placeholder in _release_notes_body(), (
+            f"the preamble names {placeholder}, which the release text does not contain"
+        )
+        assert placeholder in text
 
 
 def test_release_decision_links_and_anchors_resolve():
