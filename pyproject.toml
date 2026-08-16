@@ -8,10 +8,10 @@ name = "harvestguard"
 # CLI's `--version` and the Markdown report both report at runtime. setuptools reads
 # this literal statically at build time, so the two are separate declarations;
 # tests/test_release_identity.py fails if they drift.
-version = "0.1.0"
+version = "0.2.0"
 description = "Open-source cryptographic asset inventory and evidence-collection tool for technology due diligence."
 readme = "README.md"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [{ name = "Timothy Serewicz" }]
 requires-python = ">=3.10"
 
@@ -60,11 +60,22 @@ dependencies = [
 [project.scripts]
 harvestguard = "harvestguard:main"
 
-# NOTE: This project isn't published to PyPI yet, so an install always starts
-# from a repository checkout (`pip install .` or `pip install -e .`). This file
-# is nonetheless the authoritative packaging metadata for that install: it
-# centralizes dev-tooling config, declares the runtime dependencies above, and
-# exposes the CLI entry point.
+# What a PyPI project page links to. The long description is README.md, whose
+# repository-relative links do not resolve on PyPI, so the sidebar links below
+# are how a reader gets from the package page back to the source, the release
+# history, and the issue tracker.
+[project.urls]
+Homepage = "https://github.com/serewicz/HarvestGuard"
+Repository = "https://github.com/serewicz/HarvestGuard"
+Changelog = "https://github.com/serewicz/HarvestGuard/blob/main/CHANGELOG.md"
+Issues = "https://github.com/serewicz/HarvestGuard/issues"
+
+# NOTE: `pip install harvestguard` installs the CLI and its dependencies from
+# PyPI; `pip install .` from a repository checkout remains supported and is what
+# the demo corpus needs, since `demo/` is not part of the distribution. This
+# file is the authoritative packaging metadata for both paths: it centralizes
+# dev-tooling config, declares the runtime dependencies above, and exposes the
+# CLI entry point.
 
 # The repository uses a flat layout with several top-level modules and
 # packages, so setuptools' automatic discovery refuses to guess (it errors with

@@ -49,6 +49,35 @@ expected instead. **Do not paste real scan output**: reports can contain file
 paths, bucket and object names, and other sensitive identifiers. Reproduce
 against `demo/sample_target/` where you can.
 
+## Pilot feedback for v0.2.0
+
+`v0.2.0` is a pre-1.0 pilot release. It has been exercised against this
+repository's own fixtures and demo corpus, on a small number of machines, so
+reports from other environments are genuinely useful — including reports that
+nothing went wrong.
+
+Open a [GitHub Issue](https://github.com/serewicz/HarvestGuard/issues) with:
+
+- your operating system and Python version;
+- how you installed it (`pip install harvestguard`, `pip install .` from a
+  clone, `pip install -e .`, or a container);
+- the exact command you ran;
+- what you expected and what actually happened;
+- sample output **only if it is safe to share** — the demo corpus output is
+  always safe; and
+- which of these it is: install, scan, output, documentation, or packaging.
+
+**Never send** real secrets, private keys, certificates from production
+systems, proprietary source trees, or scan output from real systems. Scan
+reports legitimately contain file paths, bucket and object names, certificate
+subjects and issuers, and other sensitive identifiers, so treat them as
+confidential and reproduce against `demo/sample_target/` where you can. Suspected
+vulnerabilities go to the private channel in [SECURITY.md](SECURITY.md), not to
+a public issue.
+
+This is a request for reports, not a support commitment: the expectations in
+the table above are unchanged, and there is no response-time guarantee.
+
 ## Advisory work
 
 HarvestGuard is an open-source evidence collection tool. Advisory work around

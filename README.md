@@ -15,8 +15,29 @@ readiness, and remediation decisions to qualified human review.
 
 ## Quickstart
 
-Run, review, and export a local scan of the repository's deliberately synthetic
-demo target — this is the canonical first-run sequence:
+### Install from PyPI
+
+```bash
+python -m pip install harvestguard
+```
+
+Python 3.10+ is required. Installing into a clean virtual environment is
+recommended, because HarvestGuard pulls in Semgrep and three cloud SDKs.
+
+### Scan a local path
+
+```bash
+harvestguard scan /path/to/project --type all --summary
+```
+
+That prints the evidence summary for a path you choose. Scan only targets you
+are authorized to scan.
+
+### Try the safe demo
+
+The demo corpus is **repository content, not part of the PyPI package** — it
+does not exist after `pip install harvestguard`. To run it, clone the
+repository and install from that checkout:
 
 ```bash
 git clone https://github.com/serewicz/HarvestGuard.git
@@ -25,6 +46,16 @@ python3 -m venv venv            # macOS: python3.12 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 python -m pip install .
 
+harvestguard scan demo/sample_target --type all --summary
+```
+
+### The full first-run sequence
+
+Run, review, and export a local scan of the repository's deliberately synthetic
+demo target — this is the canonical first-run sequence, and it assumes the
+clone-and-install above:
+
+```bash
 # 1. Review the scan in the terminal
 harvestguard scan demo/sample_target --type all --summary
 
@@ -273,7 +304,19 @@ priority order.
 
 One command from a clean virtual environment installs `harvestguard` and every
 dependency it needs — `pyproject.toml` is authoritative, so there is no second
-requirements step:
+requirements step. From PyPI:
+
+```bash
+python3 -m venv venv            # macOS: python3.12 -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+python -m pip install harvestguard
+harvestguard --version
+```
+
+The installed distribution contains the CLI and its packaged modules. Neither
+the wheel nor the source archive contains the demo corpus, the Streamlit
+dashboard, the test suite, or the documentation tree, so clone the repository
+to use those resources:
 
 ```bash
 # Clone the repo
@@ -377,12 +420,20 @@ evidence artifact identifies the release that produced it. Release notes are in
 SBOM/signing/provenance status, and the release procedure are in
 [docs/RELEASE.md](docs/RELEASE.md).
 
-**How to get it.** Install from a source checkout, as the
-[Quickstart](#quickstart) shows. HarvestGuard is not published to PyPI, so
-there is no released wheel or sdist; the container image is published from
-`main` and tagged by commit SHA, not by product version. Which distribution
-channels are planned, deferred, or deliberately out of scope is recorded in
+**How to get it.** `python -m pip install harvestguard` installs the released
+wheel from PyPI ([pypi.org/project/harvestguard](https://pypi.org/project/harvestguard/)),
+and installing from a source checkout stays supported — it is what the demo
+corpus, the dashboard, and the test suite need, since none of them is part of
+the distribution. The container image is published from `main` and tagged by
+commit SHA, not by product version. Which distribution channels are supported,
+deferred, or deliberately out of scope is recorded in
 [docs/RELEASE.md](docs/RELEASE.md#release-and-distribution-decision-v02-preparation).
+
+**Pilot feedback wanted.** `v0.2.0` is a pre-1.0 pilot release, and it has been
+exercised mainly in the maintainer's own environment. If you install or run it,
+reports of what happened — including the boring successes — are useful. What to
+include, and what never to send, is in
+[SUPPORT.md](SUPPORT.md#pilot-feedback-for-v020).
 
 ## Support
 
