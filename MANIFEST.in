@@ -1,0 +1,5 @@
+exclude main.py
+prune dashboard
+prune demo
+prune docs
+prune tests

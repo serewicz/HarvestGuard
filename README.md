@@ -313,9 +313,10 @@ python -m pip install harvestguard
 harvestguard --version
 ```
 
-The distribution contains the CLI and its packaged modules only. Installing
-from a repository checkout instead is what you want for the demo corpus, the
-Streamlit dashboard, or the test suite, none of which is packaged:
+The installed distribution contains the CLI and its packaged modules. Neither
+the wheel nor the source archive contains the demo corpus, the Streamlit
+dashboard, the test suite, or the documentation tree, so clone the repository
+to use those resources:
 
 ```bash
 # Clone the repo

@@ -591,10 +591,10 @@ it.
 | Check | Command | Result |
 | --- | --- | --- |
 | Build both artifacts | `python -m build` | `harvestguard-0.2.0-py3-none-any.whl` and `harvestguard-0.2.0.tar.gz` |
-| Metadata and long description | `python -m twine check dist/*` | PASSED for both artifacts. Metadata records `Name: harvestguard`, `Version: 0.2.0`, `License: Apache-2.0`, `Requires-Python: >=3.10`, and the thirteen runtime dependencies from `pyproject.toml` |
+| Metadata and long description | `python -m twine check dist/*` | PASSED for both artifacts. Metadata records `Name: harvestguard`, `Version: 0.2.0`, `License-Expression: Apache-2.0`, `Requires-Python: >=3.10`, and the thirteen runtime dependencies from `pyproject.toml` |
 | Clean virtualenv install from the wheel | `pip install harvestguard-0.2.0-py3-none-any.whl` in a fresh venv | Installs; `harvestguard --version` prints `harvestguard 0.2.0`, `harvestguard --help` and `harvestguard scan --help` exit `0`, and a scan of a synthetic temporary file exits `0` and reports one normalized record |
 | Clean virtualenv install from the sdist | `pip install harvestguard-0.2.0.tar.gz` in a fresh venv | Identical results |
-| Distribution contents | `tar tzf` / `zipfile` listing | The CLI modules and packages only. `demo/`, `tests/`, `docs/`, and the Streamlit dashboard are **not** in either artifact, which is why README keeps the demo on the clone path |
+| Distribution contents | `tar tzf` / `zipfile` listing | The wheel contains the installed CLI modules and standard distribution metadata; the sdist also contains the standard source-build files (`README.md`, `LICENSE`, `pyproject.toml`, and `MANIFEST.in`). `demo/`, `tests/`, `docs/`, the Streamlit dashboard, and `main.py` are **not** in either artifact, which is why README keeps the demo on the clone path |
 
 ### What this release does not include
 
