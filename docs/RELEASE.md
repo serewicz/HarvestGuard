@@ -9,7 +9,11 @@ makes no claim about what the scanners detect — that lives in
 classification of every product claim lives in
 [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md).
 
-Release notes for v0.1.0 are in [CHANGELOG.md](../CHANGELOG.md).
+Release notes for v0.1.0 are in [CHANGELOG.md](../CHANGELOG.md). A maintainer
+deciding whether to publish a release should read
+[release and distribution decision](#release-and-distribution-decision-v02-preparation)
+— it records the chosen path, the state of every open item, and what still
+requires explicit authorization.
 
 ## Version identity
 
@@ -154,9 +158,16 @@ release automation.
    released, with the release date.
 5. Tag the release commit on `main` and push the tag:
    `git tag -a v0.1.0 -m "HarvestGuard v0.1.0" && git push origin v0.1.0`.
-6. Publish a GitHub release for the tag whose notes are that changelog entry.
-7. Record the commit SHA of the tag; the container image published from that
-   commit is the corresponding image (identified by its digest).
+6. Publish a GitHub release for the tag. Its notes are that changelog entry,
+   unless the version being released has a prepared release-notes draft, in
+   which case that draft is the notes — as for v0.2, at step 7 of the
+   [proposed v0.2 release checklist](#proposed-v02-release-checklist).
+7. Record the commit SHA of the tag and the digest of the container image built
+   from that commit. An image exists for that commit only if
+   `.github/workflows/container-build.yml` ran for it — its `push` trigger is
+   path-filtered, so a version/changelog-only release commit needs an explicit
+   `workflow_dispatch`, as at step 5 of the
+   [proposed v0.2 release checklist](#proposed-v02-release-checklist).
 
 Post-1.0 releases repeat this with the version bumped in both locations from
 step 3.
@@ -224,7 +235,7 @@ The repository is **not** at v0.2 and does not describe itself as v0.2.
 | `harvestguard --version` | `harvestguard 0.1.0` | `harvestguard 0.2.0` |
 | Git tags | `v0.1.0` exists — an annotated tag on commit `4598a4b`, an ancestor of the audited `main` — with no GitHub Release published from it | Given the existing `v0.1.0` tag, `v0.2.0` would be the repository's second version tag. Deleting or replacing `v0.1.0` would require a separate maintainer decision outside this audit |
 | Release and package publication | No GitHub Release and no PyPI, wheel, or sdist publication exists. GHCR does contain commit-SHA container images plus signature/attestation objects, but no `v0.1.0` or `v0.2.0` version-tagged container image | out of scope for this audit; a later authorized action |
-| [CHANGELOG.md](../CHANGELOG.md) | a `0.1.0` entry that accurately records the existing tag and missing GitHub Release, plus an `Unreleased` section that records no `0.2.0` entry or tag yet | a drafted `0.2.0` entry |
+| [CHANGELOG.md](../CHANGELOG.md) | a `0.1.0` entry that accurately records the existing tag and missing GitHub Release, plus an `Unreleased` section that records no `0.2.0` entry or tag yet | a drafted `0.2.0` entry — since written, and marked unreleased, per [release and distribution decision](#release-and-distribution-decision-v02-preparation) |
 | Roadmap milestones since the `0.1.0` entry | `v0.1.1 Stabilization` (HG-028…HG-032) and the `v0.2` cryptographic-inventory work (HG-033…HG-044) read `Complete` in [ROADMAP.md](ROADMAP.md) | those entries are the source material for the `0.2.0` release notes |
 
 This audit checked tag existence directly — `git ls-remote --tags origin` and
@@ -262,7 +273,7 @@ checkout. Confirming it is **B-5** below.
 | Surface | Check | Result at the audited commit |
 | --- | --- | --- |
 | Version identity | `python -m harvestguard --version`; `python -m pytest -v tests/test_release_identity.py` | `harvestguard 0.1.0`; the `pyproject.toml` literal and `harvestguard_version.__version__` agree and nothing else hard-codes the product version. Pass |
-| Changelog | Read [CHANGELOG.md](../CHANGELOG.md) | The newest version entry is `0.1.0`, accurately records the existing tag and missing GitHub Release, and is followed by an `Unreleased` section. Work merged since it has no drafted version entry. **B-3** |
+| Changelog | Read [CHANGELOG.md](../CHANGELOG.md) | The newest version entry is `0.1.0`, accurately records the existing tag and missing GitHub Release, and is followed by an `Unreleased` section. Work merged since it had no drafted version entry at the audited commit; one has since been drafted and marked unreleased. **B-3** |
 | Installation | `python -m pytest -v tests/test_clean_install.py` (needs network; `HARVESTGUARD_SKIP_CLEAN_INSTALL_TESTS=1` skips it) | Both documented forms — `python -m pip install .` and `-e .` — install into a clean virtual environment, record their runtime dependencies, and run every local scan type from outside the checkout. Pass |
 | Release documentation | `python -m pytest -v tests/test_release_identity.py` | This document covers identity, source/package/container artifacts, pre-1.0 support, procedure, and gate. It distinguishes the existing `v0.1.0` tag from the missing GitHub Release, package publications, and version-tagged images. Pass; final external state still requires the B-9 recheck |
 | Supported Python | `pyproject.toml` `requires-python`; `.github/workflows/ci.yml` matrix; `scripts/check_required_ci.py` `REQUIRED_CHECKS`; README prerequisites | All four say 3.10+, tested on 3.10/3.11/3.12, with `Test (Python 3.10)`, `Test (Python 3.11)`, and `Test (Python 3.12)` as the required checks. Consistent |
@@ -277,7 +288,10 @@ checkout. Confirming it is **B-5** below.
 ### Open items for the v0.2 go/no-go
 
 Blocking items must be resolved or explicitly accepted by a maintainer before a
-v0.2 release action runs. None is resolved by this audit.
+v0.2 release action runs. None is resolved by this audit. What has since
+happened to each one is recorded in
+[disposition of the audit's open items](#disposition-of-the-audits-open-items);
+this table stays as the audit wrote it.
 
 | ID | Item | Blocking | Owner / action |
 | --- | --- | --- | --- |
@@ -295,8 +309,9 @@ v0.2 release action runs. None is resolved by this audit.
 
 **None of these commands was run.** They are recorded so a later, explicitly
 authorized release action is exact and reviewable rather than improvised.
-Steps 1–4 are decisions and changes that go through ordinary review; only steps
-5–7 are the release action itself.
+Steps 1–4 are decisions and changes that go through ordinary review; steps 5–7
+are the release action itself, and step 8 is an optional in-repository record
+made after it.
 
 1. Resolve or explicitly accept every blocking item — B-1 through B-5 and B-9
    — before any release action, and record B-6 through B-8 as accepted or
@@ -324,22 +339,214 @@ Steps 1–4 are decisions and changes that go through ordinary review; only step
    plus the required checks `Test (Python 3.10)`, `Test (Python 3.11)`, and
    `Test (Python 3.12)` (`scripts/check_required_ci.py`) succeeding on the exact
    release commit SHA.
-5. Create and push the annotated tag — **the first command in this checklist
-   that changes anything outside the repository working tree**:
+5. Build and record the container image for the **exact release commit**, before
+   the tag exists — **the first step in this checklist that changes anything
+   outside the repository working tree**. `container-build.yml`'s `push` trigger
+   is path-filtered to container-related paths (`Dockerfile`, `requirements.txt`,
+   the scanner/classifier/dashboard packages, and the workflow itself), and the
+   release commit from step 2 touches version literals, the changelog, and
+   sample artifacts — none of those paths — so merging it publishes **no** image
+   on its own. The workflow's `workflow_dispatch` trigger is what builds one,
+   and its `publish` job runs for a dispatch exactly as it does for a push:
 
    ```bash
+   release_sha=$(git rev-parse origin/main)   # the release commit from step 2
+   echo "$release_sha"                        # record this value
+
+   gh workflow run container-build.yml --ref main
+   gh run list --workflow container-build.yml --limit 1 \
+     --json databaseId,headSha,status,conclusion
+   ```
+
+   A dispatch builds whatever the dispatched ref pointed at when the run
+   started, and tags the image with that commit's SHA. Confirm the run's
+   `headSha` equals `$release_sha` before trusting its image — if `main` has
+   advanced past the release commit, stop and settle which commit is being
+   released rather than recording an image built from a different tree. Then
+   wait for it to succeed and record the digest:
+
+   ```bash
+   gh run watch <databaseId>                  # expect conclusion: success
+   docker buildx imagetools inspect "ghcr.io/serewicz/harvestguard:$release_sha" \
+     --format '{{json .Manifest}}' | jq -r '.digest'
+   ```
+
+   Keep both recorded values — the release commit SHA and the full
+   `sha256:…` digest. Step 7 substitutes them into the release notes, which is
+   where the release states which image corresponds to it. This publishes a
+   commit-SHA-tagged image with its cosign signature and SBOM attestation; it
+   adds no `:v0.2.0` tag.
+6. Create and push the annotated tag:
+
+   ```bash
+   git rev-parse HEAD                        # must equal the recorded $release_sha
    git tag -a v0.2.0 -m "HarvestGuard v0.2.0"
    git push origin v0.2.0
    ```
 
-6. Publish the release for that tag, using the `0.2.0` changelog entry as its
-   notes.
-7. Record the tagged commit SHA, and the digest of the container image built
-   from that commit, in the changelog entry.
+7. Publish the release for that tag. Its notes are the prepared draft in
+   [docs/release-notes/v0.2.0-draft.md](release-notes/v0.2.0-draft.md) — paste
+   that file's release text, with its preamble and maintainer-checklist sections
+   deleted as that file instructs, and substitute the release commit SHA and
+   image digest recorded in step 5 for its `<commit-sha>` and `<image-digest>`
+   placeholders. The `0.2.0` [CHANGELOG.md](../CHANGELOG.md) entry stays the
+   in-repository record and is linked from those notes rather than pasted as
+   them.
+8. Optional, after publishing: the tagged tree is immutable, so the changelog
+   entry **at** `v0.2.0` cannot carry the release commit SHA or the image
+   digest — the digest does not exist until step 5, by which point the release
+   commit is already written. The published release notes from step 7 are
+   therefore the authoritative record of both. To keep the same values in the
+   repository, add them to the `0.2.0` changelog entry in a separate reviewed
+   commit on `main` after publication, stating there that the tagged tree does
+   not contain them.
 
 Nothing in this checklist authorizes publishing to PyPI, adding a
 version-tagged (`:v0.2.0`) container image, or signing the tag; those remain
 [deferred work](#deferred-work).
+
+## Release and distribution decision (v0.2 preparation)
+
+The decision the [audit above](#v02-pre-10-release-readiness-audit) left open,
+made and recorded (GitHub issue #125) so a maintainer can act without rereading
+the repository. **Preparing this decision published nothing**: it created no
+`v0.2.0` tag, no GitHub Release, no PyPI/wheel/sdist artifact, and no
+version-tagged container image, and it changed no version literal. Every
+command in this section and in the
+[checklist above](#proposed-v02-release-checklist) is written for a later,
+explicitly authorized human release action and was deliberately not executed.
+
+### Decision
+
+**Prepare a `v0.2.0` pre-1.0 GitHub Release; publish nothing yet.**
+
+| Option considered | Outcome | Why |
+| --- | --- | --- |
+| A — publish a GitHub Release for the existing `v0.1.0` tag | Not chosen | Per the audit above, the `v0.1.0` tag is on commit `4598a4b`, an ancestor of `main` that predates the cryptographic-inventory epic (HG-033…HG-044) and all four first-public-use prerequisites. A release published from it would send a first-time reader to a checkout without the demo corpus, sample output, or quickstart that make a first run safe, and its notes would describe less than `main` already does |
+| **B — prepare a `v0.2.0` pre-1.0 GitHub Release** | **Chosen** | `main` is where the merged work actually is, and a `0.2.0` version identity lets a shared evidence artifact name a release rather than a bare commit SHA. Preparation (decision, changelog entry, release notes, support path) is reviewable now; the release action itself stays a separate authorized step |
+| C — update metadata only and defer any release | Partly adopted | Its substance — repository metadata and a support/advisory path — is done here (see below). Deferring indefinitely was not chosen: the preparation work is what a maintainer needs in order to decide, and leaving it undone would not make the decision any better informed later |
+
+Choosing B is a choice about **release mechanics only**. It asserts nothing
+about product completeness, cryptographic completeness, detection coverage,
+security, compliance, remediation readiness, migration readiness, or quantum
+readiness, and it changes no claim about what the scanners detect — those stay
+in [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md) and
+[CLAIMS_AUDIT.md](CLAIMS_AUDIT.md).
+
+Publishing remains gated: the version literals are still `0.1.0`, and a release
+requires the [checklist above](#proposed-v02-release-checklist) plus explicit
+maintainer authorization.
+
+### Release-surface facts as of this preparation
+
+Unchanged from the audit, and restated here so the decision does not rest on a
+reader's memory. These are external facts that can change after this section is
+written; rechecking them immediately before any release action is **B-9**, and
+this section does not discharge it.
+
+| Surface | State |
+| --- | --- |
+| Declared version (`pyproject.toml`, `harvestguard_version.py`) | `0.1.0` in both; `python -m harvestguard --version` prints `harvestguard 0.1.0` |
+| Git tags | the annotated `v0.1.0` tag exists; no `v0.2.0` tag has been created |
+| GitHub Releases | none published, from `v0.1.0` or any other tag |
+| PyPI / wheel / sdist | no publication of any kind |
+| Container images | commit-SHA-tagged images in GHCR with signatures and SBOM attestations; no `v0.1.0` or `v0.2.0` version-tagged image |
+
+### Disposition of the audit's open items
+
+The audit's [open items](#open-items-for-the-v02-gono-go) table records those
+items as they stood when it was written; this table records what happened to
+each. Nothing here performs a release action, so every item that requires one
+stays open by design.
+
+| ID | Disposition |
+| --- | --- |
+| B-1 | **Decided:** do not publish a `v0.1.0` GitHub Release. The chosen path is a `v0.2.0` release instead, for the reasons in [Decision](#decision) above. The existing `v0.1.0` tag is kept as-is — not deleted, moved, or replaced — as the historical marker of the controlled-pilot commit |
+| B-2 | **Still a maintainer action, unchanged.** The `ScannerIdentity` version literals in `finding_adapters.py` are production code and are deliberately untouched here. Whoever performs the version bump must, in that same change, either bump those literals and regenerate the samples or decouple `tests/test_first_run_samples.py` from `__version__` |
+| B-3 | **Resolved:** the `0.2.0` entry is drafted in [CHANGELOG.md](../CHANGELOG.md), covering HG-028…HG-044 and issues #115 through #119, and is explicitly marked as describing an unreleased draft. Draft GitHub Release notes are in [docs/release-notes/v0.2.0-draft.md](release-notes/v0.2.0-draft.md) |
+| B-4 | **Still a maintainer action, unchanged.** The committed first-run samples correctly record `0.1.0`, which is what the repository still declares. They go stale only when the bump happens, and must be regenerated in that same change |
+| B-5 | **Still a maintainer action.** Issue closure, review approval, and green required checks live in the GitHub API, not in the checkout, so they cannot be confirmed from repository content here |
+| B-6 | **Still a maintainer action, unchanged.** Correcting `SECURITY.md`'s container-signing paragraph and the two stale `Experimental / Needs Validation` rows in [SBOM, signing, and provenance status](#sbom-signing-and-provenance-status) is evidence accuracy, not a release gate, and is outside this issue's scope |
+| B-7 | **Still a maintainer action.** [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md) is unchanged by this preparation; rescoping or accepting its v0.1-scoped `Needs Validation` section is a claims decision, not a release-mechanics one |
+| B-8 | **Accepted for v0.2.** The deferred release-engineering posture — no lock file or hash-pinned requirements, no source/package SBOM, no SLSA provenance, unsigned tags, no published wheel, no version-tagged image — carries into v0.2 unchanged and stays documented in [Deferred work](#deferred-work). Moving any item into scope needs its own issue |
+| B-9 | **Still a maintainer action by construction.** Release, tag, package, and container state is external; recheck and record it immediately before the release action |
+
+### Distribution decisions
+
+| Channel | Decision | Rationale |
+| --- | --- | --- |
+| Source checkout (`git clone` + `pip install .`) | Remains the supported way to obtain HarvestGuard | Already documented, already covered by `tests/test_clean_install.py` |
+| GitHub Release | Sufficient for v0.2 | It gives an outside reader a citable version, notes, and a source archive without new packaging or publishing infrastructure |
+| PyPI (wheel/sdist) | **Deferred.** Not part of this release, and not authorized by anything in this document | Publishing a package name creates a durable distribution surface and an implied upgrade path and support expectation. That belongs after the GitHub Release path and [SUPPORT.md](../SUPPORT.md) expectations have been exercised at least once, and needs its own maintainer decision |
+| Version-tagged container image (`:v0.2.0`) | **Deferred.** Commit-SHA-tagged images remain the current container distribution artifact, identified by digest | Adding a version tag means committing to what that tag points at over time. The existing commit-SHA tags plus signatures and SBOM attestations already identify an image precisely, and the image runs the dashboard only, so it is not the primary way the CLI evidence path is used |
+| Signed git tags, published wheels, SLSA provenance, lock files | Deferred, unchanged | [Deferred work](#deferred-work) |
+
+Real-world validation depth (HG-045) is **future validation-depth work, not a
+release blocker**: no claim in the drafted changelog entry or release notes
+depends on it, and both state plainly that detection has been exercised against
+the repository's own fixtures and demo corpus. It is recorded as a known
+limitation rather than left to be inferred from silence.
+
+### Repository metadata actions (maintainer, not changeable by pull request)
+
+GitHub repository topics and the homepage URL are repository settings, not
+repository content, so no change in this repository can set them. They are
+recorded here as an exact, reviewable maintainer action.
+
+```bash
+# 1. Record what is currently set, before changing anything.
+gh repo view serewicz/HarvestGuard --json repositoryTopics,homepageUrl
+
+# 2. Fix the misspelled topic and add accurate ones.
+gh repo edit serewicz/HarvestGuard \
+  --remove-topic crypto-aglity \
+  --add-topic crypto-agility \
+  --add-topic cryptography-inventory \
+  --add-topic post-quantum-cryptography \
+  --add-topic pqc \
+  --add-topic security-tools
+```
+
+- `crypto-aglity` is a typo for `crypto-agility` and should be removed, not
+  kept alongside the corrected spelling.
+- Every topic above describes the problem space HarvestGuard collects evidence
+  for. None of them claims a capability: `pqc` and
+  `post-quantum-cryptography` are subject-matter topics, and HarvestGuard makes
+  no quantum-readiness or migration-readiness determination
+  ([ADR-006](DECISIONS/ADR-006-product-boundary.md)).
+- **Leave the homepage URL unset.** No landing page exists, and a placeholder
+  page would read as an abandoned product surface. Set it only if a real,
+  maintained page is published later.
+
+### Support and advisory path
+
+[SUPPORT.md](../SUPPORT.md) is the single place that answers "where do I ask,
+and what should I expect": GitHub Issues on a best-effort basis, no
+service-level agreement, no paid tier, `main` only, and security reports routed
+privately through [SECURITY.md](../SECURITY.md). [README.md](../README.md) links
+to it in one short section.
+
+Advisory work available separately from the maintainer is described in
+`SUPPORT.md` only, kept out of the detector documentation and away from every
+technical claim, and stated there to be neither a support tier for this
+repository nor a condition of using it. No detector document, report, or claims
+document mentions it.
+
+### Validation performed during this preparation
+
+Run from a repository checkout on Linux with CPython 3.12, as
+`python -m harvestguard` (no install step). No command below changes anything
+outside the working tree.
+
+| Check | Command | Result |
+| --- | --- | --- |
+| Version identity unchanged | `python -m harvestguard --version` | `harvestguard 0.1.0` |
+| Quickstart still works | `python -m harvestguard scan demo/sample_target --type all --summary`, then the same scan with `--json` and with `--markdown` | All three exit `0`. `Files scanned: 4`, `Total normalized records: 5`, `Errors: 1`, `Findings with finding-level errors: 1`, `Scanner execution errors: 0`; the JSON holds 5 records; the report's `HarvestGuard Version` row reads `0.1.0` and its `Coverage` row `Bounded by configured scan scope` (host-dependent — see [CLI.md § What varies by host](CLI.md#what-varies-by-host)) |
+| Sample output still accurate | `python -m pytest -v tests/test_first_run_samples.py` | Pass; the committed samples still match live output on their host-independent lines |
+| Release identity | `python -m pytest -v tests/test_release_identity.py` | Pass |
+| Claims and documentation | `python -m pytest -v tests/test_product_claims.py tests/test_quickstart_docs.py tests/test_v0_2_release_readiness.py tests/test_release_distribution_readiness.py` | Pass |
+| Full suite and lint | `ruff check .`; `python -m pytest -v`; `git diff --check` | Clean |
+| No accidental release action | Reviewed `git diff`; no tag, release, publication, or version-literal change | Confirmed: the version literals are untouched and no publishing command was run |
 
 ## Deferred work
 
