@@ -158,7 +158,10 @@ release automation.
    released, with the release date.
 5. Tag the release commit on `main` and push the tag:
    `git tag -a v0.1.0 -m "HarvestGuard v0.1.0" && git push origin v0.1.0`.
-6. Publish a GitHub release for the tag whose notes are that changelog entry.
+6. Publish a GitHub release for the tag. Its notes are that changelog entry,
+   unless the version being released has a prepared release-notes draft, in
+   which case that draft is the notes — as for v0.2, at step 6 of the
+   [proposed v0.2 release checklist](#proposed-v02-release-checklist).
 7. Record the commit SHA of the tag; the container image published from that
    commit is the corresponding image (identified by its digest).
 
@@ -339,8 +342,12 @@ Steps 1–4 are decisions and changes that go through ordinary review; only step
    git push origin v0.2.0
    ```
 
-6. Publish the release for that tag, using the `0.2.0` changelog entry as its
-   notes.
+6. Publish the release for that tag. Its notes are the prepared draft in
+   [docs/release-notes/v0.2.0-draft.md](release-notes/v0.2.0-draft.md) — paste
+   that file's release text, with its preamble and maintainer-checklist sections
+   deleted as that file instructs. The `0.2.0`
+   [CHANGELOG.md](../CHANGELOG.md) entry stays the in-repository record and is
+   linked from those notes rather than pasted as them.
 7. Record the tagged commit SHA, and the digest of the container image built
    from that commit, in the changelog entry.
 
