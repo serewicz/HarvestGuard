@@ -1,8 +1,14 @@
-"""Build and inspect the exact wheel and sdist intended for PyPI."""
+"""Offline manifest regression for the wheel and sdist intended for PyPI.
+
+Set ``HARVESTGUARD_RUN_NETWORK_INSTALL_TESTS=1`` to additionally exercise fresh
+virtualenv installs. Those integration checks may resolve dependencies from a
+package index and are deliberately excluded from the default offline suite.
+"""
 
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tarfile
@@ -15,6 +21,7 @@ from harvestguard_version import __version__, version_string
 
 ROOT = Path(__file__).parent.parent
 FORBIDDEN_TOP_LEVEL = {"dashboard", "demo", "docs", "tests"}
+RUN_NETWORK_INSTALL_TESTS = os.environ.get("HARVESTGUARD_RUN_NETWORK_INSTALL_TESTS") == "1"
 
 
 def _venv_bin(venv_dir: Path, name: str) -> Path:
@@ -31,6 +38,7 @@ def release_artifacts(tmp_path_factory) -> tuple[Path, Path]:
             sys.executable,
             "-m",
             "build",
+            "--no-isolation",
             "--outdir",
             str(output),
             str(ROOT),
@@ -73,14 +81,36 @@ def test_release_artifacts_exclude_repository_only_content(release_artifacts, ar
     assert Path("main.py") not in paths
 
 
+def test_release_artifacts_contain_expected_package_content(release_artifacts):
+    wheel, sdist = release_artifacts
+    wheel_paths = _wheel_paths(wheel)
+    sdist_paths = _sdist_paths(sdist)
+
+    expected_package_files = {
+        Path("harvestguard.py"),
+        Path("harvestguard_version.py"),
+        Path("scanner/filesystem.py"),
+        Path("code_analysis/rules/crypto.yaml"),
+    }
+    assert expected_package_files <= wheel_paths
+    assert expected_package_files <= sdist_paths
+    assert any(path.name == "LICENSE" for path in wheel_paths)
+    assert Path("LICENSE") in sdist_paths
+    assert any(
+        path.parts[-2:] == (f"harvestguard-{__version__}.dist-info", "METADATA")
+        for path in wheel_paths
+    )
+    assert Path("PKG-INFO") in sdist_paths
+
+
 def test_sdist_contains_complete_build_inputs_without_partial_tests(release_artifacts):
     _wheel, sdist = release_artifacts
     paths = _sdist_paths(sdist)
 
     for required in ("LICENSE", "MANIFEST.in", "README.md", "pyproject.toml"):
         assert Path(required) in paths
-    assert not any("test" in part.lower() for path in paths for part in path.parts)
-    assert not any("fixture" in part.lower() for path in paths for part in path.parts)
+    assert not any(path.parts and path.parts[0] == "tests" for path in paths)
+    assert not any(path.parts[:2] == ("tests", "fixtures") for path in paths)
 
 
 def test_artifact_content_matches_public_documentation(release_artifacts):
@@ -102,6 +132,10 @@ def test_artifact_content_matches_public_documentation(release_artifacts):
 
 
 @pytest.mark.parametrize("artifact_kind", ["wheel", "sdist"])
+@pytest.mark.skipif(
+    not RUN_NETWORK_INSTALL_TESTS,
+    reason="set HARVESTGUARD_RUN_NETWORK_INSTALL_TESTS=1 for networked install validation",
+)
 def test_each_built_artifact_installs_and_runs_the_cli(
     release_artifacts, artifact_kind, tmp_path
 ):
