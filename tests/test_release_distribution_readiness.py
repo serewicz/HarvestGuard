@@ -10,6 +10,9 @@ mislead an outside reader or let a release happen by accident:
   so none of them trails off;
 - the deferrals that were deliberate (PyPI, version-tagged images) stay
   recorded as deferrals rather than drifting into implied availability;
+- the release checklist stays executable in order: the container image for the
+  release commit is built and its SHA/digest recorded before the tag exists, so
+  the published notes cite an artifact that actually exists;
 - the support/advisory language stays in SUPPORT.md and out of the detector and
   claims documentation;
 - nothing in the public-facing release surfaces starts asserting completeness,
@@ -135,6 +138,16 @@ def _draft_entry() -> str:
 
 
 DECISION = _section(RELEASE_TEXT, DECISION_HEADING)
+
+CHECKLIST_HEADING = "### Proposed v0.2 release checklist"
+
+
+def _checklist() -> str:
+    """The proposed v0.2 release checklist, up to the next top-level section."""
+    start = RELEASE_TEXT.index(CHECKLIST_HEADING)
+    rest = RELEASE_TEXT[start:]
+    end = rest.index("\n## ")
+    return rest[:end]
 
 # A repository link inside the pasted release text, pinned to the `v0.2.0` tag.
 PINNED_REPOSITORY_LINK = re.compile(
@@ -555,6 +568,53 @@ def test_release_decision_links_and_anchors_resolve():
             assert fragment in _anchors(markdown), (
                 f"broken anchor in the release decision: {target}"
             )
+
+
+# --- The checklist can actually produce what it tells the release to cite ---
+
+
+def test_checklist_dispatches_the_container_build_for_the_release_commit():
+    # container-build.yml's push trigger is path-filtered, so the release commit
+    # (version literals, changelog, samples) publishes no image by itself. The
+    # checklist has to ask for the build explicitly, or step 7 would cite an
+    # image that was never created.
+    checklist = _checklist()
+    assert "gh workflow run container-build.yml" in checklist, (
+        "the checklist never builds an image for the release commit"
+    )
+    normalized = _plain(checklist)
+    assert "path-filtered" in normalized, (
+        "the checklist does not say why the release commit builds no image on its own"
+    )
+    assert "workflow_dispatch" in normalized
+    # A dispatch builds whatever the ref pointed at when it started, so the run
+    # has to be tied back to the intended commit.
+    assert "headsha" in normalized
+
+
+def test_checklist_records_the_sha_and_digest_before_creating_the_tag():
+    checklist = _checklist()
+    dispatch = checklist.index("gh workflow run container-build.yml")
+    digest = checklist.index("imagetools inspect")
+    tag = checklist.index("git tag -a v0.2.0")
+    publish = checklist.index("Publish the release for that tag")
+    assert dispatch < digest < tag < publish, (
+        "the image build and its digest must be recorded before the tag is "
+        "created and the release is published"
+    )
+
+
+def test_checklist_does_not_ask_the_immutable_tag_to_carry_the_digest():
+    # The digest cannot exist until the release commit is built, so the changelog
+    # entry frozen at the v0.2.0 tag can never contain it; the published release
+    # notes are the record instead.
+    normalized = _plain(_checklist())
+    assert "immutable" in normalized
+    assert "cannot carry the release commit sha or the image digest" in normalized
+    notes = _plain(RELEASE_NOTES.read_text(encoding="utf-8"))
+    assert "record the same digest in the changelog entry" not in notes, (
+        "the release notes must not direct the digest into the entry at the tag"
+    )
 
 
 def test_changelog_release_links_resolve():

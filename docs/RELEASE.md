@@ -160,10 +160,14 @@ release automation.
    `git tag -a v0.1.0 -m "HarvestGuard v0.1.0" && git push origin v0.1.0`.
 6. Publish a GitHub release for the tag. Its notes are that changelog entry,
    unless the version being released has a prepared release-notes draft, in
-   which case that draft is the notes — as for v0.2, at step 6 of the
+   which case that draft is the notes — as for v0.2, at step 7 of the
    [proposed v0.2 release checklist](#proposed-v02-release-checklist).
-7. Record the commit SHA of the tag; the container image published from that
-   commit is the corresponding image (identified by its digest).
+7. Record the commit SHA of the tag and the digest of the container image built
+   from that commit. An image exists for that commit only if
+   `.github/workflows/container-build.yml` ran for it — its `push` trigger is
+   path-filtered, so a version/changelog-only release commit needs an explicit
+   `workflow_dispatch`, as at step 5 of the
+   [proposed v0.2 release checklist](#proposed-v02-release-checklist).
 
 Post-1.0 releases repeat this with the version bumped in both locations from
 step 3.
@@ -305,8 +309,9 @@ this table stays as the audit wrote it.
 
 **None of these commands was run.** They are recorded so a later, explicitly
 authorized release action is exact and reviewable rather than improvised.
-Steps 1–4 are decisions and changes that go through ordinary review; only steps
-5–7 are the release action itself.
+Steps 1–4 are decisions and changes that go through ordinary review; steps 5–7
+are the release action itself, and step 8 is an optional in-repository record
+made after it.
 
 1. Resolve or explicitly accept every blocking item — B-1 through B-5 and B-9
    — before any release action, and record B-6 through B-8 as accepted or
@@ -334,22 +339,67 @@ Steps 1–4 are decisions and changes that go through ordinary review; only step
    plus the required checks `Test (Python 3.10)`, `Test (Python 3.11)`, and
    `Test (Python 3.12)` (`scripts/check_required_ci.py`) succeeding on the exact
    release commit SHA.
-5. Create and push the annotated tag — **the first command in this checklist
-   that changes anything outside the repository working tree**:
+5. Build and record the container image for the **exact release commit**, before
+   the tag exists — **the first step in this checklist that changes anything
+   outside the repository working tree**. `container-build.yml`'s `push` trigger
+   is path-filtered to container-related paths (`Dockerfile`, `requirements.txt`,
+   the scanner/classifier/dashboard packages, and the workflow itself), and the
+   release commit from step 2 touches version literals, the changelog, and
+   sample artifacts — none of those paths — so merging it publishes **no** image
+   on its own. The workflow's `workflow_dispatch` trigger is what builds one,
+   and its `publish` job runs for a dispatch exactly as it does for a push:
 
    ```bash
+   release_sha=$(git rev-parse origin/main)   # the release commit from step 2
+   echo "$release_sha"                        # record this value
+
+   gh workflow run container-build.yml --ref main
+   gh run list --workflow container-build.yml --limit 1 \
+     --json databaseId,headSha,status,conclusion
+   ```
+
+   A dispatch builds whatever the dispatched ref pointed at when the run
+   started, and tags the image with that commit's SHA. Confirm the run's
+   `headSha` equals `$release_sha` before trusting its image — if `main` has
+   advanced past the release commit, stop and settle which commit is being
+   released rather than recording an image built from a different tree. Then
+   wait for it to succeed and record the digest:
+
+   ```bash
+   gh run watch <databaseId>                  # expect conclusion: success
+   docker buildx imagetools inspect "ghcr.io/serewicz/harvestguard:$release_sha" \
+     --format '{{json .Manifest}}' | jq -r '.digest'
+   ```
+
+   Keep both recorded values — the release commit SHA and the full
+   `sha256:…` digest. Step 7 substitutes them into the release notes, which is
+   where the release states which image corresponds to it. This publishes a
+   commit-SHA-tagged image with its cosign signature and SBOM attestation; it
+   adds no `:v0.2.0` tag.
+6. Create and push the annotated tag:
+
+   ```bash
+   git rev-parse HEAD                        # must equal the recorded $release_sha
    git tag -a v0.2.0 -m "HarvestGuard v0.2.0"
    git push origin v0.2.0
    ```
 
-6. Publish the release for that tag. Its notes are the prepared draft in
+7. Publish the release for that tag. Its notes are the prepared draft in
    [docs/release-notes/v0.2.0-draft.md](release-notes/v0.2.0-draft.md) — paste
    that file's release text, with its preamble and maintainer-checklist sections
-   deleted as that file instructs. The `0.2.0`
-   [CHANGELOG.md](../CHANGELOG.md) entry stays the in-repository record and is
-   linked from those notes rather than pasted as them.
-7. Record the tagged commit SHA, and the digest of the container image built
-   from that commit, in the changelog entry.
+   deleted as that file instructs, and substitute the release commit SHA and
+   image digest recorded in step 5 for its `<commit-sha>` and `<image-digest>`
+   placeholders. The `0.2.0` [CHANGELOG.md](../CHANGELOG.md) entry stays the
+   in-repository record and is linked from those notes rather than pasted as
+   them.
+8. Optional, after publishing: the tagged tree is immutable, so the changelog
+   entry **at** `v0.2.0` cannot carry the release commit SHA or the image
+   digest — the digest does not exist until step 5, by which point the release
+   commit is already written. The published release notes from step 7 are
+   therefore the authoritative record of both. To keep the same values in the
+   repository, add them to the `0.2.0` changelog entry in a separate reviewed
+   commit on `main` after publication, stating there that the tagged tree does
+   not contain them.
 
 Nothing in this checklist authorizes publishing to PyPI, adding a
 version-tagged (`:v0.2.0`) container image, or signing the tag; those remain
