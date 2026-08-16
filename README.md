@@ -377,6 +377,21 @@ evidence artifact identifies the release that produced it. Release notes are in
 SBOM/signing/provenance status, and the release procedure are in
 [docs/RELEASE.md](docs/RELEASE.md).
 
+**How to get it.** Install from a source checkout, as the
+[Quickstart](#quickstart) shows. HarvestGuard is not published to PyPI, so
+there is no released wheel or sdist; the container image is published from
+`main` and tagged by commit SHA, not by product version. Which distribution
+channels are planned, deferred, or deliberately out of scope is recorded in
+[docs/RELEASE.md](docs/RELEASE.md#release-and-distribution-decision-v02-preparation).
+
+## Support
+
+[SUPPORT.md](SUPPORT.md) covers where to ask a question, what version is
+supported, what to include in a bug report, and what support to expect —
+best effort through GitHub Issues, with no service-level agreement. Advisory
+work available separately from the maintainer is described there too, and is
+not a support tier for this repository.
+
 ## Contributing
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup,

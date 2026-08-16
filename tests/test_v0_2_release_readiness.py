@@ -312,13 +312,18 @@ def test_audit_links_and_anchors_resolve():
 # --- The changelog surface the audit reports on -----------------------------
 
 
-def test_changelog_records_the_undescribed_merged_work_and_points_at_the_audit():
+def test_changelog_records_the_merged_work_as_unreleased_and_points_at_the_audit():
+    # Issue #125 drafted the `0.2.0` entry this audit listed as open item B-3,
+    # so the changelog now *describes* the merged work — but the entry is a
+    # draft, and the Unreleased section above it still has to say so, still
+    # name the version the repository actually declares, and still point back
+    # at this audit.
     unreleased = _section(CHANGELOG_TEXT, "## Unreleased")
-    assert "not yet described by a version entry here" in unreleased
-    assert f"`{__version__}` in both `pyproject.toml` and `harvestguard_version.py`" in unreleased
+    assert "a **draft for a release that has not happened**" in unreleased
     assert "docs/RELEASE.md#v02-pre-10-release-readiness-audit" in unreleased
     normalized = " ".join(unreleased.lower().split())
-    assert "no `v0.2.0` tag or github release has been created" in normalized
+    assert f"`{__version__}` in both `pyproject.toml` and `harvestguard_version.py`" in normalized
+    assert "no `v0.2.0` tag has been created" in normalized
+    assert "no github release has been published from any tag" in normalized
     assert "no pypi, wheel, or sdist publication has been made" in normalized
-    assert "no version change has been made" in normalized
     assert "no tag, release, package publication" not in normalized

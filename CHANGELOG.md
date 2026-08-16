@@ -10,20 +10,140 @@ change between versions. The normalized finding schema is versioned separately
 
 ## Unreleased
 
-Work merged to `main` since the `0.1.0` entry below — the `v0.1.1
-Stabilization` and `v0.2` cryptographic-inventory milestones in
-[docs/ROADMAP.md](docs/ROADMAP.md) (HG-028 through HG-044), plus the demo
-corpus, first-run sample output, quickstart, and executive-readable evidence
-example — is **not yet described by a version entry here**. The declared
-version is still `0.1.0` in both `pyproject.toml` and `harvestguard_version.py`.
+The `0.2.0` entry below is a **draft for a release that has not happened**. It
+describes work already merged to `main`; it does not describe a published
+version. Specifically, at the time of writing:
 
-Drafting a `0.2.0` entry is a listed open item (B-3) in the
-[v0.2 pre-1.0 release readiness audit](docs/RELEASE.md#v02-pre-10-release-readiness-audit),
-which records the current version identity, the reproducible readiness checks
-and their results, every remaining open item with an owner, and the exact
-commands a later authorized release action would run. No `v0.2.0` tag or
-GitHub Release has been created for this unreleased work, no PyPI, wheel, or
-sdist publication has been made, and no version change has been made.
+- the declared version is still `0.1.0` in both `pyproject.toml` and
+  `harvestguard_version.py`, and `harvestguard --version` prints
+  `harvestguard 0.1.0`;
+- no `v0.2.0` tag has been created, and no GitHub Release has been published
+  from any tag;
+- no PyPI, wheel, or sdist publication has been made, and no version-tagged
+  container image exists.
+
+Drafting that entry closes open item B-3 of the
+[v0.2 pre-1.0 release readiness audit](docs/RELEASE.md#v02-pre-10-release-readiness-audit).
+The chosen release path, the disposition of every other open item, and the
+maintainer actions still required are recorded in
+[release and distribution decision](docs/RELEASE.md#release-and-distribution-decision-v02-preparation);
+the draft GitHub Release notes are in
+[docs/release-notes/v0.2.0-draft.md](docs/release-notes/v0.2.0-draft.md).
+
+Nothing here bumps a version literal, creates a tag, or publishes anything;
+each of those remains a separate, explicitly authorized maintainer action.
+
+## 0.2.0 — Cryptographic Inventory and First Public Use (drafted, unreleased)
+
+Covers the `v0.1.1 Stabilization` (HG-028…HG-032) and `v0.2` cryptographic
+inventory (HG-033…HG-044) milestones in
+[docs/ROADMAP.md](docs/ROADMAP.md), plus the first-public-use work from issues
+#115 through #119. Every scanner addition below is **evidence only**: a
+detection records what was structurally observed in a file, and establishes
+nothing about runtime exposure, exploitability, remediation priority, business
+risk, compliance, HNDL exposure, quantum readiness, or migration readiness.
+
+### Added — cryptographic asset inventory
+
+Bounded, format-specific detectors, each requiring structural evidence rather
+than a filename extension or an entropy guess, and each characterized in
+[docs/DETECTION_CHARACTERIZATION.md](docs/DETECTION_CHARACTERIZATION.md):
+
+- **Encrypted-file and encrypted-container evidence** — OpenSSL `Salted__`
+  files (HG-030), binary and ASCII-armored OpenPGP encrypted messages
+  (HG-031), gocryptfs forward-mode cipher roots reported once per root without
+  mounting or per-ciphertext-file findings (HG-032), and native age v1 files
+  (HG-035).
+- **Encrypted key and object structures** — encrypted PKCS#8 private keys
+  (HG-038), CMS/PKCS#7 encrypted objects (HG-039), and legacy PEM encryption
+  headers (HG-040).
+- **Keystores and certificate stores** — BCFKS (HG-036) and JCEKS (HG-037)
+  keystore evidence, Mozilla NSS database sets (HG-041), and Java
+  trusted-certificate-only stores (HG-042).
+- **Host and cluster identity material** — OpenSSH host identity through
+  file-local private-key, public-key, and host-certificate findings, with no
+  cross-file key/certificate pairing (HG-043), and Kubernetes TLS Secret
+  manifests read from local JSON and YAML documents only, with no cluster,
+  Kubernetes API, or kubeconfig access (HG-044).
+
+### Changed
+
+- **Shared crypto detector framework** (HG-033) — an explicit static detector
+  registry with deterministic IDs and priorities, separate file and root
+  detector concepts, scanner-owned traversal, cached shared scan context, and
+  per-detector metadata allowlists. It adds no detection capability of its own.
+- **Internal cryptographic relationship model** (HG-034) — immutable records
+  for direct structural links between existing findings, with a fixed bounded
+  vocabulary and High confidence only for direct structural proof. It is
+  internal only: no relationship appears in the normalized finding schema,
+  JSON output, or Markdown reports.
+- **Filesystem finding and summary semantics** (HG-029) — ordinary files no
+  longer produce repeated per-file filesystem context findings; shared
+  filesystem context is represented once per mount or volume, and console and
+  Markdown summaries separate material evidence, aggregate filesystem context,
+  coverage limitations, skipped or inaccessible entries, finding-level errors,
+  and scanner errors. Crypto scans additionally report *Crypto files
+  inspected*.
+- **Self-contained CLI installation** (HG-028) — `pip install .` and
+  `pip install -e .` produce a usable `harvestguard` in a clean environment
+  without a second dependency step; `pyproject.toml` is the authoritative
+  runtime dependency declaration.
+
+### Added — first public use experience (issues #115–#119)
+
+- **Synthetic demo corpus** — [`demo/sample_target/`](demo/sample_target/README.md),
+  four fake-pattern files with a per-file manifest of the finding each is
+  expected to produce. It contains no real credentials.
+- **Committed sample output** — [`docs/examples/first-run/`](docs/examples/first-run/README.md):
+  JSON and Markdown artifacts from exactly that demo scan, their generating
+  commands and version, and the normalization applied, so output can be read
+  before installing anything.
+- **README quickstart** — the canonical run/review/export sequence, including
+  which demo results are host-dependent and why the demo's one expected
+  finding-level error is not a failure.
+- **Executive-readable evidence example** —
+  [`docs/examples/executive-evidence-example.md`](docs/examples/executive-evidence-example.md),
+  which keeps every executive-readable statement traceable back to a technical
+  finding.
+- **v0.2 pre-1.0 release readiness audit** — a go/no-go evidence record in
+  [docs/RELEASE.md](docs/RELEASE.md#v02-pre-10-release-readiness-audit), and
+  the release/distribution decision that followed it.
+- **[SUPPORT.md](SUPPORT.md)** — where to ask, which version is supported, what
+  to include in a bug report, and what support to expect.
+
+### Known limitations
+
+The v0.1 limitations below still apply in full, unchanged. In addition:
+
+- **Broader format coverage is still not complete coverage.** Each detector
+  above recognizes specific structures in specific formats; anything outside
+  them is not detected, and absence of a finding remains not proof of absence.
+  Per-detector misses, false positives, and false negatives are in
+  [docs/DETECTION_CHARACTERIZATION.md](docs/DETECTION_CHARACTERIZATION.md).
+- Keystore, NSS, and truststore findings are **structural evidence about the
+  container**, not a decrypted enumeration of its contents; encrypted material
+  may not expose algorithm or key-size metadata without a passphrase.
+- Kubernetes TLS Secret evidence comes from **local manifest files only** — it
+  says nothing about what a live cluster actually holds.
+- OpenSSH findings are **file-local**: no key is paired with a certificate
+  across files.
+- Detection has been exercised against the repository's own fixtures and demo
+  corpus. **Real-world validation depth remains outstanding work** (HG-045),
+  and no claim in this entry depends on it.
+- Still not built: CBOM (CycloneDX) and PDF export, network/TLS cipher
+  discovery, and the packaged Technology Due Diligence Evidence Package. Risk
+  Score and HNDL Exposure remain heuristic, `Needs Validation`, and
+  dashboard-only.
+
+### Release state
+
+Drafting this entry published nothing. The declared version literal is
+unchanged at `0.1.0`, no `v0.2.0` tag has been created, no GitHub Release
+exists, HarvestGuard is not published to PyPI, and container images remain
+tagged by commit SHA. Before this entry can describe an actual release, the
+version literals must be bumped in step and the blocking items in
+[docs/RELEASE.md](docs/RELEASE.md#open-items-for-the-v02-gono-go) resolved —
+see [release and distribution decision](docs/RELEASE.md#release-and-distribution-decision-v02-preparation).
 
 ## 0.1.0 — Controlled Diligence Pilot (approved, tagged)
 
