@@ -88,7 +88,7 @@ Formats that will be skipped on this host:
 
 Negative controls in the plan include misleading extensions, misleading
 filenames, and near-match content for every generator that runs.
-Generators to DISABLE (space-separated names, empty for none): Optional note to record in the manifest: 
+Generators to DISABLE (space-separated names, empty for none): Optional note to record in the manifest:
 ===============================================================
 GATE 2 of 8 — Validation plan
 ===============================================================
@@ -255,7 +255,7 @@ assume their type. It records only filesystem metadata and a SHA-256 hash.
 To declare an expectation for a file, add a line to:
   <workspace>/state/operator-expectations.tsv
 Anything left undeclared is a BLIND input.
-Press Enter once your files are in place. 
+Press Enter once your files are in place.
 Corpus categories now recorded separately:
   - generated:          19
   - operator-declared:  1
