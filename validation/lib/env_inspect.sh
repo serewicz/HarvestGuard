@@ -3,10 +3,14 @@
 hg_inspect_environment() {
     HG_OS_FAMILY="unknown"
     HG_OS_DESCRIPTION="unknown"
-    if [ -r /etc/os-release ]; then
+    # Overridable only so the self-tests can assert the family mapping for a
+    # distribution the test host is not running. Operators never set it; the
+    # default is the real file and nothing else is consulted.
+    local release_file="${HG_OS_RELEASE_FILE:-/etc/os-release}"
+    if [ -r "$release_file" ]; then
         local os_id="" os_like="" pretty=""
-        # shellcheck disable=SC1091
-        eval "$(. /etc/os-release; printf 'os_id=%q\nos_like=%q\npretty=%q\n' \
+        # shellcheck disable=SC1090,SC1091
+        eval "$(. "$release_file"; printf 'os_id=%q\nos_like=%q\npretty=%q\n' \
             "${ID:-}" "${ID_LIKE:-}" "${PRETTY_NAME:-${NAME:-unknown}}")"
         HG_OS_DESCRIPTION="$pretty"
         case " $os_id $os_like " in
