@@ -69,15 +69,24 @@ generator is part of Phase 1.
 
 ## Platform scope
 
-OS-family detection is isolated in `lib/env_inspect.sh`. RHEL and CentOS Stream
-manual execution notes live in [`environments/`](environments/). Ubuntu/Debian
-is not validated in Phase 1, but the harness does not reject it solely by OS
-family. Its future package/tool mapping belongs only in
-[`environments/ubuntu-debian.md`](environments/ubuntu-debian.md).
+OS-family detection is isolated in `lib/env_inspect.sh`. Per-family execution
+notes live in [`environments/`](environments/); package names there are operator
+guidance only, never installer logic.
 
-No archived RHEL/CentOS run is included yet. When one is available, archive
-only the frozen manifest and result reports as described in
-[`manifests/README.md`](manifests/README.md), never corpus or scratch material.
+Ubuntu 24.04.4 LTS on `x86_64` has been validated end to end — one complete
+eight-gate run, zero discrepancies, `age` deliberately absent so the
+optional-tool skip path was exercised by a genuinely missing tool. See
+[`environments/ubuntu-debian.md`](environments/ubuntu-debian.md) for the
+validated configuration and its limitations, and
+[`reports/2026-08-18-ubuntu-24.04-phase1.md`](reports/2026-08-18-ubuntu-24.04-phase1.md)
+for the sanitized report. Debian stable, other architectures, WSL, and container
+execution remain unvalidated. RHEL and CentOS Stream have manual execution notes
+but no recorded run.
+
+Sanitized run reports live in [`reports/`](reports/). Archiving a run's frozen
+manifest and result files is separate and described in
+[`manifests/README.md`](manifests/README.md) — never archive corpus or scratch
+material.
 
 ## Self-tests
 

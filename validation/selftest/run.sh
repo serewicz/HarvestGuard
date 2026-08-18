@@ -138,7 +138,11 @@ spec.loader.exec_module(module)
 original_stat = Path.stat
 
 def guarded_stat(path, *args, **kwargs):
-    if path == link:
+    # Path.is_symlink() is itself an lstat, and on Python 3.12+ it reaches
+    # os.stat through Path.stat(follow_symlinks=False). Only a stat that
+    # follows the link would touch the target outside the workspace, so that
+    # is what this guard rejects.
+    if path == link and kwargs.get("follow_symlinks", True):
         raise AssertionError("manifest freeze attempted to stat the symlink target")
     return original_stat(path, *args, **kwargs)
 
@@ -170,6 +174,39 @@ else:
 assert not Path(args.out).exists()
 PY
 pass "manifest freeze rejects explicit corpus symlinks before stat or hash"
+
+osrel="$SELFTEST_TMP/os-release"
+mkdir -p "$osrel"
+# One fixture per family, so the mapping is asserted without needing a host of
+# that distribution. Ubuntu is the validated case; see
+# validation/environments/ubuntu-debian.md.
+printf 'ID=ubuntu\nID_LIKE=debian\nPRETTY_NAME="Ubuntu 24.04 LTS"\n' > "$osrel/ubuntu"
+printf 'ID=debian\nPRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\n' > "$osrel/debian"
+printf 'ID=rhel\nID_LIKE="fedora"\nPRETTY_NAME="Red Hat Enterprise Linux 9.4"\n' > "$osrel/rhel"
+printf 'ID=arch\nPRETTY_NAME="Arch Linux"\n' > "$osrel/other"
+for fixture_case in ubuntu:debian debian:debian rhel:rhel other:unknown; do
+    fixture="${fixture_case%%:*}"
+    expected="${fixture_case##*:}"
+    observed="$(bash -c ". '$SELFTEST_ROOT/lib/env_inspect.sh'; HG_OS_FAMILY=unknown; hg_apply_os_release_file '$osrel/$fixture'; printf '%s' \"\$HG_OS_FAMILY\"")"
+    [ "$observed" = "$expected" ] ||
+        fail "os-release family mapping for $fixture (got '$observed', want '$expected')"
+done
+observed_pretty="$(bash -c ". '$SELFTEST_ROOT/lib/env_inspect.sh'; HG_OS_FAMILY=unknown; hg_apply_os_release_file '$osrel/ubuntu'; printf '%s' \"\$HG_OS_DESCRIPTION\"")"
+[ "$observed_pretty" = "Ubuntu 24.04 LTS" ] || fail "os-release description passthrough"
+injection_marker="$SELFTEST_TMP/os-release-executed"
+printf 'ID=ubuntu\nPRETTY_NAME="$(touch %s)"\n' "$injection_marker" > "$osrel/inert"
+bash -c ". '$SELFTEST_ROOT/lib/env_inspect.sh'; HG_OS_FAMILY=unknown; hg_apply_os_release_file '$osrel/inert'"
+[ ! -e "$injection_marker" ] || fail "os-release fixture executed as shell code"
+inherited_marker="$SELFTEST_TMP/inherited-os-release-used"
+printf 'ID=ubuntu\nPRETTY_NAME="$(touch %s)"\n' "$inherited_marker" > "$osrel/inherited"
+HG_OS_RELEASE_FILE="$osrel/inherited" bash -c \
+    ". '$SELFTEST_ROOT/lib/env_inspect.sh'; hg_inspect_environment" >/dev/null
+[ ! -e "$inherited_marker" ] || fail "production path honored inherited os-release override"
+if grep -rqE '\b(apt|apt-get|dnf|yum|zypper|pacman)[[:space:]]' \
+    "$SELFTEST_ROOT/run-validation.sh" "$SELFTEST_ROOT/lib" "$SELFTEST_ROOT/generators"; then
+    fail "harness references a package manager outside environments/ documentation"
+fi
+pass "OS-family detection parses inert fixtures and production ignores inherited overrides"
 
 HG_WORKSPACE="$SELFTEST_TMP/cleanup"
 export HG_WORKSPACE
