@@ -96,6 +96,8 @@ def _is_coverage_rule(rule_id: str) -> bool:
 
 
 def _walk_corpus(corpus_root: Path) -> list[Path]:
+    if corpus_root.is_symlink():
+        raise SystemExit(f"refusing symbolic link in validation corpus: {corpus_root}")
     paths: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(corpus_root):
         dirnames.sort()
@@ -123,6 +125,8 @@ def freeze(args: argparse.Namespace) -> int:
         relative_path = record.get("relative_path", "")
         target = corpus_root / relative_path
         entry = dict(record)
+        if target.is_symlink():
+            raise SystemExit(f"refusing symbolic link in validation corpus: {target}")
         if target.is_dir():
             entry["path_type"] = "directory"
             entry["sha256"] = None

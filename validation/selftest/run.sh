@@ -112,15 +112,64 @@ assert report["scan_invocations"] == [
 PY
 pass "comparison preserves manifest, separates outcomes, and records all exit statuses"
 
-ln -s "$SELFTEST_TMP/outside" "$fixture/corpus/operator-supplied/outside-link"
-set +e
-python3 "$SELFTEST_ROOT/harness_tool.py" freeze \
-    --corpus-root "$fixture/corpus" --records "$fixture/state/artifacts.jsonl" \
-    --out "$fixture/state/symlink-manifest.json" --run-id symlink-selftest >/dev/null 2>&1
-symlink_status=$?
-set -e
-[ "$symlink_status" -ne 0 ] || fail "corpus symlink rejection"
-pass "manifest freeze rejects corpus symlinks without following targets"
+symlink_fixture="$SELFTEST_TMP/symlink-freeze"
+mkdir -p "$symlink_fixture/corpus/operator-supplied" "$symlink_fixture/state"
+printf 'DISTINCTIVE-NONSECRET-OUTSIDE-CONTENT\n' > "$symlink_fixture/outside.txt"
+ln -s "$symlink_fixture/outside.txt" \
+    "$symlink_fixture/corpus/operator-supplied/outside-link"
+cat > "$symlink_fixture/state/artifacts.jsonl" <<'EOF'
+{"artifact_id":"explicit-symlink","source_category":"blind","relative_path":"operator-supplied/outside-link","generator":"","generator_tool":"operator-supplied","generator_tool_version":"n/a","command_description":"operator supplied","expected_asset_type":"","expected_rule_id":"","expected_finding_count":0,"forbidden_rule_ids":[],"forbidden_asset_types":[],"additional_expected":[],"expected_scanner_error":false,"negative_control":false,"notes":"explicit symlink rejection self-test"}
+EOF
+python3 - "$SELFTEST_ROOT/harness_tool.py" "$symlink_fixture" <<'PY'
+import importlib.util
+from pathlib import Path
+from types import SimpleNamespace
+import sys
+
+helper_path = Path(sys.argv[1])
+fixture = Path(sys.argv[2])
+link = fixture / "corpus/operator-supplied/outside-link"
+
+spec = importlib.util.spec_from_file_location("hg_validation_harness_tool", helper_path)
+module = importlib.util.module_from_spec(spec)
+assert spec.loader is not None
+spec.loader.exec_module(module)
+
+original_stat = Path.stat
+
+def guarded_stat(path, *args, **kwargs):
+    if path == link:
+        raise AssertionError("manifest freeze attempted to stat the symlink target")
+    return original_stat(path, *args, **kwargs)
+
+def forbidden_hash(path):
+    raise AssertionError(f"manifest freeze attempted to hash symlink target: {path}")
+
+Path.stat = guarded_stat
+module._sha256_file = forbidden_hash
+args = SimpleNamespace(
+    corpus_root=str(fixture / "corpus"),
+    records=str(fixture / "state/artifacts.jsonl"),
+    out=str(fixture / "state/manifest.json"),
+    run_id="symlink-selftest",
+    harness_version="1",
+    frozen_at="",
+    host_os="selftest",
+    harvestguard_version="not run",
+    secret_marker="",
+    scan_command=[],
+    skipped="",
+    operator_note="",
+)
+try:
+    module.freeze(args)
+except SystemExit as exc:
+    assert "refusing symbolic link in validation corpus" in str(exc)
+else:
+    raise AssertionError("manifest freeze accepted an explicit symlink record")
+assert not Path(args.out).exists()
+PY
+pass "manifest freeze rejects explicit corpus symlinks before stat or hash"
 
 HG_WORKSPACE="$SELFTEST_TMP/cleanup"
 export HG_WORKSPACE
