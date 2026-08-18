@@ -492,11 +492,15 @@ HG_MANIFEST="$HG_STATE/manifest.json"
 HG_CONSOLE_OUT="$HG_RESULTS/console.txt"
 HG_FINDINGS_JSON="$HG_RESULTS/findings.json"
 HG_MARKDOWN_OUT="$HG_RESULTS/report.md"
+HG_INVOCATIONS="$HG_RESULTS/scan-invocations.tsv"
 
 HG_SCAN_BASE=("${HG_HARVESTGUARD_ARGV[@]}" scan "$HG_CORPUS" --type crypto --max-depth "$HG_SCAN_MAX_DEPTH")
 HG_CMD_CONSOLE="${HG_SCAN_BASE[*]}"
 HG_CMD_JSON="${HG_SCAN_BASE[*]} --json $HG_FINDINGS_JSON"
 HG_CMD_MARKDOWN="${HG_SCAN_BASE[*]} --markdown $HG_MARKDOWN_OUT"
+HG_CMD_CONSOLE="$(hg_redact_command "$HG_CMD_CONSOLE")"
+HG_CMD_JSON="$(hg_redact_command "$HG_CMD_JSON")"
+HG_CMD_MARKDOWN="$(hg_redact_command "$HG_CMD_MARKDOWN")"
 
 freeze_args=(
     freeze
@@ -530,10 +534,11 @@ hg_gate_what "Recorded the exact HarvestGuard commands that stage 7 will run."
 hg_gate_path "frozen manifest: $HG_MANIFEST"
 hg_gate_path "scan root: $HG_CORPUS"
 hg_gate_command "chmod -R a-w '$HG_GENERATED'"
-hg_gate_command "$HG_CMD_CONSOLE"
-hg_gate_command "$HG_CMD_JSON"
-[ "$HG_CAPTURE_MARKDOWN" = "1" ] && hg_gate_command "$HG_CMD_MARKDOWN"
+hg_gate_command "python3 validation/harness_tool.py freeze <records> <frozen-corpus>"
 hg_gate_next "Stage 7 runs HarvestGuard against the frozen corpus and stops at the raw output."
+hg_gate_next "Planned console command: $HG_CMD_CONSOLE"
+hg_gate_next "Planned JSON command: $HG_CMD_JSON"
+[ "$HG_CAPTURE_MARKDOWN" = "1" ] && hg_gate_next "Planned Markdown command: $HG_CMD_MARKDOWN"
 hg_gate_inspect "python3 -m json.tool '$HG_MANIFEST' | less"
 hg_gate_inspect "grep -c '\"negative_control\": true' '$HG_MANIFEST'"
 hg_gate 6 "Freeze corpus and expectations"
@@ -558,6 +563,13 @@ if [ "$HG_CAPTURE_MARKDOWN" = "1" ]; then
         2> "$HG_RESULTS/markdown.stderr.txt" || markdown_status=$?
 fi
 
+{
+    printf 'console\t%s\t%s\n' "$console_status" "$HG_CMD_CONSOLE"
+    printf 'json\t%s\t%s\n' "$json_status" "$HG_CMD_JSON"
+    [ "$HG_CAPTURE_MARKDOWN" = "1" ] &&
+        printf 'markdown\t%s\t%s\n' "$markdown_status" "$HG_CMD_MARKDOWN"
+} > "$HG_INVOCATIONS"
+
 hg_say ""
 hg_say "Exit status — console run: $console_status, JSON run: $json_status, Markdown run: $markdown_status"
 hg_say ""
@@ -573,13 +585,14 @@ else
 fi
 
 hg_gate_reset
-hg_gate_what "Ran HarvestGuard against the frozen corpus and captured console, JSON, and Markdown output."
+hg_gate_what "Ran HarvestGuard against the frozen corpus and captured every requested output mode."
 hg_gate_what "Reported raw counts, rule IDs, asset types, scanner errors, and coverage limitations."
 hg_gate_what "No expectation has been compared yet, and no result has been collapsed into pass/fail."
 hg_gate_path "console: $HG_CONSOLE_OUT"
 hg_gate_path "JSON findings: $HG_FINDINGS_JSON"
 [ "$HG_CAPTURE_MARKDOWN" = "1" ] && hg_gate_path "Markdown: $HG_MARKDOWN_OUT"
 hg_gate_path "stderr captures: $HG_RESULTS/*.stderr.txt"
+hg_gate_path "durable redacted argv and exit statuses: $HG_INVOCATIONS"
 hg_gate_command "$HG_CMD_CONSOLE"
 hg_gate_command "$HG_CMD_JSON"
 [ "$HG_CAPTURE_MARKDOWN" = "1" ] && hg_gate_command "$HG_CMD_MARKDOWN"
@@ -592,16 +605,32 @@ hg_gate 7 "Run and review raw results"
 
 hg_heading "STAGE 8 of 8 — Compare, report, and clean up"
 
+hg_gate_reset
+hg_gate_what "Completed the operator review window for the raw Stage 7 outputs."
+hg_gate_what "No comparison or cleanup has run yet."
+hg_gate_path "frozen manifest: $HG_MANIFEST"
+hg_gate_path "raw console output: $HG_CONSOLE_OUT"
+hg_gate_path "raw JSON findings: $HG_FINDINGS_JSON"
+[ "$HG_CAPTURE_MARKDOWN" = "1" ] && hg_gate_path "raw Markdown output: $HG_MARKDOWN_OUT"
+hg_gate_path "durable redacted argv and exit statuses: $HG_INVOCATIONS"
+hg_gate_command "(none — comparison waits for this gate)"
+hg_gate_next "Compare raw findings with frozen expectations, write reports, then request an explicit cleanup choice."
+hg_gate_inspect "Re-check '$HG_CONSOLE_OUT' and '$HG_FINDINGS_JSON' before authorizing comparison."
+hg_gate_inspect "Abort leaves the complete workspace and raw results intact."
+hg_gate 8 "Compare, report, and cleanup"
+
 compare_args=(
     compare
     --manifest "$HG_MANIFEST"
     --findings "$HG_FINDINGS_JSON"
     --console "$HG_CONSOLE_OUT"
-    --scan-exit-code "$json_status"
+    --console-exit-code "$console_status"
+    --json-exit-code "$json_status"
     --out-json "$HG_RESULTS/validation-report.json"
     --out-markdown "$HG_RESULTS/validation-report.md"
 )
 [ "$HG_CAPTURE_MARKDOWN" = "1" ] && compare_args+=(--markdown "$HG_MARKDOWN_OUT")
+[ "$HG_CAPTURE_MARKDOWN" = "1" ] && compare_args+=(--markdown-exit-code "$markdown_status")
 [ "$HG_NON_INTERACTIVE" = "1" ] && compare_args+=(--non-interactive)
 
 compare_status=0

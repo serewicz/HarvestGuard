@@ -266,5 +266,12 @@ hg_emit_artifact() {
 # format is visibly skipped rather than silently absent.
 hg_emit_skip() {
     local generator="$1" reason="$2"
-    printf 'SKIP\t%s\t%s\n' "$generator" "$reason"
+    printf 'SKIP\t%s\t%s\tskipped\n' "$generator" "$reason"
+}
+
+# Reserved for a requested generator identifier or family that this Phase 1
+# harness does not implement. Tool absence is a skip, never unsupported.
+hg_emit_unsupported() {
+    local generator="$1" reason="$2"
+    printf 'UNSUPPORTED\t%s\t%s\tunsupported\n' "$generator" "$reason"
 }

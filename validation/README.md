@@ -47,6 +47,9 @@ an explicit `delete`; otherwise the workspace remains intact.
 Generator commands and their mapping to the eight approved format cases are in
 [`generators/README.md`](generators/README.md). Missing optional tools produce a
 recorded generator skip, not a whole-harness failure. `age` is optional.
+Unavailable optional tools are reported as `skipped_generator`; the separate
+`unsupported_generator` outcome is reserved for generator identifiers or
+families that this Phase 1 harness does not implement.
 
 No CMS, gocryptfs, Java keystore, Kubernetes TLS Secret, NSS, OpenPGP, or PKCS#12
 generator is part of Phase 1.
@@ -61,6 +64,8 @@ generator is part of Phase 1.
 - The comparison checks outputs for the per-run secret marker and private-key
   block headers.
 - Cleanup checks the workspace marker and requires explicit confirmation.
+- Manifest freeze rejects symbolic links in the corpus before hashing, so it
+  never follows a link target outside the workspace.
 
 ## Platform scope
 

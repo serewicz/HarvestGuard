@@ -43,11 +43,12 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["generator", "reason"],
+        "required": ["generator", "reason", "outcome"],
         "additionalProperties": false,
         "properties": {
           "generator": { "type": "string" },
-          "reason": { "type": "string" }
+          "reason": { "type": "string" },
+          "outcome": { "enum": ["skipped", "unsupported"] }
         }
       }
     },

@@ -99,8 +99,15 @@ def _walk_corpus(corpus_root: Path) -> list[Path]:
     paths: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(corpus_root):
         dirnames.sort()
+        for name in dirnames:
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                raise SystemExit(f"refusing symbolic link in validation corpus: {path}")
         for name in sorted(filenames):
-            paths.append(Path(dirpath) / name)
+            path = Path(dirpath) / name
+            if path.is_symlink():
+                raise SystemExit(f"refusing symbolic link in validation corpus: {path}")
+            paths.append(path)
     return paths
 
 
@@ -150,8 +157,13 @@ def freeze(args: argparse.Namespace) -> int:
         if not line.strip():
             continue
         parts = line.split("\t")
-        if len(parts) >= 3 and parts[0] == "SKIP":
-            skipped.append({"generator": parts[1], "reason": parts[2]})
+        if len(parts) >= 3 and parts[0] in {"SKIP", "UNSUPPORTED"}:
+            outcome = parts[3] if len(parts) >= 4 else (
+                "unsupported" if parts[0] == "UNSUPPORTED" else "skipped"
+            )
+            skipped.append(
+                {"generator": parts[1], "reason": parts[2], "outcome": outcome}
+            )
 
     manifest = {
         "schema_version": MANIFEST_SCHEMA_VERSION,
@@ -463,10 +475,14 @@ def compare(args: argparse.Namespace) -> int:
         results.extend(_evaluate_artifact(artifact, scan_root, findings))
 
     for skipped in manifest.get("skipped_generators", []):
+        outcome = skipped.get("outcome", "skipped")
+        category = (
+            "unsupported_generator" if outcome == "unsupported" else "skipped_generator"
+        )
         results.append(
             {
-                "category": "unsupported_or_skipped_generator",
-                "validation_class": "skipped_or_unsupported",
+                "category": category,
+                "validation_class": category,
                 "artifact_id": None,
                 "relative_path": None,
                 "detail": f"{skipped.get('generator')}: {skipped.get('reason')}",
@@ -542,16 +558,35 @@ def compare(args: argparse.Namespace) -> int:
                 }
             )
 
-    if args.scan_exit_code:
-        results.append(
-            {
-                "category": "scanner_error",
-                "validation_class": "generated_validation",
-                "artifact_id": None,
-                "relative_path": None,
-                "detail": f"HarvestGuard exited with status {args.scan_exit_code}.",
-            }
-        )
+    commands = manifest.get("scan_commands", [])
+    statuses = [
+        ("console", args.console_exit_code),
+        ("json", args.json_exit_code),
+    ]
+    if args.markdown_exit_code is not None:
+        statuses.append(("markdown", args.markdown_exit_code))
+    scan_invocations = [
+        {
+            "mode": mode,
+            "argv": commands[index] if index < len(commands) else "",
+            "exit_status": status,
+        }
+        for index, (mode, status) in enumerate(statuses)
+    ]
+    for invocation in scan_invocations:
+        if invocation["exit_status"]:
+            results.append(
+                {
+                    "category": "scanner_error",
+                    "validation_class": "generated_validation",
+                    "artifact_id": None,
+                    "relative_path": None,
+                    "detail": (
+                        f"HarvestGuard {invocation['mode']} invocation exited with status "
+                        f"{invocation['exit_status']}."
+                    ),
+                }
+            )
 
     # The manifest legitimately records the marker itself (that is how a later
     # run can re-check an archived output), so the marker field is removed
@@ -585,6 +620,7 @@ def compare(args: argparse.Namespace) -> int:
         "harvestguard_version": manifest.get("harvestguard_version"),
         "scan_root": manifest.get("scan_root"),
         "scan_commands": manifest.get("scan_commands", []),
+        "scan_invocations": scan_invocations,
         "manifest_path": str(args.manifest),
         "findings_path": str(args.findings),
         "operator_reviewed_raw_results": not args.non_interactive,
@@ -617,7 +653,8 @@ _CLASS_TITLES = {
     "generated_validation": "Generated validation",
     "operator_declared_validation": "Operator-declared validation",
     "blind_observation": "Blind observations",
-    "skipped_or_unsupported": "Skipped or unsupported generators",
+    "skipped_generator": "Skipped generators",
+    "unsupported_generator": "Unsupported generators",
 }
 
 
@@ -638,6 +675,15 @@ def _markdown_report(report: dict[str, Any]) -> str:
     ]
     for command in report["scan_commands"]:
         lines.append(f"- `{command}`")
+    lines += [
+        "",
+        "## Invocation exit statuses",
+        "",
+        "| Mode | Exit status |",
+        "| --- | ---: |",
+    ]
+    for invocation in report["scan_invocations"]:
+        lines.append(f"| {invocation['mode']} | {invocation['exit_status']} |")
     lines += ["", "## Result counts", "", "| Category | Count |", "| --- | --- |"]
     for category, count in report["counts"].items():
         lines.append(f"| {category} | {count} |")
@@ -703,7 +749,9 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--findings", required=True)
     compare_parser.add_argument("--console", default="")
     compare_parser.add_argument("--markdown", default="")
-    compare_parser.add_argument("--scan-exit-code", type=int, default=0)
+    compare_parser.add_argument("--console-exit-code", type=int, default=0)
+    compare_parser.add_argument("--json-exit-code", type=int, default=0)
+    compare_parser.add_argument("--markdown-exit-code", type=int, default=None)
     compare_parser.add_argument("--non-interactive", action="store_true")
     compare_parser.add_argument("--dry-run", action="store_true")
     compare_parser.add_argument("--out-json", required=True)

@@ -67,7 +67,8 @@ EOF
         --out "$state/manifest.json" --run-id "$HG_RUN_ID" \
         --harness-version "$HG_HARNESS_VERSION" --host-os "dry-run" \
         --harvestguard-version "not run" --skipped "$state/skipped.tsv" \
-        --scan-command "not run in dry-run mode"
+        --scan-command "console scan not run in dry-run mode" \
+        --scan-command "JSON scan not run in dry-run mode"
     hg_gate_reset
     hg_gate_what "Froze the mock manifest without running HarvestGuard."
     hg_gate_path "manifest: $state/manifest.json"
@@ -82,15 +83,18 @@ EOF
     hg_gate_next "Stage 8 compares mock records."
     hg_gate 7 "Run and review raw results (mocked in dry-run)"
 
+    hg_gate_reset
+    hg_gate_what "Recorded mock raw observations and froze mock expectations."
+    hg_gate_what "No comparison has run yet; no format-support conclusion is possible."
+    hg_gate_path "mock manifest: $state/manifest.json"
+    hg_gate_path "mock findings: $results/findings.json"
+    hg_gate_next "Compare mock records and retain the dry-run workspace for inspection."
+    hg_gate 8 "Compare, report, and cleanup"
     python3 "$HG_ROOT/harness_tool.py" compare \
         --manifest "$state/manifest.json" --findings "$results/findings.json" \
         --console "$results/console.txt" --out-json "$results/validation-report.json" \
-        --out-markdown "$results/validation-report.md" --non-interactive --dry-run
-    hg_gate_reset
-    hg_gate_what "Compared mock observations; no format-support conclusion is possible."
-    hg_gate_path "mock report: $results/validation-report.json"
-    hg_gate_next "Dry-run complete; workspace remains for inspection."
-    hg_gate 8 "Compare, report, and cleanup"
+        --out-markdown "$results/validation-report.md" --console-exit-code 0 \
+        --json-exit-code 0 --non-interactive --dry-run
 
     hg_say "Dry-run complete. Workspace retained: $HG_WORKSPACE"
     hg_say "No cryptographic validation, scanner validation, or format support was claimed."
