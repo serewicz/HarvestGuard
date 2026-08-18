@@ -1,0 +1,539 @@
+total 12
+-rw-r--r-- 1 <operator> <operator>   59 Aug 18 18:46 blind-notes.txt
+-rw-r--r-- 1 <operator> <operator> 1159 Aug 18 18:46 operator-cert.pem
+-rw-r--r-- 1 <operator> <operator>   80 Aug 18 18:46 operator-openssl-enc.bin
+
+===============================================================
+STAGE 1 of 8 — Environment inspection
+===============================================================
+Operating system: AlmaLinux 9.8 (Olive Jaguar)
+Kernel:           Linux 6.17.0-1022-azure
+Architecture:     x86_64
+Effective user:   <operator> (uid 1000)
+Privilege level:  unprivileged
+HarvestGuard:     harvestguard 0.2.0
+  command:        harvestguard
+  resolved path:  <venv-bin>/harvestguard
+
+Generator tool inventory:
+  - age_encrypted — UNAVAILABLE (age is not installed)
+  - encrypted_private_key — available (openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026))
+  - openssh_host_identity — available (ssh-keygen: option requires an argument -- V
+)
+  - openssl_enc — available (openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026))
+  - private_key_pem — available (openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026))
+  - x509_certificate — available (openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026))
+
+===============================================================
+GATE 1 of 8 — Environment inspection
+===============================================================
+
+What just happened:
+  - Inspected the operating system, architecture, user, and privilege level.
+  - Probed every generator's native tool. No cryptographic artifact exists yet.
+  - Created an empty, mode-0700 validation workspace.
+
+Files and directories created or discovered:
+  - workspace: <workspace>
+  - corpus root (still empty): <workspace>/corpus
+  - environment record: <workspace>/state/environment.txt
+  - missing optional tool -> generator skipped: age_encrypted — age is not installed
+
+Commands executed (secret arguments redacted):
+  - uname -sr; uname -m; id -un; id -u
+  - harvestguard --version
+  - validation/generators/*.sh probe (tool presence and version only)
+
+Expected next action:
+  - Stage 2 proposes a validation plan. Nothing is generated or scanned yet.
+
+How to inspect the current state:
+  - cat '<workspace>/state/environment.txt'
+  - ls -la '<workspace>'
+  - Safety boundary: every write goes under '<workspace>'; no network access, no package installation, no production credentials.
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+
+===============================================================
+STAGE 2 of 8 — Validation plan
+===============================================================
+Proposed generators (each produces at least one positive and one negative control):
+  - encrypted_private_key — Encrypted PKCS#8 (PEM and DER) and encrypted legacy PEM private keys
+  -     expected findings: private_key:pkcs8_encrypted private_key:legacy_pem_encrypted
+  -     native tool: openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+  - openssh_host_identity — OpenSSH host keys and host certificates via 'ssh-keygen'
+  -     expected findings: openssh_host_identity:private_key openssh_host_identity:public_key openssh_host_identity:host_certificate
+  -     native tool: ssh-keygen: option requires an argument -- V
+  - openssl_enc — OpenSSL Salted__ encrypted files via 'openssl enc'
+  -     expected findings: encrypted_file:openssl
+  -     native tool: openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+  - private_key_pem — Unencrypted PKCS#8 PEM private keys via 'openssl genpkey'
+  -     expected findings: asset type: PEM Private Key (no rule ID published)
+  -     native tool: openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+  - x509_certificate — PEM and DER X.509 certificates via 'openssl req -x509'
+  -     expected findings: asset types: PEM Certificate, DER Certificate (no rule ID published)
+  -     native tool: openssl: OpenSSL 3.5.5 27 Jan 2026 (Library: OpenSSL 3.5.5 27 Jan 2026)
+
+Formats that will be skipped on this host:
+  - age_encrypted — age is not installed
+
+Negative controls in the plan include misleading extensions, misleading
+filenames, and near-match content for every generator that runs.
+Generators to DISABLE (space-separated names, empty for none): Optional note to record in the manifest:
+===============================================================
+GATE 2 of 8 — Validation plan
+===============================================================
+
+What just happened:
+  - Built the validation plan from the tools actually installed here.
+  - Selected generators: encrypted_private_key openssh_host_identity openssl_enc private_key_pem x509_certificate
+  - Skipped generators are recorded with their reason and stay visible in the report.
+
+Files and directories created or discovered:
+  - plan record: <workspace>/state/plan.txt
+  - skip record: <workspace>/state/skipped.tsv
+
+Commands executed (secret arguments redacted):
+  - (no artifact-producing command has run yet)
+
+Expected next action:
+  - Stage 3 runs the selected generators. HarvestGuard still does not run.
+
+How to inspect the current state:
+  - cat '<workspace>/state/plan.txt'; cat '<workspace>/state/skipped.tsv'
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+
+===============================================================
+STAGE 3 of 8 — Generate real artifacts
+===============================================================
+Running generator: encrypted_private_key
+Running generator: openssh_host_identity
+Running generator: openssl_enc
+Running generator: private_key_pem
+Running generator: x509_certificate
+
+Generated artifact inventory (19 manifest entries):
+  [dir ] generated/encrypted_private_key
+  [file] generated/encrypted_private_key/legacy_4e1da9f2.key            1766 bytes  sha256=<sha256-elided>
+  [file] generated/encrypted_private_key/legacy_4e1da9f2_header_only.key      111 bytes  sha256=<sha256-elided>
+  [file] generated/encrypted_private_key/tls_4e1da9f2_encrypted.der     1913 bytes  sha256=<sha256-elided>
+  [file] generated/encrypted_private_key/tls_4e1da9f2_encrypted.pem     2666 bytes  sha256=<sha256-elided>
+  [file] generated/encrypted_private_key/vault_4e1da9f2_encrypted_backup.pem     2484 bytes  sha256=<sha256-elided>
+  [dir ] generated/openssh_host_identity
+  [dir ] generated/openssh_host_identity/decoy_d1ebe9e2
+  [file] generated/openssh_host_identity/decoy_d1ebe9e2/ssh_host_ed25519_key      115 bytes  sha256=<sha256-elided>
+  [file] generated/openssh_host_identity/ssh_host_ed25519_key            411 bytes  sha256=<sha256-elided>
+  [file] generated/openssh_host_identity/ssh_host_ed25519_key-cert.pub      509 bytes  sha256=<sha256-elided>
+  [file] generated/openssh_host_identity/ssh_host_ed25519_key.pub         96 bytes  sha256=<sha256-elided>
+  [dir ] generated/openssl_enc
+  [file] generated/openssl_enc/backup_notes_f53425ef.enc                  95 bytes  sha256=<sha256-elided>
+  [file] generated/openssl_enc/near_match_f53425ef.enc                   158 bytes  sha256=<sha256-elided>
+  [file] generated/openssl_enc/payload_f53425ef.enc                     3184 bytes  sha256=<sha256-elided>
+  [file] generated/openssl_enc/quarterly_report_f53425ef.p12            3184 bytes  sha256=<sha256-elided>
+  [dir ] generated/private_key_pem
+  [file] generated/private_key_pem/app_f13b1763_backup.pem               121 bytes  sha256=<sha256-elided>
+  [dir ] generated/private_key_pem/level1_bb09
+  [file] generated/private_key_pem/level1_bb09/app_f13b1763.pem          241 bytes  sha256=<sha256-elided>
+  [dir ] generated/x509_certificate
+  [file] generated/x509_certificate/archived_cert_451e890f.pem           128 bytes  sha256=<sha256-elided>
+  [file] generated/x509_certificate/renewal_notes_451e890f.crt            73 bytes  sha256=<sha256-elided>
+  [file] generated/x509_certificate/service_451e890f.der                 891 bytes  sha256=<sha256-elided>
+  [file] generated/x509_certificate/service_451e890f.pem                1261 bytes  sha256=<sha256-elided>
+
+===============================================================
+GATE 3 of 8 — Generate real artifacts
+===============================================================
+
+What just happened:
+  - Ran 5 generator(s) using their real native tools.
+  - Recorded generator name, tool version, redacted command, and expected finding per artifact.
+  - Disposable passphrases were used and are not stored anywhere.
+  - HarvestGuard has NOT run.
+
+Files and directories created or discovered:
+  - generated corpus: <workspace>/corpus/generated
+  - artifact records: <workspace>/state/artifacts.jsonl
+  - generator scratch material (never scanned): <workspace>/scratch
+
+Commands executed (secret arguments redacted):
+  - see the command_description field of each record in <workspace>/state/artifacts.jsonl
+
+Expected next action:
+  - Stage 4 is your inspection window. Nothing will be modified.
+
+How to inspect the current state:
+  - find '<workspace>/corpus/generated' -type f -exec file {} +
+  - python3 -m json.tool < <(head -n1 '<workspace>/state/artifacts.jsonl')
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+
+===============================================================
+STAGE 4 of 8 — Human inspection
+===============================================================
+Inspect the corpus now, in this or another terminal. The harness will not
+touch these files again until you confirm.
+
+Safe inspection commands:
+  - file '<workspace>/corpus/generated'/*/*
+  - ls -laR '<workspace>/corpus/generated'
+  - head -c 16 <artifact> | xxd        # header bytes only
+  - openssl x509 -in <certificate> -noout -subject -dates
+  - openssl asn1parse -inform DER -in <der-artifact> | head
+
+Do NOT print or copy:
+  - the body of any private key file (*.pem key or ssh_host_* key)
+  - the plaintext of any encrypted artifact — nothing here needs decrypting
+  - any passphrase; the harness holds none for you to read
+
+===============================================================
+GATE 4 of 8 — Human inspection
+===============================================================
+
+What just happened:
+  - Provided inspection guidance only. No file was created, modified, or removed.
+
+Files and directories created or discovered:
+  - corpus under inspection: <workspace>/corpus/generated
+
+Commands executed (secret arguments redacted):
+  - (none — this stage runs no command against the corpus)
+
+Expected next action:
+  - Stage 5 opens a separate directory for files you created yourself.
+
+How to inspect the current state:
+  - ls -laR '<workspace>/corpus/generated'
+  - Confirm the generated corpus looks reasonable before continuing.
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+
+===============================================================
+STAGE 5 of 8 — Add independent operator files
+===============================================================
+Copy or create independently generated artifacts here:
+  <workspace>/corpus/operator-supplied
+
+The harness will not read their contents, will not modify them, and will not
+assume their type. It records only filesystem metadata and a SHA-256 hash.
+
+To declare an expectation for a file, add a line to:
+  <workspace>/state/operator-expectations.tsv
+Anything left undeclared is a BLIND input.
+Press Enter once your files are in place.
+Corpus categories now recorded separately:
+  - generated:          19
+  - operator-declared:  1
+  - blind:              2
+
+===============================================================
+GATE 5 of 8 — Add independent operator files
+===============================================================
+
+What just happened:
+  - Opened a separate operator-supplied directory and recorded what you placed there.
+  - Operator files were hashed and listed only; none was read for content, altered, or moved.
+  - Undeclared operator files are marked blind and will not be scored.
+
+Files and directories created or discovered:
+  - operator-supplied corpus: <workspace>/corpus/operator-supplied
+  - declaration file: <workspace>/state/operator-expectations.tsv
+
+Commands executed (secret arguments redacted):
+  - find '<workspace>/corpus/operator-supplied' -type f (listing and hashing only)
+
+Expected next action:
+  - Stage 6 freezes the corpus and the expectations before HarvestGuard runs.
+
+How to inspect the current state:
+  - cat '<workspace>/state/operator-expectations.tsv'; find '<workspace>/corpus/operator-supplied' -type f | sort
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+
+===============================================================
+STAGE 6 of 8 — Freeze corpus and expectations
+===============================================================
+Frozen manifest written: <workspace>/state/manifest.json
+  artifacts:            22
+  generated:            19
+  operator-supplied:    1
+  blind:                2
+  negative controls:    8
+  skipped generators:   1
+  unmanifested files:   0
+
+Exact scan root: <workspace>/corpus
+Expected positives, expected negatives, blind inputs, and exclusions are all
+recorded in the frozen manifest. Nothing below will rewrite them.
+
+===============================================================
+GATE 6 of 8 — Freeze corpus and expectations
+===============================================================
+
+What just happened:
+  - Froze the corpus listing, hashed every file, and finalized expectations.
+  - Made the generated corpus read-only; operator-supplied files were left untouched.
+  - Recorded the exact HarvestGuard commands that stage 7 will run.
+
+Files and directories created or discovered:
+  - frozen manifest: <workspace>/state/manifest.json
+  - scan root: <workspace>/corpus
+
+Commands executed (secret arguments redacted):
+  - chmod -R a-w '<workspace>/corpus/generated'
+  - python3 validation/harness_tool.py freeze <records> <frozen-corpus>
+
+Expected next action:
+  - Stage 7 runs HarvestGuard against the frozen corpus and stops at the raw output.
+  - Planned console command: harvestguard scan <workspace>/corpus --type crypto --max-depth 20
+  - Planned JSON command: harvestguard scan <workspace>/corpus --type crypto --max-depth 20 --json <workspace>/results/findings.json
+  - Planned Markdown command: harvestguard scan <workspace>/corpus --type crypto --max-depth 20 --markdown <workspace>/results/report.md
+
+How to inspect the current state:
+  - python3 -m json.tool '<workspace>/state/manifest.json' | less
+  - grep -c '"negative_control": true' '<workspace>/state/manifest.json'
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+
+===============================================================
+STAGE 7 of 8 — Run HarvestGuard and review raw results
+===============================================================
+Running: harvestguard scan <workspace>/corpus --type crypto --max-depth 20
+Running: harvestguard scan <workspace>/corpus --type crypto --max-depth 20 --json <workspace>/results/findings.json
+Running: harvestguard scan <workspace>/corpus --type crypto --max-depth 20 --markdown <workspace>/results/report.md
+
+Exit status — console run: 0, JSON run: 0, Markdown run: 0
+
+----- console output (verbatim) -----
+HarvestGuard Scan Complete
+
+Files scanned: 0
+Crypto files inspected: 22
+
+Record Categories
+
+Aggregate filesystem context records: 0
+Per-file filesystem evidence records: 0
+Coverage limitation records: 0
+Skipped or inaccessible entry records: 0
+Cryptographic inventory records: 17
+Sensitive-data records: 0
+Code-analysis records: 0
+Cloud storage records: 0
+
+Findings
+
+Certificates: 6
+Private Keys: 7
+Encrypted Keys: 7
+SSH Keys: 3
+PKCS#12: 0
+Expired Certificates: 0
+Sensitive Files: 0
+Semgrep Findings: 0
+Malformed Assets: 2
+Errors: 3
+
+Material evidence records: 17
+Total normalized records: 17
+Findings with finding-level errors: 3
+Scanner execution errors: 0
+----- end console output -----
+
+Findings in <workspace>/results/findings.json: 17
+
+Rule IDs observed:
+     8  (none)
+     3  encrypted_file:openssl
+     1  openssh_host_identity:host_certificate
+     1  openssh_host_identity:private_key
+     1  openssh_host_identity:public_key
+     1  private_key:legacy_pem_encrypted
+     2  private_key:pkcs8_encrypted
+
+Asset types observed:
+     1  DER Certificate
+     3  Encrypted File
+     1  Encrypted Legacy PEM Private Key
+     1  Encrypted PEM Private Key
+     2  Encrypted PKCS#8 Private Key
+     1  Malformed DER Certificate
+     1  Malformed PEM Certificate
+     1  OpenSSH Host Certificate
+     1  OpenSSH Host Private Key Candidate
+     1  OpenSSH Host Public Key Candidate
+     2  PEM Certificate
+     2  PEM Private Key
+
+Findings carrying scanner errors: 3
+  <workspace>/corpus/generated/encrypted_private_key/legacy_4e1da9f2_header_only.key: Private key is encrypted; key metadata requires a passphrase
+  <workspace>/corpus/generated/x509_certificate/renewal_notes_451e890f.crt: Unable to parse DER certificate
+  <workspace>/corpus/generated/x509_certificate/archived_cert_451e890f.pem: Unable to load PEM file. See https://cryptography.io/en/latest/faq/#why-can-t-i-import-my-pem-file for more details. MalformedFraming
+
+Findings recording a coverage limitation: 0
+
+Repeated finding IDs: 0
+
+This is a raw summary only. No expectation has been compared yet.
+
+===============================================================
+GATE 7 of 8 — Run and review raw results
+===============================================================
+
+What just happened:
+  - Ran HarvestGuard against the frozen corpus and captured every requested output mode.
+  - Reported raw counts, rule IDs, asset types, scanner errors, and coverage limitations.
+  - No expectation has been compared yet, and no result has been collapsed into pass/fail.
+
+Files and directories created or discovered:
+  - console: <workspace>/results/console.txt
+  - JSON findings: <workspace>/results/findings.json
+  - Markdown: <workspace>/results/report.md
+  - stderr captures: <workspace>/results/*.stderr.txt
+  - durable redacted argv and exit statuses: <workspace>/results/scan-invocations.tsv
+
+Commands executed (secret arguments redacted):
+  - harvestguard scan <workspace>/corpus --type crypto --max-depth 20
+  - harvestguard scan <workspace>/corpus --type crypto --max-depth 20 --json <workspace>/results/findings.json
+  - harvestguard scan <workspace>/corpus --type crypto --max-depth 20 --markdown <workspace>/results/report.md
+
+Expected next action:
+  - Stage 8 compares these results against the frozen manifest — only after you review them.
+
+How to inspect the current state:
+  - less '<workspace>/results/console.txt'; python3 -m json.tool '<workspace>/results/findings.json' | less
+  - Coverage limitation: --type crypto was scanned; other scan types were not exercised.
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+
+===============================================================
+STAGE 8 of 8 — Compare, report, and clean up
+===============================================================
+
+===============================================================
+GATE 8 of 8 — Compare, report, and cleanup
+===============================================================
+
+What just happened:
+  - Completed the operator review window for the raw Stage 7 outputs.
+  - No comparison or cleanup has run yet.
+
+Files and directories created or discovered:
+  - frozen manifest: <workspace>/state/manifest.json
+  - raw console output: <workspace>/results/console.txt
+  - raw JSON findings: <workspace>/results/findings.json
+  - raw Markdown output: <workspace>/results/report.md
+  - durable redacted argv and exit statuses: <workspace>/results/scan-invocations.tsv
+
+Commands executed (secret arguments redacted):
+  - (none — comparison waits for this gate)
+
+Expected next action:
+  - Compare raw findings with frozen expectations, write reports, then request an explicit cleanup choice.
+
+How to inspect the current state:
+  - Re-check '<workspace>/results/console.txt' and '<workspace>/results/findings.json' before authorizing comparison.
+  - Abort leaves the complete workspace and raw results intact.
+
+How to abort safely:
+  - Type 'abort' at the prompt below, or press Ctrl-C.
+  - Nothing outside <workspace> has been written.
+  - Aborting leaves the workspace in place for inspection; remove it yourself with:
+  -     rm -rf -- '<workspace>'
+
+How to continue:
+  - Type 'continue' and press Enter. Empty or unrecognized input never advances.
+
+Type continue or abort: Confirmed. Continuing.
+Comparison report written: <workspace>/results/validation-report.json
+Human-readable report:     <workspace>/results/validation-report.md
+
+Result counts:
+     2  blind_file_observation
+    12  expected_finding_observed
+     8  expected_negative_remained_negative
+     3  scanner_error
+     1  skipped_generator
+
+Entries needing operator attention: 0
+
+The comparison used the frozen expectations. Nothing rewrote them.
+Blind inputs were observed and reported, never scored.
+
+Reports:
+  - <workspace>/results/validation-report.json
+  - <workspace>/results/validation-report.md
+
+Cleanup. The workspace holds generated key material and disposable-passphrase
+artifacts. Deleting it removes ONLY '<workspace>'.
+Type 'delete' to remove the workspace or 'keep' to retain it: Workspace retained with explicit approval: <workspace>
+
+===============================================================
+Validation run complete — run ID <run-id>
+===============================================================
+This run validated the artifacts it generated on this host. It does not
+establish support for every valid form of any format.
+HARNESS_EXIT=0

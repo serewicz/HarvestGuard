@@ -73,18 +73,27 @@ OS-family detection is isolated in `lib/env_inspect.sh`. Per-family execution
 notes live in [`environments/`](environments/); package names there are operator
 guidance only, never installer logic.
 
-Ubuntu 24.04.4 LTS on `x86_64` has been validated end to end — one complete
-eight-gate run, zero discrepancies, `age` deliberately absent so the
-optional-tool skip path was exercised by a genuinely missing tool. See
-[`environments/ubuntu-debian.md`](environments/ubuntu-debian.md) for the
-validated configuration and its limitations, and
-[`reports/2026-08-18-ubuntu-24.04-phase1.md`](reports/2026-08-18-ubuntu-24.04-phase1.md)
-for the sanitized report. Debian stable, other architectures, WSL, and container
-execution remain unvalidated. RHEL and CentOS Stream have manual execution notes
-but no recorded run.
+Two families have been validated end to end, each with one complete eight-gate
+run, zero discrepancies, and `age` deliberately absent so the optional-tool skip
+path was exercised by a genuinely missing tool:
 
-Sanitized run reports live in [`reports/`](reports/). Archiving a run's frozen
-manifest and result files is separate and described in
+- **Debian family** — Ubuntu 24.04.4 LTS on `x86_64`, a Hyper-V virtual machine.
+  See [`environments/ubuntu-debian.md`](environments/ubuntu-debian.md) and
+  [`reports/2026-08-18-ubuntu-24.04-phase1.md`](reports/2026-08-18-ubuntu-24.04-phase1.md).
+- **RHEL family** — AlmaLinux 9.8 on `x86_64`, in a container, detected as family
+  `rhel`. See [`environments/rhel.md`](environments/rhel.md) and
+  [`reports/2026-08-18-almalinux-9.8-phase1.md`](reports/2026-08-18-almalinux-9.8-phase1.md).
+  That run also recorded a blocking harness defect: with pandas 3.x resolved,
+  stage 7 aborts before its gate. The complete run pinned pandas below 3.0.
+
+RHEL itself, Rocky Linux, CentOS Stream, Debian stable, non-`x86_64`
+architectures, and WSL remain unvalidated, as does bare-metal or VM execution of
+the RHEL family. Each validated configuration and its limitations are in the
+per-family note.
+
+Sanitized run reports live in [`reports/`](reports/), and sanitized gate
+transcripts in [`transcripts/`](transcripts/). Archiving a run's frozen manifest
+and result files is separate and described in
 [`manifests/README.md`](manifests/README.md) — never archive corpus or scratch
 material.
 
