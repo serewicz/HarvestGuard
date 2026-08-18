@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harvestguard.dev/schemas/validation-manifest-1.0.json",
+  "title": "HarvestGuard validation manifest (HG-045)",
+  "description": "The frozen corpus and expectation record written at stage 6, before HarvestGuard runs. Never rewritten by a scan result. Deliberately holds no passphrase, private key content, plaintext, decrypted material, or raw secret value; the only secret-adjacent field is `secret_marker`, a per-run prefix shared by the disposable passphrases the harness generated, which exists so stage 8 can prove nothing leaked.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "harness_version",
+    "run_id",
+    "scan_root",
+    "scan_commands",
+    "artifacts",
+    "skipped_generators"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "harness_version": { "type": "string" },
+    "run_id": {
+      "type": "string",
+      "description": "Randomized per-run identity. Workspace paths and artifact names vary with it."
+    },
+    "frozen_at": { "type": "string" },
+    "host_os": { "type": "string" },
+    "harvestguard_version": { "type": "string" },
+    "scan_root": {
+      "type": "string",
+      "description": "Absolute path of the frozen corpus. Nothing outside it is scanned."
+    },
+    "scan_commands": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Exact HarvestGuard commands stage 7 will run, recorded before it runs them."
+    },
+    "operator_notes": { "type": "string" },
+    "secret_marker": { "type": "string" },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "skipped_generators": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["generator", "reason"],
+        "additionalProperties": false,
+        "properties": {
+          "generator": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "unmanifested_corpus_files": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Files found inside the frozen corpus that no manifest entry covers. Reported as accounting mismatches at stage 8."
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "required": ["artifact_id", "source_category", "relative_path"],
+      "additionalProperties": false,
+      "properties": {
+        "artifact_id": { "type": "string" },
+        "source_category": {
+          "enum": ["generated", "operator-supplied", "blind"],
+          "description": "Generated artifacts, operator-supplied artifacts with a declared expectation, and blind operator inputs stay distinguishable through to the final report."
+        },
+        "relative_path": {
+          "type": "string",
+          "description": "Path relative to the validation corpus root."
+        },
+        "path_type": { "enum": ["file", "directory", "missing"] },
+        "generator": { "type": "string" },
+        "generator_tool": { "type": "string" },
+        "generator_tool_version": { "type": "string" },
+        "command_description": {
+          "type": "string",
+          "description": "Safe description of the generating command, with secret arguments redacted."
+        },
+        "expected_asset_type": { "type": "string" },
+        "expected_rule_id": {
+          "type": "string",
+          "description": "Empty when HarvestGuard publishes no rule ID for the family; matching then falls back to expected_asset_type."
+        },
+        "expected_finding_count": { "type": "integer", "minimum": 0 },
+        "forbidden_rule_ids": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Rule IDs that must NOT fire for a negative control."
+        },
+        "forbidden_asset_types": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "additional_expected": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Further rule IDs or asset types acknowledged in advance at this location, so they are not reported as unexpected."
+        },
+        "expected_scanner_error": {
+          "type": "boolean",
+          "description": "Declared before the scan: a parse attempt against this artifact may legitimately record a scanner error."
+        },
+        "negative_control": { "type": "boolean" },
+        "sha256": { "type": ["string", "null"] },
+        "size_bytes": { "type": ["integer", "null"] },
+        "directory_file_count": { "type": "integer" },
+        "notes": { "type": "string" },
+        "skipped_reason": { "type": "string" }
+      }
+    }
+  }
+}
