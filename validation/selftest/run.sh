@@ -187,23 +187,26 @@ printf 'ID=arch\nPRETTY_NAME="Arch Linux"\n' > "$osrel/other"
 for fixture_case in ubuntu:debian debian:debian rhel:rhel other:unknown; do
     fixture="${fixture_case%%:*}"
     expected="${fixture_case##*:}"
-    observed="$(
-        HG_OS_RELEASE_FILE="$osrel/$fixture" bash -c \
-            ". '$SELFTEST_ROOT/lib/env_inspect.sh'; hg_inspect_environment; printf '%s' \"\$HG_OS_FAMILY\""
-    )"
+    observed="$(bash -c ". '$SELFTEST_ROOT/lib/env_inspect.sh'; HG_OS_FAMILY=unknown; hg_apply_os_release_file '$osrel/$fixture'; printf '%s' \"\$HG_OS_FAMILY\"")"
     [ "$observed" = "$expected" ] ||
         fail "os-release family mapping for $fixture (got '$observed', want '$expected')"
 done
-observed_pretty="$(
-    HG_OS_RELEASE_FILE="$osrel/ubuntu" bash -c \
-        ". '$SELFTEST_ROOT/lib/env_inspect.sh'; hg_inspect_environment; printf '%s' \"\$HG_OS_DESCRIPTION\""
-)"
+observed_pretty="$(bash -c ". '$SELFTEST_ROOT/lib/env_inspect.sh'; HG_OS_FAMILY=unknown; hg_apply_os_release_file '$osrel/ubuntu'; printf '%s' \"\$HG_OS_DESCRIPTION\"")"
 [ "$observed_pretty" = "Ubuntu 24.04 LTS" ] || fail "os-release description passthrough"
+injection_marker="$SELFTEST_TMP/os-release-executed"
+printf 'ID=ubuntu\nPRETTY_NAME="$(touch %s)"\n' "$injection_marker" > "$osrel/inert"
+bash -c ". '$SELFTEST_ROOT/lib/env_inspect.sh'; HG_OS_FAMILY=unknown; hg_apply_os_release_file '$osrel/inert'"
+[ ! -e "$injection_marker" ] || fail "os-release fixture executed as shell code"
+inherited_marker="$SELFTEST_TMP/inherited-os-release-used"
+printf 'ID=ubuntu\nPRETTY_NAME="$(touch %s)"\n' "$inherited_marker" > "$osrel/inherited"
+HG_OS_RELEASE_FILE="$osrel/inherited" bash -c \
+    ". '$SELFTEST_ROOT/lib/env_inspect.sh'; hg_inspect_environment" >/dev/null
+[ ! -e "$inherited_marker" ] || fail "production path honored inherited os-release override"
 if grep -rqE '\b(apt|apt-get|dnf|yum|zypper|pacman)[[:space:]]' \
     "$SELFTEST_ROOT/run-validation.sh" "$SELFTEST_ROOT/lib" "$SELFTEST_ROOT/generators"; then
     fail "harness references a package manager outside environments/ documentation"
 fi
-pass "OS-family detection maps Debian and RHEL families without invoking a package manager"
+pass "OS-family detection parses inert fixtures and production ignores inherited overrides"
 
 HG_WORKSPACE="$SELFTEST_TMP/cleanup"
 export HG_WORKSPACE

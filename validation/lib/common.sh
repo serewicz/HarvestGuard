@@ -148,18 +148,7 @@ hg_tool_version() {
     local tool="$1"
     case "$tool" in
         openssl) openssl version 2>/dev/null | head -n1 ;;
-        # ssh-keygen has no version flag: `-V` is its certificate
-        # validity-interval option, so asking it for a version yields the usage
-        # error "option requires an argument -- V", which is then recorded as if
-        # it were a version string (observed on Ubuntu 24.04, OpenSSH 9.6p1).
-        # OpenSSH reports its version through `ssh -V`, on stderr.
-        ssh-keygen)
-            if command -v ssh >/dev/null 2>&1; then
-                ssh -V 2>&1 | head -n1
-            else
-                printf 'ssh-keygen present (OpenSSH version not reported)'
-            fi
-            ;;
+        ssh-keygen) ssh-keygen -V 2>&1 | head -n1 || true ;;
         age) age --version 2>/dev/null | head -n1 ;;
         *) command -v "$tool" >/dev/null 2>&1 && printf 'present (version not reported)' ;;
     esac

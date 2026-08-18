@@ -20,7 +20,7 @@ One complete eight-gate run, with a sanitized report in
 | Shell | GNU bash 5.2.21 |
 | Python | 3.12.13 |
 | HarvestGuard | `harvestguard 0.2.0`, installed CLI on `PATH` |
-| Native tools present | `openssl` 3.0.13, `ssh-keygen` (OpenSSH 9.6p1) |
+| Native tools present | `openssl` 3.0.13, `ssh-keygen` present (version field limitation below) |
 | Native tools missing | `age` — its generator was skipped |
 | Discrepancies | 0 |
 
@@ -73,6 +73,12 @@ through all eight gates to a clean comparison.
 
 ## Known limitations
 
+- The harness probes `ssh-keygen` with `ssh-keygen -V`, but `-V` is a
+  certificate validity-interval option rather than a version flag. The Ubuntu
+  run therefore recorded the usage error `option requires an argument -- V`
+  instead of an OpenSSH version. This issue does not change
+  `validation/lib/common.sh`; the host's OpenSSH 9.6p1 version was established
+  separately and is not claimed as the manifest-recorded value.
 - Debian stable, non-`x86_64` architectures, WSL, and container execution are
   all unvalidated. Under a container the volume-level and privilege observations
   in particular would differ, and `systemd-detect-virt` reporting would change.
