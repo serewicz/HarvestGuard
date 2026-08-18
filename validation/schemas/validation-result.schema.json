@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://harvestguard.dev/schemas/validation-result-1.0.json",
+  "title": "HarvestGuard validation result (HG-045)",
+  "description": "The stage 8 comparison report. Written only after the operator reviewed the raw stage 7 output and explicitly continued. It never modifies the frozen manifest, and it never labels a blind-file observation correct or incorrect.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "run_id",
+    "scan_root",
+    "scan_invocations",
+    "counts",
+    "discrepancy_count",
+    "results",
+    "caveat"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "run_id": { "type": ["string", "null"] },
+    "harness_version": { "type": ["string", "null"] },
+    "harvestguard_version": { "type": ["string", "null"] },
+    "scan_root": { "type": ["string", "null"] },
+    "scan_commands": { "type": "array", "items": { "type": "string" } },
+    "scan_invocations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["mode", "argv", "exit_status"],
+        "additionalProperties": false,
+        "properties": {
+          "mode": { "enum": ["console", "json", "markdown"] },
+          "argv": { "type": "string" },
+          "exit_status": { "type": "integer" }
+        }
+      }
+    },
+    "manifest_path": { "type": "string" },
+    "findings_path": { "type": "string" },
+    "operator_reviewed_raw_results": {
+      "type": "boolean",
+      "description": "False for a --non-interactive run, so such a report can never be mistaken for an operator-reviewed one."
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": { "type": "integer" }
+    },
+    "discrepancy_count": {
+      "type": "integer",
+      "description": "Entries needing operator attention. Scanner errors the manifest declared in advance are excluded."
+    },
+    "results": { "type": "array", "items": { "$ref": "#/$defs/result" } },
+    "caveat": { "type": "string" }
+  },
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["category", "validation_class"],
+      "additionalProperties": true,
+      "properties": {
+        "category": {
+          "enum": [
+            "expected_finding_observed",
+            "expected_finding_missing",
+            "unexpected_finding",
+            "expected_negative_remained_negative",
+            "false_positive",
+            "duplicate_finding",
+            "scanner_error",
+            "coverage_limitation",
+            "accounting_mismatch",
+            "output_privacy_violation",
+            "blind_file_observation",
+            "skipped_generator",
+            "unsupported_generator"
+          ]
+        },
+        "validation_class": {
+          "enum": [
+            "generated_validation",
+            "operator_declared_validation",
+            "blind_observation",
+            "skipped_generator",
+            "unsupported_generator"
+          ]
+        },
+        "artifact_id": { "type": ["string", "null"] },
+        "relative_path": { "type": ["string", "null"] },
+        "source_category": { "type": ["string", "null"] },
+        "negative_control": { "type": "boolean" },
+        "match_mode": { "enum": ["rule_id", "asset_type", "none"] },
+        "expected_rule_id": { "type": ["string", "null"] },
+        "expected_asset_type": { "type": ["string", "null"] },
+        "expected_finding_count": { "type": "integer" },
+        "observed_finding_count": { "type": "integer" },
+        "observed_findings": { "type": "array", "items": { "type": "string" } },
+        "declared_in_manifest": { "type": "boolean" },
+        "detail": { "type": "string" }
+      }
+    }
+  }
+}
