@@ -91,6 +91,10 @@ architectures, and WSL remain unvalidated, as does bare-metal or VM execution of
 the RHEL family. Each validated configuration and its limitations are in the
 per-family note.
 
+For a short, non-specialist account of what this completed validation work does
+and does not demonstrate, read
+[`reports/executive-validation-summary.md`](reports/executive-validation-summary.md).
+
 Sanitized run reports live in [`reports/`](reports/), and sanitized gate
 transcripts in [`transcripts/`](transcripts/). Archiving a run's frozen manifest
 and result files is separate and described in
