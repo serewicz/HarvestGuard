@@ -1,6 +1,10 @@
 # Example interactive gate transcript
 
-This abbreviated transcript demonstrates control flow only.
+This abbreviated transcript demonstrates control flow only. It is **illustrative,
+not run evidence**: it was hand-trimmed to show how a gate accepts input, it
+records no observed result, and no host produced it. Verbatim output from real
+runs is in [`../transcripts/`](../transcripts/), indexed with the reports in
+[`README.md`](README.md).
 
 ```text
 GATE 1 of 8 — Environment inspection

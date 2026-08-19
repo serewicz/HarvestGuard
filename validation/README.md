@@ -97,6 +97,16 @@ and result files is separate and described in
 [`manifests/README.md`](manifests/README.md) — never archive corpus or scratch
 material.
 
+## See what a run produces first
+
+[`examples/README.md`](examples/README.md) indexes the committed run evidence and
+is the place to start if you want to know what the harness produces before
+running it. It says which artifacts are authoritative run evidence and which are
+illustrative only, where to find each element of a run — environment, command,
+generators run and skipped, invocation exit statuses, comparison summary,
+discrepancies, limitations — how the halted and completed AlmaLinux runs relate,
+and what these runs do and do not prove.
+
 ## Self-tests
 
 Shell-based harness self-tests are intentionally outside default pytest and CI:
