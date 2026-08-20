@@ -1,0 +1,97 @@
+name: Install problem (pilot feedback)
+description: Report a problem installing HarvestGuard or getting the CLI to run.
+title: "[Install] "
+labels: ["pilot-feedback", "install"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying HarvestGuard. Fill in what you know and leave the rest blank — a partial report is still useful.
+
+        **Sanitize anything you paste.** Never paste or upload real secrets, private keys or other reconstructable key material, production certificates, proprietary source trees, confidential scan output, passphrases, plaintext sensitive data, decrypted material, raw secret values, credentials or tokens, or sensitive internal hostnames or paths. Redact them, or leave the field empty — an omitted log is better than a leaked one.
+
+        Reproduce against the synthetic `demo/sample_target/` corpus where you can; its output is safe to share.
+
+        **If this may be a security vulnerability, do not describe it here.** Use the private process in [SECURITY.md](https://github.com/serewicz/HarvestGuard/blob/main/SECURITY.md) instead of a public issue.
+
+        HarvestGuard is pre-1.0 and offered as-is. [SUPPORT.md](https://github.com/serewicz/HarvestGuard/blob/main/SUPPORT.md) describes what support exists.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: "Ubuntu 24.04, Fedora 42, macOS 15.3"
+    validations:
+      required: false
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      description: Output of `python3 --version`.
+      placeholder: "3.12.3"
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: HarvestGuard version
+      description: Output of `harvestguard --version`, if the install got that far. Leave blank if it did not.
+    validations:
+      required: false
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - pipx
+        - Virtual environment
+        - PyPI
+        - Local checkout
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: command
+    attributes:
+      label: Install command
+      description: The exact command you ran.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: known_symptoms
+    attributes:
+      label: Did either of these happen?
+      options:
+        - label: "`error: externally-managed-environment`"
+          required: false
+        - label: "`harvestguard` was not found on `PATH` after a pipx install"
+          required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected the install to do.
+    validations:
+      required: false
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Terminal output
+      description: Sanitized output only, and only if it is safe to share. Skip this field if you are unsure.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: sanitized
+    attributes:
+      label: Sanitization check
+      options:
+        - label: What I pasted above contains no secrets, key material, credentials, confidential output, or sensitive internal hostnames or paths.
+          required: true

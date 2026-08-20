@@ -1,0 +1,133 @@
+name: Validation harness feedback (pilot feedback)
+description: Report a problem or an observation from running the gated validation harness.
+title: "[Validation] "
+labels: ["pilot-feedback", "validation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for running the validation harness. Fill in what you know and leave the rest blank — a partial report is still useful, including a report that everything worked.
+
+        **Sanitize anything you paste.** Never paste or upload real secrets, private keys or other reconstructable key material, production certificates, proprietary source trees, confidential scan output, passphrases, plaintext sensitive data, decrypted material, raw secret values, credentials or tokens, or sensitive internal hostnames or paths. Redact them, or leave the field empty — an omitted log is better than a leaked one.
+
+        The harness generates its own synthetic corpus; reproduce there rather than against real material, and use the synthetic `demo/sample_target/` corpus for CLI comparisons where you can.
+
+        **If this may be a security vulnerability, do not describe it here.** Use the private process in [SECURITY.md](https://github.com/serewicz/HarvestGuard/blob/main/SECURITY.md) instead of a public issue.
+
+        HarvestGuard is pre-1.0 and offered as-is. [SUPPORT.md](https://github.com/serewicz/HarvestGuard/blob/main/SUPPORT.md) describes what support exists.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and version
+      placeholder: "AlmaLinux 9.8, Ubuntu 24.04"
+    validations:
+      required: false
+  - type: dropdown
+    id: environment_type
+    attributes:
+      label: Environment type
+      description: Answer only if it is safe to disclose.
+      options:
+        - VM
+        - Container
+        - Bare metal
+        - Cloud host
+        - Prefer not to say
+    validations:
+      required: false
+  - type: input
+    id: architecture
+    attributes:
+      label: Architecture
+      placeholder: "x86_64, aarch64"
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: HarvestGuard version or checkout commit
+      description: Output of `harvestguard --version`, or the commit you ran from.
+    validations:
+      required: false
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact harness command and flags.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: stage_reached
+    attributes:
+      label: Validation stage reached
+      options:
+        - Stage 1 — Environment inspection
+        - Stage 2 — Validation plan
+        - Stage 3 — Generate real artifacts
+        - Stage 4 — Human inspection
+        - Stage 5 — Add independent operator files
+        - Stage 6 — Freeze corpus and expectations
+        - Stage 7 — Run and review raw results
+        - Stage 8 — Compare, report, and cleanup
+        - Did not reach a stage
+    validations:
+      required: false
+  - type: textarea
+    id: skipped_generators
+    attributes:
+      label: Skipped generators
+      description: Any generator the harness reported as skipped, and the reason it gave.
+    validations:
+      required: false
+  - type: dropdown
+    id: age_tool
+    attributes:
+      label: Was `age` installed?
+      options:
+        - Installed
+        - Skipped — not installed
+        - Not sure
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: What does the problem concern?
+      options:
+        - Stage 7
+        - summarize
+        - compare
+        - cleanup
+        - Another stage
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected the harness to do.
+    validations:
+      required: false
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Sanitized output only, and only if it is safe to share. Skip this field if you are unsure.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: sanitized
+    attributes:
+      label: Sanitization check
+      options:
+        - label: What I pasted above contains no secrets, key material, credentials, confidential output, or sensitive internal hostnames or paths.
+          required: true

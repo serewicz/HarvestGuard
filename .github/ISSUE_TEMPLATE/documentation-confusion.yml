@@ -1,0 +1,59 @@
+name: Documentation confusion (pilot feedback)
+description: Tell us where the documentation was unclear, missing, or misleading.
+title: "[Docs] "
+labels: ["pilot-feedback", "documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reading closely. "I could not tell what this meant" is a complete report on its own — fill in what you know and leave the rest blank.
+
+        **Sanitize anything you paste.** Never paste or upload real secrets, private keys or other reconstructable key material, production certificates, proprietary source trees, confidential scan output, passphrases, plaintext sensitive data, decrypted material, raw secret values, credentials or tokens, or sensitive internal hostnames or paths. Redact them, or leave the field empty.
+
+        Use the synthetic `demo/sample_target/` corpus in any example you include; its output is safe to share.
+
+        **If this may be a security vulnerability, do not describe it here.** Use the private process in [SECURITY.md](https://github.com/serewicz/HarvestGuard/blob/main/SECURITY.md) instead of a public issue.
+
+        HarvestGuard is pre-1.0 and offered as-is. [SUPPORT.md](https://github.com/serewicz/HarvestGuard/blob/main/SUPPORT.md) describes what support exists.
+  - type: input
+    id: page
+    attributes:
+      label: Page or section
+      description: The file, page, or heading you were reading.
+      placeholder: "README.md — Quickstart"
+    validations:
+      required: false
+  - type: textarea
+    id: confusing
+    attributes:
+      label: What was confusing?
+      description: Quote or describe the part that did not land.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to find?
+    validations:
+      required: false
+  - type: textarea
+    id: task
+    attributes:
+      label: What were you trying to do?
+      description: The command or workflow you were trying to complete, with real paths replaced by placeholders.
+    validations:
+      required: false
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested wording
+      description: Optional. A sentence that would have worked better for you.
+    validations:
+      required: false
+  - type: checkboxes
+    id: sanitized
+    attributes:
+      label: Sanitization check
+      options:
+        - label: What I pasted above contains no secrets, key material, credentials, confidential output, or sensitive internal hostnames or paths.
+          required: true
