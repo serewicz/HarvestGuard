@@ -7,6 +7,7 @@ SELFTEST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$SELFTEST_ROOT/lib/common.sh"
 
 SELFTEST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/hg-validation-selftest.XXXXXX")"
+SELFTEST_TMP="$(cd "$SELFTEST_TMP" && pwd -P)"
 trap 'rm -rf -- "$SELFTEST_TMP"' EXIT
 
 pass() { printf 'ok - %s\n' "$1"; }
