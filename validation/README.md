@@ -84,7 +84,10 @@ path was exercised by a genuinely missing tool:
   `rhel`. See [`environments/rhel.md`](environments/rhel.md) and
   [`reports/2026-08-18-almalinux-9.8-phase1.md`](reports/2026-08-18-almalinux-9.8-phase1.md).
   That run also recorded a blocking harness defect: with pandas 3.x resolved,
-  stage 7 aborts before its gate. The complete run pinned pandas below 3.0.
+  stage 7 aborted before its gate, so the complete run pinned pandas below 3.0.
+  The harness has since been fixed — missing rule IDs normalize to `(none)`
+  whatever their shape, and a summarize failure is recorded rather than
+  aborting the run — so pinning pandas is no longer operator preparation.
 
 RHEL itself, Rocky Linux, CentOS Stream, Debian stable, non-`x86_64`
 architectures, and WSL remain unvalidated, as does bare-metal or VM execution of
@@ -120,5 +123,12 @@ Shell-based harness self-tests are intentionally outside default pytest and CI:
 ```
 
 They cover gates, abort preservation, workspace containment, redaction,
-manifest immutability, comparison immutability, blind observations, cleanup
-confirmation, and the bounded dry-run.
+manifest immutability, comparison immutability, blind observations, missing
+rule-ID normalization in the stage 7 summary, durable recording of a harness
+stage failure, cleanup confirmation, and the bounded dry-run.
+
+One self-test drives the whole eight-gate harness with a stub HarvestGuard CLI
+and an injected stage 7 summarize failure, so it generates real artifacts in its
+own temporary workspace and removes them afterwards. The stub scans nothing and
+establishes no format support; it exists only so the harness has raw outputs to
+preserve while the summarize failure is recorded and reviewed.
