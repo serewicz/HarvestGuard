@@ -96,13 +96,18 @@ remain blind observations. Missing optional tools skip only their generator.
 
 ## Known limitations
 
-- **A fresh install resolving pandas 3.x cannot finish stage 7.** With
-  pandas 3.0.5, `harvestguard scan --json` writes float `NaN` for findings with
-  no rule ID; `harness_tool.py summarize` treats NaN as a present value and dies
-  sorting mixed `str` and `float` keys, which under `set -e` aborts the whole
-  run mid-stage-7. The validated run above pinned pandas below 3.0 as operator
-  preparation. Both the halted and the complete run are documented in the
-  report.
+- **A fresh install resolving pandas 3.x could not finish stage 7 at the time
+  of this run.** With pandas 3.0.5, `harvestguard scan --json` writes float
+  `NaN` for findings with no rule ID; `harness_tool.py summarize` treated NaN as
+  a present value and died sorting mixed `str` and `float` keys, which under
+  `set -e` aborted the whole run mid-stage-7. The validated run above pinned
+  pandas below 3.0 as operator preparation. Both the halted and the complete run
+  are documented in the report. The harness has since been fixed: missing rule
+  IDs normalize to `(none)` whether they arrive as `None`, `NaN`, an empty
+  string, or an absent key, and a summarize failure is now recorded in
+  `results/harness-stage-failures.tsv` and carried into the comparison instead
+  of aborting before the stage 7 review gate. Pinning pandas is no longer
+  required; this environment note still records what the original run observed.
 - The harness probes `ssh-keygen` with `ssh-keygen -V`, but `-V` is a
   certificate validity-interval option rather than a version flag, so the
   recorded value is the usage error `option requires an argument -- V` instead

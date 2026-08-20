@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import sys
 from collections import Counter
@@ -31,6 +32,17 @@ from typing import Any
 
 MANIFEST_SCHEMA_VERSION = "1.0"
 RESULT_SCHEMA_VERSION = "1.0"
+
+# Stable textual stand-in for an optional finding field the scanner did not
+# populate. A missing value reaches this module in more than one shape: JSON
+# `null` (`None`), an empty string, an absent key, or -- when the producing
+# side round-tripped through a pandas DataFrame -- float `NaN`. pandas 3.x
+# surfaces a missing rule ID as `NaN` where pandas 2.x surfaced `None`, and a
+# bare `NaN` is both truthy (so `value or "(none)"` keeps it) and unorderable
+# against `str` (so sorting the summary keys raises `TypeError`). Every read of
+# an optional finding field therefore goes through `_finding_text` or
+# `_finding_value`, which makes the harness behave identically on both.
+MISSING_VALUE_LABEL = "(none)"
 
 # Findings that record a scan-scope boundary rather than a cryptographic
 # observation. They are reported as coverage limitations, never as unexpected
@@ -88,8 +100,63 @@ def _read_text(path: Path | None) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _is_coverage_rule(rule_id: str) -> bool:
-    return rule_id in COVERAGE_RULE_IDS or rule_id.startswith("volume_status:")
+def _read_stage_failures(path: Path | None) -> list[dict[str, str]]:
+    """Harness-stage failures the harness recorded durably before comparison.
+
+    ``run-validation.sh`` appends one tab-separated row -- stage, step, exit
+    status, detail -- whenever a harness-side step (summarization, report
+    generation) fails after HarvestGuard itself already ran. These are kept
+    strictly apart from scanner results: a harness failure is never reported as
+    a scanner error, and it never overwrites the recorded invocation statuses.
+    """
+    entries: list[dict[str, str]] = []
+    for line in _read_text(path).splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        entries.append(
+            {
+                "stage": parts[0],
+                "step": parts[1] if len(parts) > 1 else "",
+                "exit_status": parts[2] if len(parts) > 2 else "",
+                "detail": parts[3] if len(parts) > 3 else "",
+            }
+        )
+    return entries
+
+
+def _is_missing(value: Any) -> bool:
+    """Whether an optional finding field carries no value.
+
+    `None`, float `NaN`, and blank strings all mean "the scanner did not set
+    this", regardless of which pandas major version produced the JSON.
+    """
+    if value is None:
+        return True
+    if isinstance(value, float):
+        return math.isnan(value)
+    if isinstance(value, str):
+        return not value.strip()
+    return False
+
+
+def _finding_value(finding: dict[str, Any], key: str) -> str:
+    """An optional finding field as a string, with missing collapsed to ``""``."""
+    value = finding.get(key)
+    return "" if _is_missing(value) else str(value)
+
+
+def _finding_text(finding: dict[str, Any], key: str) -> str:
+    """An optional finding field as a display/grouping key.
+
+    Never returns a non-string, so summary keys are always mutually orderable.
+    """
+    return _finding_value(finding, key) or MISSING_VALUE_LABEL
+
+
+def _is_coverage_rule(rule_id: Any) -> bool:
+    value = "" if _is_missing(rule_id) else str(rule_id)
+    return value in COVERAGE_RULE_IDS or value.startswith("volume_status:")
 
 
 # ------------------------------------------------------------ stage 6/6 ----
@@ -206,10 +273,12 @@ def freeze(args: argparse.Namespace) -> int:
 
 def summarize(args: argparse.Namespace) -> int:
     findings = json.loads(_read_text(Path(args.findings)) or "[]")
+    if not isinstance(findings, list) or not all(isinstance(f, dict) for f in findings):
+        raise SystemExit(f"{args.findings}: expected a JSON array of finding objects")
     print(f"Findings in {args.findings}: {len(findings)}")
 
-    by_rule = Counter(finding.get("rule_id") or "(none)" for finding in findings)
-    by_asset = Counter(finding.get("asset_type") or "(none)" for finding in findings)
+    by_rule = Counter(_finding_text(finding, "rule_id") for finding in findings)
+    by_asset = Counter(_finding_text(finding, "asset_type") for finding in findings)
 
     print("\nRule IDs observed:")
     for rule_id, count in sorted(by_rule.items()):
@@ -222,16 +291,19 @@ def summarize(args: argparse.Namespace) -> int:
     errored = [f for f in findings if f.get("errors")]
     print(f"\nFindings carrying scanner errors: {len(errored)}")
     for finding in errored:
-        print(f"  {finding.get('location')}: {'; '.join(str(e) for e in finding['errors'])}")
+        location = _finding_text(finding, "location")
+        print(f"  {location}: {'; '.join(str(e) for e in finding['errors'])}")
 
-    limited = [f for f in findings if _is_coverage_rule(f.get("rule_id") or "")]
+    limited = [f for f in findings if _is_coverage_rule(f.get("rule_id"))]
     print(f"\nFindings recording a coverage limitation: {len(limited)}")
     for finding in limited:
-        print(f"  {finding.get('rule_id')}: {finding.get('location')}")
+        print(f"  {_finding_text(finding, 'rule_id')}: {_finding_text(finding, 'location')}")
 
     duplicates = [
         finding_id
-        for finding_id, count in Counter(f.get("finding_id") for f in findings).items()
+        for finding_id, count in Counter(
+            _finding_text(f, "finding_id") for f in findings
+        ).items()
         if count > 1
     ]
     print(f"\nRepeated finding IDs: {len(duplicates)}")
@@ -245,7 +317,7 @@ def summarize(args: argparse.Namespace) -> int:
 def _findings_for(location: str, findings: list[dict[str, Any]], is_directory: bool) -> list[dict]:
     matched = []
     for finding in findings:
-        observed = finding.get("location") or ""
+        observed = _finding_value(finding, "location")
         if observed == location or observed.startswith(location + "#"):
             matched.append(finding)
         elif is_directory and observed.startswith(location + os.sep):
@@ -272,10 +344,10 @@ def _finding_label(finding: dict[str, Any]) -> str:
     finding without a rule ID is identified by its asset type instead -- which
     is the observable the CLI documents for those families.
     """
-    rule_id = finding.get("rule_id")
+    rule_id = _finding_value(finding, "rule_id")
     if rule_id:
-        return str(rule_id)
-    return f"asset_type={finding.get('asset_type') or '(none)'}"
+        return rule_id
+    return f"asset_type={_finding_text(finding, 'asset_type')}"
 
 
 def _match_mode(artifact: dict[str, Any]) -> str:
@@ -289,9 +361,9 @@ def _match_mode(artifact: dict[str, Any]) -> str:
 def _matches_expectation(finding: dict[str, Any], artifact: dict[str, Any]) -> bool:
     mode = _match_mode(artifact)
     if mode == "rule_id":
-        return (finding.get("rule_id") or "") == artifact["expected_rule_id"]
+        return _finding_value(finding, "rule_id") == artifact["expected_rule_id"]
     if mode == "asset_type":
-        return (finding.get("asset_type") or "") == artifact["expected_asset_type"]
+        return _finding_value(finding, "asset_type") == artifact["expected_asset_type"]
     return False
 
 
@@ -301,8 +373,8 @@ def _forbidden_hits(matched: list[dict[str, Any]], artifact: dict[str, Any]) -> 
     return [
         finding
         for finding in matched
-        if (finding.get("rule_id") or "") in forbidden_rules
-        or (finding.get("asset_type") or "") in forbidden_assets
+        if _finding_value(finding, "rule_id") in forbidden_rules
+        or _finding_value(finding, "asset_type") in forbidden_assets
     ]
 
 
@@ -427,10 +499,10 @@ def _evaluate_artifact(
             _finding_label(f)
             for f in matched
             if not _matches_expectation(f, artifact)
-            and not _is_coverage_rule(f.get("rule_id") or "")
+            and not _is_coverage_rule(f.get("rule_id"))
             and id(f) not in forbidden_ids
             and _finding_label(f) not in acknowledged
-            and (f.get("asset_type") or "") not in acknowledged
+            and _finding_value(f, "asset_type") not in acknowledged
         }
     )
     if others:
@@ -473,6 +545,10 @@ def compare(args: argparse.Namespace) -> int:
     manifest = json.loads(_read_text(Path(args.manifest)))
     findings = json.loads(_read_text(Path(args.findings)) or "[]")
     scan_root = Path(manifest["scan_root"])
+    stage_failures_path = getattr(args, "stage_failures", "")
+    stage_failures = _read_stage_failures(
+        Path(stage_failures_path) if stage_failures_path else None
+    )
 
     results: list[dict[str, Any]] = []
     for artifact in manifest.get("artifacts", []):
@@ -506,7 +582,9 @@ def compare(args: argparse.Namespace) -> int:
 
     duplicate_ids = [
         finding_id
-        for finding_id, count in Counter(f.get("finding_id") for f in findings).items()
+        for finding_id, count in Counter(
+            _finding_text(f, "finding_id") for f in findings
+        ).items()
         if count > 1
     ]
     for finding_id in duplicate_ids:
@@ -533,7 +611,7 @@ def compare(args: argparse.Namespace) -> int:
 
     for finding in findings:
         if finding.get("errors"):
-            location = finding.get("location") or ""
+            location = _finding_value(finding, "location")
             declared = any(
                 location == declared or location.startswith(declared + "#")
                 for declared in declared_error_locations
@@ -551,14 +629,15 @@ def compare(args: argparse.Namespace) -> int:
                     ),
                 }
             )
-        if _is_coverage_rule(finding.get("rule_id") or ""):
+        if _is_coverage_rule(finding.get("rule_id")):
+            rule_id = _finding_text(finding, "rule_id")
             results.append(
                 {
                     "category": "coverage_limitation",
                     "validation_class": "generated_validation",
                     "artifact_id": None,
-                    "relative_path": finding.get("location"),
-                    "detail": f"rule {finding.get('rule_id')} recorded a scope boundary.",
+                    "relative_path": _finding_value(finding, "location") or None,
+                    "detail": f"rule {rule_id} recorded a scope boundary.",
                 }
             )
 
@@ -617,6 +696,30 @@ def compare(args: argparse.Namespace) -> int:
         if entry["category"] in DISCREPANCY_CATEGORIES and not entry.get("declared_in_manifest")
     )
 
+    # A harness-side failure is not a scanner result, so it is counted and
+    # surfaced without being written into `results` as if HarvestGuard had
+    # produced it. It still raises the discrepancy count: a run whose
+    # summarization never completed must not read as a clean comparison.
+    if stage_failures:
+        counts["harness_stage_failure"] = len(stage_failures)
+        discrepancies += len(stage_failures)
+
+    caveat = (
+        "Dry-run only: no cryptographic validation, scanner validation, or format "
+        "support was exercised or established."
+        if args.dry_run
+        else "A passing generated fixture does not establish support for every valid "
+        "form of a format. This harness validates the artifacts it actually generated "
+        "on this host, nothing more."
+    )
+    if stage_failures:
+        caveat = (
+            f"{len(stage_failures)} harness stage(s) failed before this comparison "
+            f"(durable record: {stage_failures_path}). The HarvestGuard invocation "
+            "statuses in this report are unaffected, but this run must not be read as "
+            "a successful validation. " + caveat
+        )
+
     report = {
         "schema_version": RESULT_SCHEMA_VERSION,
         "run_id": manifest.get("run_id"),
@@ -631,24 +734,24 @@ def compare(args: argparse.Namespace) -> int:
         "counts": dict(sorted(counts.items())),
         "discrepancy_count": discrepancies,
         "results": results,
-        "caveat": (
-            "Dry-run only: no cryptographic validation, scanner validation, or format "
-            "support was exercised or established."
-            if args.dry_run
-            else "A passing generated fixture does not establish support for every valid "
-            "form of a format. This harness validates the artifacts it actually generated "
-            "on this host, nothing more."
-        ),
+        "caveat": caveat,
     }
 
     Path(args.out_json).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    Path(args.out_markdown).write_text(_markdown_report(report), encoding="utf-8")
+    Path(args.out_markdown).write_text(
+        _markdown_report(report, stage_failures), encoding="utf-8"
+    )
 
     print(f"Comparison report written: {args.out_json}")
     print(f"Human-readable report:     {args.out_markdown}")
     print("\nResult counts:")
     for category, count in sorted(counts.items()):
         print(f"  {count:4d}  {category}")
+    for failure in stage_failures:
+        print(
+            f"\nHarness stage {failure['stage']} step '{failure['step']}' failed "
+            f"(exit status {failure['exit_status']}): {failure['detail']}"
+        )
     print(f"\nEntries needing operator attention: {discrepancies}")
     return 1 if discrepancies else 0
 
@@ -662,7 +765,9 @@ _CLASS_TITLES = {
 }
 
 
-def _markdown_report(report: dict[str, Any]) -> str:
+def _markdown_report(
+    report: dict[str, Any], stage_failures: list[dict[str, str]] | None = None
+) -> str:
     lines = [
         "# HarvestGuard real-world validation report",
         "",
@@ -691,6 +796,28 @@ def _markdown_report(report: dict[str, Any]) -> str:
     lines += ["", "## Result counts", "", "| Category | Count |", "| --- | --- |"]
     for category, count in report["counts"].items():
         lines.append(f"| {category} | {count} |")
+
+    if stage_failures:
+        lines += [
+            "",
+            "## Harness stage failures",
+            "",
+            "These are failures of the harness itself, not of HarvestGuard. The scan",
+            "invocations above still ran, and their exit statuses and raw outputs are",
+            "unchanged by the failure recorded here.",
+            "",
+            "| Stage | Step | Exit status | Detail |",
+            "| --- | --- | ---: | --- |",
+        ]
+        for failure in stage_failures:
+            lines.append(
+                "| {} | {} | {} | {} |".format(
+                    failure["stage"],
+                    failure["step"],
+                    failure["exit_status"],
+                    failure["detail"].replace("|", "\\|"),
+                )
+            )
 
     for class_key, title in _CLASS_TITLES.items():
         entries = [r for r in report["results"] if r.get("validation_class") == class_key]
@@ -756,6 +883,11 @@ def build_parser() -> argparse.ArgumentParser:
     compare_parser.add_argument("--console-exit-code", type=int, default=0)
     compare_parser.add_argument("--json-exit-code", type=int, default=0)
     compare_parser.add_argument("--markdown-exit-code", type=int, default=None)
+    compare_parser.add_argument(
+        "--stage-failures",
+        default="",
+        help="TSV of harness-stage failures recorded before comparison",
+    )
     compare_parser.add_argument("--non-interactive", action="store_true")
     compare_parser.add_argument("--dry-run", action="store_true")
     compare_parser.add_argument("--out-json", required=True)

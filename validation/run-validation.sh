@@ -493,6 +493,18 @@ HG_CONSOLE_OUT="$HG_RESULTS/console.txt"
 HG_FINDINGS_JSON="$HG_RESULTS/findings.json"
 HG_MARKDOWN_OUT="$HG_RESULTS/report.md"
 HG_INVOCATIONS="$HG_RESULTS/scan-invocations.tsv"
+HG_SUMMARY_OUT="$HG_RESULTS/summary.txt"
+HG_STAGE_FAILURES="$HG_RESULTS/harness-stage-failures.tsv"
+: > "$HG_STAGE_FAILURES"
+
+# Durable record of a harness-side failure -- summarization or report
+# generation -- that happens after HarvestGuard itself already ran. It is kept
+# separate from $HG_INVOCATIONS on purpose: a harness failure must never be
+# recorded as a scanner result, and must never hide the fact that the scan ran
+# and its raw outputs are on disk.
+hg_record_stage_failure() {
+    printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" >> "$HG_STAGE_FAILURES"
+}
 
 HG_SCAN_BASE=("${HG_HARVESTGUARD_ARGV[@]}" scan "$HG_CORPUS" --type crypto --max-depth "$HG_SCAN_MAX_DEPTH")
 HG_CMD_CONSOLE="${HG_SCAN_BASE[*]}"
@@ -578,18 +590,39 @@ cat "$HG_CONSOLE_OUT"
 hg_say "----- end console output -----"
 hg_say ""
 
+# Summarization is a harness convenience for the operator's review, not part
+# of the scan. If it fails, the scan outputs above are already durable, so the
+# failure is recorded and the operator still reaches the stage 7 gate with the
+# raw results in hand instead of the run aborting before any review window.
+summarize_status=0
 if [ -s "$HG_FINDINGS_JSON" ]; then
-    python3 "$HG_ROOT/harness_tool.py" summarize --findings "$HG_FINDINGS_JSON"
+    python3 "$HG_ROOT/harness_tool.py" summarize --findings "$HG_FINDINGS_JSON" \
+        > "$HG_SUMMARY_OUT" 2> "$HG_RESULTS/summarize.stderr.txt" || summarize_status=$?
+    cat "$HG_SUMMARY_OUT"
+    if [ "$summarize_status" -ne 0 ]; then
+        cat "$HG_RESULTS/summarize.stderr.txt" >&2
+        hg_warn "summarizing the raw findings failed with exit status $summarize_status"
+        hg_warn "HarvestGuard already ran; exit statuses are recorded in $HG_INVOCATIONS"
+        hg_warn "raw outputs are untouched and still available for review"
+        hg_record_stage_failure 7 summarize "$summarize_status" \
+            "harness_tool.py summarize failed; raw scan outputs are intact and unmodified"
+    fi
 else
     hg_warn "no JSON findings file was produced"
 fi
 
 hg_gate_reset
 hg_gate_what "Ran HarvestGuard against the frozen corpus and captured every requested output mode."
-hg_gate_what "Reported raw counts, rule IDs, asset types, scanner errors, and coverage limitations."
+if [ "$summarize_status" -eq 0 ]; then
+    hg_gate_what "Reported raw counts, rule IDs, asset types, scanner errors, and coverage limitations."
+else
+    hg_gate_what "Summarizing the raw findings FAILED (exit status $summarize_status); the scan itself ran and its raw outputs below are complete."
+fi
 hg_gate_what "No expectation has been compared yet, and no result has been collapsed into pass/fail."
 hg_gate_path "console: $HG_CONSOLE_OUT"
 hg_gate_path "JSON findings: $HG_FINDINGS_JSON"
+[ -f "$HG_SUMMARY_OUT" ] && hg_gate_path "raw summary: $HG_SUMMARY_OUT"
+[ -s "$HG_STAGE_FAILURES" ] && hg_gate_path "durable harness stage failures: $HG_STAGE_FAILURES"
 [ "$HG_CAPTURE_MARKDOWN" = "1" ] && hg_gate_path "Markdown: $HG_MARKDOWN_OUT"
 hg_gate_path "stderr captures: $HG_RESULTS/*.stderr.txt"
 hg_gate_path "durable redacted argv and exit statuses: $HG_INVOCATIONS"
@@ -613,6 +646,10 @@ hg_gate_path "raw console output: $HG_CONSOLE_OUT"
 hg_gate_path "raw JSON findings: $HG_FINDINGS_JSON"
 [ "$HG_CAPTURE_MARKDOWN" = "1" ] && hg_gate_path "raw Markdown output: $HG_MARKDOWN_OUT"
 hg_gate_path "durable redacted argv and exit statuses: $HG_INVOCATIONS"
+if [ -s "$HG_STAGE_FAILURES" ]; then
+    hg_gate_what "A harness step failed after the scan; the comparison will report it and cannot read as a clean run."
+    hg_gate_path "durable harness stage failures: $HG_STAGE_FAILURES"
+fi
 hg_gate_command "(none — comparison waits for this gate)"
 hg_gate_next "Compare raw findings with frozen expectations, write reports, then request an explicit cleanup choice."
 hg_gate_inspect "Re-check '$HG_CONSOLE_OUT' and '$HG_FINDINGS_JSON' before authorizing comparison."
@@ -626,6 +663,7 @@ compare_args=(
     --console "$HG_CONSOLE_OUT"
     --console-exit-code "$console_status"
     --json-exit-code "$json_status"
+    --stage-failures "$HG_STAGE_FAILURES"
     --out-json "$HG_RESULTS/validation-report.json"
     --out-markdown "$HG_RESULTS/validation-report.md"
 )
@@ -643,6 +681,11 @@ hg_say ""
 hg_say "Reports:"
 hg_bullet "$HG_RESULTS/validation-report.json"
 hg_bullet "$HG_RESULTS/validation-report.md"
+
+if [ -s "$HG_STAGE_FAILURES" ]; then
+    hg_warn "a harness stage failed during this run; see $HG_STAGE_FAILURES"
+    hg_warn "the comparison counted it, so this run does not report a clean validation"
+fi
 
 hg_say ""
 hg_say "Cleanup. The workspace holds generated key material and disposable-passphrase"

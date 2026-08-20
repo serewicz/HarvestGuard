@@ -112,6 +112,119 @@ assert report["scan_invocations"] == [
 PY
 pass "comparison preserves manifest, separates outcomes, and records all exit statuses"
 
+# Stage 7 summarization must behave the same whichever way the findings file
+# spells "this finding has no rule ID". pandas 2.x writes JSON null; pandas 3.x
+# writes a bare NaN, which is truthy and unorderable against str -- that is what
+# aborted the AlmaLinux 9.8 run before its stage 7 review gate.
+summary_fixture="$SELFTEST_TMP/summarize"
+mkdir -p "$summary_fixture"
+cat > "$summary_fixture/null.json" <<'EOF'
+[
+  {"finding_id": "f1", "rule_id": null, "asset_type": "certificate", "location": "/corpus/a.pem"},
+  {"finding_id": "f2", "rule_id": "openssl_enc_header", "asset_type": "encrypted_blob",
+   "location": "/corpus/b.enc"}
+]
+EOF
+cat > "$summary_fixture/nan.json" <<'EOF'
+[
+  {"finding_id": "f1", "rule_id": NaN, "asset_type": "certificate", "location": "/corpus/a.pem"},
+  {"finding_id": "f2", "rule_id": "openssl_enc_header", "asset_type": NaN,
+   "location": "/corpus/b.enc"},
+  {"finding_id": "f3", "rule_id": "", "asset_type": "certificate", "location": "/corpus/c.pem"},
+  {"finding_id": "f4", "asset_type": "certificate", "location": "/corpus/d.pem"}
+]
+EOF
+for shape in null nan; do
+    set +e
+    summary_out="$(python3 "$SELFTEST_ROOT/harness_tool.py" summarize \
+        --findings "$summary_fixture/$shape.json" 2> "$summary_fixture/$shape.stderr")"
+    summary_status=$?
+    set -e
+    [ "$summary_status" -eq 0 ] ||
+        fail "summarize exited $summary_status for missing rule_id shape '$shape'"
+    grep -q 'TypeError' "$summary_fixture/$shape.stderr" &&
+        fail "summarize raised TypeError sorting mixed keys for shape '$shape'"
+    printf '%s\n' "$summary_out" | grep -q '(none)' ||
+        fail "missing rule_id lacked the stable label for shape '$shape'"
+    printf '%s\n' "$summary_out" | grep -q 'openssl_enc_header' ||
+        fail "present rule_id was lost for shape '$shape'"
+    printf '%s\n' "$summary_out" | grep -Eqi '[[:space:]]nan$' &&
+        fail "a raw NaN reached the summary output for shape '$shape'"
+done
+summary_out="$(python3 "$SELFTEST_ROOT/harness_tool.py" summarize \
+    --findings "$summary_fixture/nan.json")"
+printf '%s\n' "$summary_out" | grep -Eq '^[[:space:]]+3[[:space:]]+\(none\)$' ||
+    fail "NaN, empty-string, and absent rule IDs did not collapse into one label"
+printf '{"not": "an array of findings"}\n' > "$summary_fixture/malformed.json"
+set +e
+python3 "$SELFTEST_ROOT/harness_tool.py" summarize --findings "$summary_fixture/malformed.json" \
+    >/dev/null 2>&1
+malformed_status=$?
+set -e
+[ "$malformed_status" -ne 0 ] || fail "summarize accepted a findings file that is not an array"
+pass "summarize normalizes null, NaN, empty, and absent rule IDs without a mixed-type sort"
+
+# A harness-side failure after the scan must be recorded durably, must not be
+# reported as a scanner result, and must stop the comparison from reading as a
+# clean run.
+empty_failures="$fixture/results/no-harness-failures.tsv"
+: > "$empty_failures"
+python3 "$SELFTEST_ROOT/harness_tool.py" compare \
+    --manifest "$fixture/state/manifest.json" --findings "$fixture/results/findings.json" \
+    --console "$fixture/results/console.txt" --out-json "$fixture/results/clean-report.json" \
+    --out-markdown "$fixture/results/clean-report.md" --console-exit-code 0 \
+    --json-exit-code 0 --stage-failures "$empty_failures" --non-interactive >/dev/null
+stage_failures_tsv="$fixture/results/harness-stage-failures.tsv"
+printf '7\tsummarize\t1\tharness_tool.py summarize failed; raw scan outputs are intact\n' \
+    > "$stage_failures_tsv"
+set +e
+python3 "$SELFTEST_ROOT/harness_tool.py" compare \
+    --manifest "$fixture/state/manifest.json" --findings "$fixture/results/findings.json" \
+    --console "$fixture/results/console.txt" --out-json "$fixture/results/failed-report.json" \
+    --out-markdown "$fixture/results/failed-report.md" --console-exit-code 0 \
+    --json-exit-code 0 --stage-failures "$stage_failures_tsv" --non-interactive >/dev/null
+stage_failure_status=$?
+set -e
+[ "$stage_failure_status" -ne 0 ] ||
+    fail "comparison reported success despite a recorded harness stage failure"
+grep -q '## Harness stage failures' "$fixture/results/failed-report.md" ||
+    fail "harness stage failure absent from the human-readable report"
+python3 - "$fixture/results/clean-report.json" "$fixture/results/failed-report.json" <<'PY'
+import json
+import pathlib
+import sys
+
+clean = json.loads(pathlib.Path(sys.argv[1]).read_text())
+failed = json.loads(pathlib.Path(sys.argv[2]).read_text())
+
+assert "harness_stage_failure" not in clean["counts"], clean["counts"]
+assert clean["discrepancy_count"] == 0, clean["discrepancy_count"]
+
+assert failed["counts"]["harness_stage_failure"] == 1, failed["counts"]
+assert failed["discrepancy_count"] == 1, failed["discrepancy_count"]
+assert "durable record" in failed["caveat"]
+# The harness failure is never laundered into a scanner result...
+assert all(item["category"] != "scanner_error" for item in failed["results"])
+# ...and it never hides the fact that the scan invocations already ran.
+assert [item["mode"] for item in failed["scan_invocations"]] == ["console", "json"]
+PY
+pass "a harness stage failure is counted, reported, and never becomes a scanner result"
+
+harness="$SELFTEST_ROOT/run-validation.sh"
+grep -q 'harness-stage-failures.tsv' "$harness" ||
+    fail "no durable harness-stage-failure record in the harness"
+grep -q '|| summarize_status=\$?' "$harness" ||
+    fail "stage 7 summarize failure still aborts the run"
+grep -q 'hg_record_stage_failure 7 summarize' "$harness" ||
+    fail "stage 7 does not record a summarize failure"
+grep -q -- '--stage-failures "\$HG_STAGE_FAILURES"' "$harness" ||
+    fail "stage 8 comparison is not told about recorded harness stage failures"
+record_line="$(grep -n 'hg_record_stage_failure 7 summarize' "$harness" | cut -d: -f1)"
+gate7_line="$(grep -n 'hg_gate 7 "' "$harness" | cut -d: -f1)"
+[ "$record_line" -lt "$gate7_line" ] ||
+    fail "summarize failure is recorded after the stage 7 review gate"
+pass "stage 7 records a summarize failure durably and still reaches the review gate"
+
 symlink_fixture="$SELFTEST_TMP/symlink-freeze"
 mkdir -p "$symlink_fixture/corpus/operator-supplied" "$symlink_fixture/state"
 printf 'DISTINCTIVE-NONSECRET-OUTSIDE-CONTENT\n' > "$symlink_fixture/outside.txt"
