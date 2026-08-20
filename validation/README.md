@@ -126,3 +126,9 @@ They cover gates, abort preservation, workspace containment, redaction,
 manifest immutability, comparison immutability, blind observations, missing
 rule-ID normalization in the stage 7 summary, durable recording of a harness
 stage failure, cleanup confirmation, and the bounded dry-run.
+
+One self-test drives the whole eight-gate harness with a stub HarvestGuard CLI
+and an injected stage 7 summarize failure, so it generates real artifacts in its
+own temporary workspace and removes them afterwards. The stub scans nothing and
+establishes no format support; it exists only so the harness has raw outputs to
+preserve while the summarize failure is recorded and reviewed.

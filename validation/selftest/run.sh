@@ -225,6 +225,148 @@ gate7_line="$(grep -n 'hg_gate 7 "' "$harness" | cut -d: -f1)"
     fail "summarize failure is recorded after the stage 7 review gate"
 pass "stage 7 records a summarize failure durably and still reaches the review gate"
 
+# The same failure path, driven through the real harness end to end. Two test
+# doubles make an unexpected stage 7 summarize failure reachable without an
+# installed product build and without reintroducing the pandas 3.x NaN bug:
+#
+#   - a stub `harvestguard` CLI, so the harness has a real executable to invoke
+#     and real raw outputs to preserve. It scans nothing and claims nothing.
+#   - a `python3` wrapper that fails only for the `harness_tool.py summarize`
+#     invocation and execs the real interpreter for freeze and compare.
+#
+# Everything between those two doubles is the production harness.
+stage7_bin="$SELFTEST_TMP/stage7-bin"
+mkdir -p "$stage7_bin"
+real_python3="$(command -v python3)"
+cat > "$stage7_bin/harvestguard" <<'STUB'
+#!/usr/bin/env bash
+# Test double for the installed HarvestGuard CLI. It performs no scan, reads no
+# corpus file, and makes no detection claim; it only produces the output shapes
+# stage 7 captures.
+set -euo pipefail
+if [ "${1:-}" = "--version" ]; then
+    printf 'harvestguard 0.0.0+validation-selftest-stub\n'
+    exit 0
+fi
+json_out=""
+markdown_out=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --json)
+            json_out="${2:?--json needs a path}"
+            shift 2
+            ;;
+        --markdown)
+            markdown_out="${2:?--markdown needs a path}"
+            shift 2
+            ;;
+        *) shift ;;
+    esac
+done
+printf 'selftest stub scan: 2 findings reported\n'
+if [ -n "$json_out" ]; then
+    cat > "$json_out" <<'JSON'
+[
+  {"finding_id": "selftest-stub-1", "rule_id": "openssl_enc_header",
+   "asset_type": "encrypted blob", "location": "/selftest/stub/a.enc"},
+  {"finding_id": "selftest-stub-2", "rule_id": null,
+   "asset_type": "certificate", "location": "/selftest/stub/b.pem"}
+]
+JSON
+fi
+if [ -n "$markdown_out" ]; then
+    printf '# selftest stub report\n' > "$markdown_out"
+fi
+STUB
+cat > "$stage7_bin/python3" <<STUB
+#!/usr/bin/env bash
+# Fails the stage 7 summarize step only; every other harness_tool invocation is
+# the real one.
+for arg in "\$@"; do
+    if [ "\$arg" = "summarize" ]; then
+        printf 'selftest fault injection: simulated unexpected summarize failure\n' >&2
+        exit 9
+    fi
+done
+exec "$real_python3" "\$@"
+STUB
+chmod +x "$stage7_bin/harvestguard" "$stage7_bin/python3"
+
+stage7_workspace="$SELFTEST_TMP/stage7-failure-run"
+stage7_launch=()
+# A wrong answer at a gate reprompts, so a bounded run fails loudly instead of
+# blocking forever if the scripted operator input ever drifts out of step.
+command -v timeout >/dev/null 2>&1 && stage7_launch=(timeout 900)
+set +e
+HG_GATE_STDIN_ONLY=1 PATH="$stage7_bin:$PATH" \
+    ${stage7_launch[@]+"${stage7_launch[@]}"} "$SELFTEST_ROOT/run-validation.sh" \
+    --workspace "$stage7_workspace" --harvestguard "$stage7_bin/harvestguard" \
+    > "$SELFTEST_TMP/stage7-run.out" 2> "$SELFTEST_TMP/stage7-run.err" <<'OPERATOR'
+continue
+
+validation selftest: injected stage 7 summarize failure
+continue
+continue
+continue
+
+continue
+continue
+continue
+continue
+keep
+OPERATOR
+stage7_run_status=$?
+set -e
+# Stage 6 makes the generated corpus read-only, so make it removable again for
+# this selftest's own temporary-directory cleanup.
+chmod -R u+w "$stage7_workspace" 2>/dev/null || true
+
+[ "$stage7_run_status" -ne 124 ] || fail "stage 7 failure run never finished; gate input drifted"
+[ "$stage7_run_status" -ne 0 ] ||
+    fail "a run whose summarization failed exited 0 as if it were a clean validation"
+grep -q 'GATE 7 of 8' "$SELFTEST_TMP/stage7-run.out" ||
+    fail "the run aborted before the stage 7 review gate"
+grep -q 'Summarizing the raw findings FAILED (exit status 9)' "$SELFTEST_TMP/stage7-run.out" ||
+    fail "the stage 7 gate did not disclose the summarize failure"
+grep -q 'STAGE 8 of 8' "$SELFTEST_TMP/stage7-run.out" ||
+    fail "the run did not continue past the stage 7 review gate"
+stage7_results="$stage7_workspace/results"
+grep -q "^7	summarize	9	" "$stage7_results/harness-stage-failures.tsv" ||
+    fail "no durable stage 7 summarize failure record was written"
+grep -q '^console	0	' "$stage7_results/scan-invocations.tsv" ||
+    fail "the console invocation status was lost by the summarize failure"
+grep -q '^json	0	' "$stage7_results/scan-invocations.tsv" ||
+    fail "the JSON invocation status was lost by the summarize failure"
+grep -q 'selftest stub scan' "$stage7_results/console.txt" ||
+    fail "raw console output did not survive the summarize failure"
+grep -q '## Harness stage failures' "$stage7_results/validation-report.md" ||
+    fail "the human-readable report omitted the harness stage failure"
+python3 - "$stage7_results/validation-report.json" "$stage7_results/findings.json" <<'PY'
+import json
+import pathlib
+import sys
+
+report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+findings = json.loads(pathlib.Path(sys.argv[2]).read_text())
+
+# The raw scanner output is untouched by the harness-side failure...
+assert [f["finding_id"] for f in findings] == ["selftest-stub-1", "selftest-stub-2"], findings
+# ...the invocation context survives...
+assert [i["mode"] for i in report["scan_invocations"]] == ["console", "json", "markdown"], (
+    report["scan_invocations"]
+)
+assert all(i["exit_status"] == 0 for i in report["scan_invocations"]), report["scan_invocations"]
+# ...the operator still reached the stage 7 review gate...
+assert report["operator_reviewed_raw_results"] is True
+# ...the failure is counted as a harness failure, never as a scanner result...
+assert report["counts"]["harness_stage_failure"] == 1, report["counts"]
+assert "harness-stage-failures.tsv" in report["caveat"], report["caveat"]
+assert all("summarize" not in (r.get("detail") or "") for r in report["results"])
+# ...and the comparison cannot read as clean.
+assert report["discrepancy_count"] >= 1, report["discrepancy_count"]
+PY
+pass "a real stage 7 summarize failure is durable, reviewable, and never reported as clean"
+
 symlink_fixture="$SELFTEST_TMP/symlink-freeze"
 mkdir -p "$symlink_fixture/corpus/operator-supplied" "$symlink_fixture/state"
 printf 'DISTINCTIVE-NONSECRET-OUTSIDE-CONTENT\n' > "$symlink_fixture/outside.txt"
