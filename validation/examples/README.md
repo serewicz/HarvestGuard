@@ -15,7 +15,9 @@ validation work; it does not create or reproduce a new validation run.
   abbreviated [`gate-transcript.md`](gate-transcript.md) is illustrative only.
 
 Reports and transcripts link to existing artifacts rather than copying their
-contents here.
+contents here. For a non-specialist summary of what this evidence does and does
+not demonstrate, see the
+[executive validation summary](../reports/executive-validation-summary.md).
 
 ## Available run evidence
 
