@@ -1,0 +1,120 @@
+name: Scan or output problem (pilot feedback)
+description: Report a problem with a scan run or with the console, JSON, Markdown, or summary output.
+title: "[Scan/Output] "
+labels: ["pilot-feedback", "scan-output"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for trying HarvestGuard. Fill in what you know and leave the rest blank — a partial report is still useful.
+
+        **Sanitize anything you paste.** Scan output legitimately contains file paths, bucket and object names, and certificate subjects, so treat it as confidential. Never paste or upload real secrets, private keys or other reconstructable key material, production certificates, proprietary source trees, confidential scan output, passphrases, plaintext sensitive data, decrypted material, raw secret values, credentials or tokens, or sensitive internal hostnames or paths. Redact them, or leave the field empty — an omitted log is better than a leaked one.
+
+        Reproduce against the synthetic `demo/sample_target/` corpus where you can; its output is safe to share.
+
+        **If this may be a security vulnerability, do not describe it here.** Use the private process in [SECURITY.md](https://github.com/serewicz/HarvestGuard/blob/main/SECURITY.md) instead of a public issue.
+
+        HarvestGuard reports observed evidence only. Absence of a finding is not proof of absence, and format coverage is partial — [docs/DETECTION_CHARACTERIZATION.md](https://github.com/serewicz/HarvestGuard/blob/main/docs/DETECTION_CHARACTERIZATION.md) describes what each scanner detects and can miss. HarvestGuard is pre-1.0 and offered as-is; [SUPPORT.md](https://github.com/serewicz/HarvestGuard/blob/main/SUPPORT.md) describes what support exists.
+  - type: input
+    id: version
+    attributes:
+      label: HarvestGuard version
+      description: Output of `harvestguard --version`.
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Operating system and Python version
+      description: Include these where they seem relevant.
+      placeholder: "Ubuntu 24.04, Python 3.12.3"
+    validations:
+      required: false
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Install method
+      options:
+        - pipx
+        - Virtual environment
+        - PyPI
+        - Local checkout
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: command
+    attributes:
+      label: Command run
+      description: The exact command, with any real path replaced by a placeholder.
+      render: shell
+    validations:
+      required: false
+  - type: dropdown
+    id: target_type
+    attributes:
+      label: Scan target type
+      description: Describe the target in general terms. Do not give a real proprietary path.
+      options:
+        - Synthetic demo corpus (demo/sample_target/)
+        - Local filesystem directory
+        - Source tree (code analysis)
+        - Cloud object storage
+        - Other
+    validations:
+      required: false
+  - type: dropdown
+    id: output_mode
+    attributes:
+      label: Output mode
+      options:
+        - Console
+        - JSON
+        - Markdown
+        - Summary
+        - More than one of these
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: What does the problem concern?
+      options:
+        - Findings
+        - Counts
+        - Formatting
+        - Errors
+        - Claims interpretation
+        - Packaging
+        - Other
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected the run or the output to do.
+    validations:
+      required: false
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Sanitized output only, and only if it is safe to share. Demo-corpus output is safe. Skip this field if you are unsure.
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: sanitized
+    attributes:
+      label: Sanitization check
+      options:
+        - label: What I pasted above contains no secrets, key material, credentials, confidential output, or sensitive internal hostnames or paths.
+          required: true
