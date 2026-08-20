@@ -15,6 +15,10 @@ generated artifact that passes validates only those bytes on that host.
 ./validation/run-validation.sh --dry-run --workspace /tmp/hg-validation-dry-run
 ```
 
+Where this fits in a first-time evaluation of HarvestGuard is described in the
+repository README, under
+[Validate on your own Linux host](../README.md#6-validate-on-your-own-linux-host).
+
 Interactive mode is the default. Each of the eight gates advances only after
 the operator types exactly `continue`; `abort` stops and preserves the
 workspace. Empty or unrecognized input never advances. Dry-run auto-advances

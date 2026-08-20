@@ -61,6 +61,17 @@ editable install instead — same dependencies, same command:
 python -m pip install -e .
 ```
 
+For ordinary command-line use without a checkout, `pipx install harvestguard`
+installs the released CLI into its own environment. On newer Debian and Ubuntu
+hosts a system-wide `pip install` is refused with
+`error: externally-managed-environment` (PEP 668); install `pipx`
+(`sudo apt install -y pipx`) rather than overriding that protection. If
+`harvestguard` is then not found, the pipx binary directory — commonly
+`~/.local/bin`, or `/root/.local/bin` for root — is not on your `PATH`. The
+README covers both cases in
+[Install the CLI](../README.md#1-install-the-cli) and
+[Verify the installation](../README.md#2-verify-the-installation).
+
 ### What to expect during installation
 
 `pip` may print long runs of repeated "Downloading …" / "INFO: pip is looking at
