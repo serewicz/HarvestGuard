@@ -15,16 +15,81 @@ readiness, and remediation decisions to qualified human review.
 
 ## Quickstart
 
-### Install from PyPI
+Evaluating HarvestGuard for the first time takes seven steps, in order:
+
+1. [Install the CLI](#1-install-the-cli)
+2. [Verify the installation](#2-verify-the-installation)
+3. [Scan an authorized local path](#3-scan-an-authorized-local-path)
+4. [Try the safe repository demo](#4-try-the-safe-repository-demo)
+5. [Review sample evidence output](#5-review-sample-evidence-output)
+6. [Validate on your own Linux host](#6-validate-on-your-own-linux-host)
+7. [Read the claims boundary](#7-read-the-claims-boundary)
+
+### 1. Install the CLI
+
+Python 3.10 or newer is required. `pipx` gives the CLI its own environment,
+which is what you want for ordinary command-line use, because HarvestGuard
+pulls in Semgrep and three cloud SDKs:
 
 ```bash
+pipx install harvestguard
+```
+
+Plain `pip` works too, from a clean virtual environment — the recommended form
+for validation and development workflows, and the one the rest of this
+Quickstart assumes when it installs from a repository checkout:
+
+```bash
+python3 -m venv venv            # macOS: python3.12 -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
 python -m pip install harvestguard
 ```
 
-Python 3.10+ is required. Installing into a clean virtual environment is
-recommended, because HarvestGuard pulls in Semgrep and three cloud SDKs.
+**Debian and Ubuntu: `error: externally-managed-environment`.** Newer releases
+enforce PEP 668 and refuse a system-wide pip install, reporting:
 
-### Scan a local path
+```text
+error: externally-managed-environment
+```
+
+That is the distribution protecting its own Python. Install `pipx` rather than
+overriding it — do not force a system-wide install with
+`--break-system-packages`:
+
+```bash
+sudo apt update
+sudo apt install -y pipx
+pipx install harvestguard
+```
+
+### 2. Verify the installation
+
+```bash
+harvestguard --version
+```
+
+If the shell reports that `harvestguard` is not found even though the install
+succeeded, the pipx binary directory is not on your `PATH`. On a root test host,
+either run the executable directly:
+
+```bash
+/root/.local/bin/harvestguard --version
+```
+
+or put the directory on `PATH` first:
+
+```bash
+export PATH="$PATH:/root/.local/bin"
+harvestguard --version
+```
+
+For a non-root user, the executable is commonly at:
+
+```text
+~/.local/bin/harvestguard
+```
+
+### 3. Scan an authorized local path
 
 ```bash
 harvestguard scan /path/to/project --type all --summary
@@ -33,7 +98,7 @@ harvestguard scan /path/to/project --type all --summary
 That prints the evidence summary for a path you choose. Scan only targets you
 are authorized to scan.
 
-### Try the safe demo
+### 4. Try the safe repository demo
 
 The demo corpus is **repository content, not part of the PyPI package** — it
 does not exist after `pip install harvestguard`. To run it, clone the
@@ -49,7 +114,7 @@ python -m pip install .
 harvestguard scan demo/sample_target --type all --summary
 ```
 
-### The full first-run sequence
+### 5. Review sample evidence output
 
 Run, review, and export a local scan of the repository's deliberately synthetic
 demo target — this is the canonical first-run sequence, and it assumes the
@@ -96,10 +161,6 @@ What to expect from the demo scan:
   where volume status cannot be determined at all the `Coverage` row reads
   `Not complete` instead: [what varies by host](docs/CLI.md#what-varies-by-host).
 
-This is one small selected synthetic sample. It shows the output shape; it does
-not demonstrate exhaustive discovery, runtime use, exploitability, business
-risk, compliance, remediation priority, or quantum readiness.
-
 The demo contains fake patterns only—never real credentials;
 [`demo/sample_target/README.md`](demo/sample_target/README.md) documents each
 demo file, its synthetic provenance, and the finding it is expected to produce.
@@ -108,6 +169,56 @@ JSON and Markdown artifacts from exactly this demo scan in
 [`docs/examples/first-run/`](docs/examples/first-run/README.md), and the
 per-finding walkthrough in the
 [CLI demo walkthrough](docs/CLI.md#demo-walkthrough).
+
+### 6. Validate on your own Linux host
+
+An operator-driven validation harness ships in the repository checkout from
+step 4. Run it from the repository root, on a Linux host you control, with
+`harvestguard` already installed:
+
+```bash
+./validation/run-validation.sh --workspace /tmp/hg-validation
+```
+
+The harness generates a bounded corpus of native-tool artifacts, freezes the
+expectations before scanning, runs the installed `harvestguard` CLI against the
+frozen corpus, and reports observations for human review. Each of its eight
+stages advances only when the operator confirms it, it installs nothing, and it
+writes only inside the workspace you name.
+
+A bounded dry-run exercises the same eight stages with mock records instead —
+no native generator and no scanner run, so it makes no cryptographic,
+scanner, or format-support claim:
+
+```bash
+./validation/run-validation.sh --dry-run --workspace /tmp/hg-validation-dry-run
+```
+
+A completed run shows how the installed CLI behaved against those generated
+bytes on that host. It is not proof of complete format support, of every valid
+variant of a supported format, or of any platform, architecture, scan type, or
+generator that the run did not exercise.
+
+The stages, safety boundaries, already-validated platforms, and their
+limitations are documented in [`validation/README.md`](validation/README.md).
+The Phase 1 generator contract — which script produces which format case, with
+which native tool — is in
+[`validation/generators/README.md`](validation/generators/README.md).
+
+### 7. Read the claims boundary
+
+This is one small selected synthetic sample. It shows the output shape; it does
+not demonstrate exhaustive discovery, runtime use, exploitability, business
+risk, compliance, remediation priority, or quantum readiness.
+
+Each scanner's detection surface is deliberately narrow and none of them is
+exhaustive, so **absence of a finding is not proof of absence**. What every
+scanner supports, what it can miss, and how to read its `confidence` value are
+documented in
+[detection characterization](docs/DETECTION_CHARACTERIZATION.md); the canonical
+evidence, confidence, and inference boundaries are in
+[docs/PRODUCT_PRINCIPLES.md](docs/PRODUCT_PRINCIPLES.md).
+
 Windows activation instructions, cloud targets, output formats, exit codes, and
 the optional local evidence store are covered in the
 [detailed setup and usage](#detailed-setup-and-usage) section and
@@ -304,7 +415,9 @@ priority order.
 
 One command from a clean virtual environment installs `harvestguard` and every
 dependency it needs — `pyproject.toml` is authoritative, so there is no second
-requirements step. From PyPI:
+requirements step. For ordinary command-line use `pipx install harvestguard`
+works as well, and is the route to take on a Debian or Ubuntu host that
+enforces PEP 668; see [Install the CLI](#1-install-the-cli). From PyPI:
 
 ```bash
 python3 -m venv venv            # macOS: python3.12 -m venv venv

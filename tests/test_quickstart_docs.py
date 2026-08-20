@@ -8,6 +8,12 @@ complete, that it says where output is written, that it states the demo's
 expected finding-level error record and the CLI exit semantics rather than
 hiding them, and that the links and heading anchors it points at resolve.
 
+Issue #134 turned the same section into an ordered first-time evaluation path,
+so the tests below also guard the steps a reader needs before the demo makes
+sense: how the CLI is installed (including the PEP 668 refusal Debian and
+Ubuntu report, without recommending an override), how a missing `harvestguard`
+on `PATH` is recovered, and how the validation harness is found and bounded.
+
 The commands themselves are executed end to end by
 tests/test_end_to_end_validation.py and tests/test_clean_install.py; these
 tests deliberately run no subprocess.
@@ -108,6 +114,91 @@ def test_quickstart_keeps_its_claims_bounded():
         "quantum readiness",
     ):
         assert disclaimed in normalized, f"quickstart no longer disclaims: {disclaimed}"
+
+
+# --- The ordered evaluation path (issue #134) ------------------------------
+
+
+EVALUATION_STEPS = [
+    "### 1. Install the CLI",
+    "### 2. Verify the installation",
+    "### 3. Scan an authorized local path",
+    "### 4. Try the safe repository demo",
+    "### 5. Review sample evidence output",
+    "### 6. Validate on your own Linux host",
+    "### 7. Read the claims boundary",
+]
+
+
+def _code_blocks(markdown: str) -> list[str]:
+    return re.findall(r"^```[a-z]*\n(.*?)^```", markdown, flags=re.DOTALL | re.MULTILINE)
+
+
+@pytest.mark.parametrize("step", EVALUATION_STEPS)
+def test_quickstart_keeps_the_ordered_evaluation_path(step):
+    assert step in QUICKSTART, f"the evaluation path no longer has the step: {step}"
+    # Each step is reachable from the list at the top of the section.
+    assert f"(#{_anchor(step[len('### ') :])})" in QUICKSTART, f"{step} is not linked"
+
+
+def test_quickstart_documents_pipx_installation_and_the_pep_668_refusal():
+    normalized = " ".join(QUICKSTART.split())
+    assert "pipx install harvestguard" in normalized
+    assert "sudo apt install -y pipx" in normalized
+    assert "error: externally-managed-environment" in normalized
+    assert "pep 668" in normalized.lower()
+
+
+def test_quickstart_never_recommends_overriding_the_managed_environment():
+    for block in _code_blocks(QUICKSTART):
+        assert "--break-system-packages" not in block, (
+            "the quickstart offers a system-wide pip override as a runnable command"
+        )
+    normalized = " ".join(QUICKSTART.split())
+    if "--break-system-packages" in normalized:
+        assert "do not force a system-wide install with `--break-system-packages`" in normalized
+
+
+def test_quickstart_documents_verification_and_path_recovery():
+    normalized = " ".join(QUICKSTART.split())
+    assert "harvestguard --version" in normalized
+    assert "not on your `PATH`" in normalized
+    assert "/root/.local/bin/harvestguard --version" in normalized
+    assert 'export PATH="$PATH:/root/.local/bin"' in normalized
+    assert "~/.local/bin/harvestguard" in normalized
+
+
+def test_quickstart_documents_the_first_authorized_local_scan():
+    normalized = " ".join(QUICKSTART.split())
+    assert "harvestguard scan /path/to/project --type all --summary" in normalized
+    assert "authorized to scan" in normalized
+
+
+def test_quickstart_documents_the_linux_validation_commands():
+    normalized = " ".join(QUICKSTART.split())
+    for command in (
+        "./validation/run-validation.sh --workspace /tmp/hg-validation",
+        "./validation/run-validation.sh --dry-run --workspace /tmp/hg-validation-dry-run",
+    ):
+        assert command in normalized, f"the evaluation path is missing: {command}"
+    assert (ROOT / "validation" / "run-validation.sh").is_file()
+
+
+def test_quickstart_points_at_the_validation_and_generator_documentation():
+    assert "(validation/README.md)" in QUICKSTART
+    assert "(validation/generators/README.md)" in QUICKSTART
+
+
+def test_quickstart_bounds_what_a_validation_run_demonstrates():
+    normalized = " ".join(QUICKSTART.split())
+    assert "not proof of complete format support" in normalized
+    # No claim that unexercised platforms, scan types, or generators are covered.
+    assert "that the run did not exercise" in normalized
+
+
+def test_quickstart_keeps_absence_of_a_finding_from_reading_as_proof():
+    normalized = " ".join(QUICKSTART.split()).lower()
+    assert "absence of a finding is not proof of absence" in normalized
 
 
 @pytest.mark.parametrize(
