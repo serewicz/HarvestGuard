@@ -659,22 +659,27 @@ establish complete inventory, complete format support, production readiness,
 compliance, quantum readiness, remediation priority, exploitability, runtime
 exposure, business risk, or absence of cryptographic material.
 
-### Packaging validation for the preparation PR
+### Separate package verification (#146)
 
-Build the wheel and sdist from the reviewed checkout with
-`python -m build --no-isolation`, then run `python -m twine check dist/*` and
-inspect both manifests. Neither artifact may contain `demo/`, `tests/`,
-`docs/`, `dashboard/`, or top-level `main.py`. Install each artifact into its
-own clean virtual environment and verify `harvestguard --version`,
-`harvestguard --help`, `harvestguard scan --help`, and a bounded scan of safe
-synthetic input. These checks validate local artifacts only; they do not upload
-or publish them, and built files are not committed.
+Issue #136 prepares version identity and release documentation only. Building
+the wheel and sdist, inspecting their manifests, and validating clean installs
+are not requirements of its preparation PR. That work remains the separate
+post-merge follow-up tracked by #146, which must verify both local artifacts
+before any publication action.
+
+Package checks already performed while reviewing this preparation may be
+reported as optional supporting evidence, but they do not complete or replace
+#146. That issue owns the authoritative `python -m build --no-isolation`,
+`python -m twine check dist/*`, artifact-content inspection, clean wheel and
+sdist installs, CLI version/help checks, and bounded safe scan verification. It
+publishes nothing and commits no built artifact.
 
 ### Maintainer publication checklist (v0.3.0)
 
 Publication is a separate, explicitly authorized maintainer action after the
-preparation PR is reviewed and merged. Run the steps in order and stop on any
-identity, artifact, install, upload, or visibility failure.
+preparation PR is reviewed and merged and #146 package verification is
+complete. Run the steps in order and stop on any identity, artifact, install,
+upload, or visibility failure.
 
 1. Verify the working tree is clean; `HEAD`, `main`, and `origin/main` identify
    the reviewed merge commit; required CI is green; version output is `0.3.0`;
