@@ -233,7 +233,7 @@ def test_decision_records_that_preparation_published_nothing():
         assert falsehood not in normalized, f"the decision falsely claims: {falsehood!r}"
 
 
-def test_the_authorized_version_bump_landed_in_both_literals():
+def test_release_version_still_uses_the_two_synchronized_literals():
     # Issue #125 excluded the bump; issue #127 authorized it and it happened.
     # What matters now is that the two literals moved together -- a half-done
     # bump would make `pip show harvestguard` and `harvestguard --version`
@@ -242,7 +242,7 @@ def test_the_authorized_version_bump_landed_in_both_literals():
     match = re.search(r'^version\s*=\s*"([^"]+)"', pyproject, re.MULTILINE)
     assert match is not None
     assert match.group(1) == __version__
-    assert __version__ == "0.2.0"
+    assert __version__ == "0.3.0"
 
 
 def test_release_surface_facts_match_the_issue_125_baseline():
@@ -348,7 +348,7 @@ def test_changelog_carries_a_released_0_2_0_entry_without_asserting_external_sta
     # must point a reader at those sources instead of asserting them.
     assert "it cannot record external publication state" in unreleased
     assert "pypi.org/project/harvestguard" in unreleased
-    assert "docs/release-notes/v0.2.0.md" in unreleased
+    assert f"docs/release-notes/v{__version__}.md" in unreleased
 
 
 def test_drafted_entry_covers_the_work_the_release_would_describe():
@@ -392,7 +392,7 @@ def test_release_notes_are_final_and_publish_nothing_themselves():
     assert "status: draft. not published." not in normalized
     assert "this file publishes nothing by itself" in normalized
     assert "tagging and publishing are separate maintainer actions" in normalized
-    assert f"harvestguard v{__version__}" in normalized
+    assert "harvestguard v0.2.0" in normalized
 
 
 @pytest.mark.parametrize(
