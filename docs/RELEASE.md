@@ -9,25 +9,26 @@ makes no claim about what the scanners detect — that lives in
 classification of every product claim lives in
 [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md).
 
-Release notes are in [CHANGELOG.md](../CHANGELOG.md), and the `v0.2.0` GitHub
-Release text is in [docs/release-notes/v0.2.0.md](release-notes/v0.2.0.md). A
-maintainer deciding whether to publish a release should read
-[release and distribution decision](#release-and-distribution-decision-v02-preparation)
-— it records the chosen path and the state of every open item — together with
-[v0.2.0 release preparation](#v020-release-preparation-issue-127), which records
-what issue #127 authorized and what it validated.
+Release notes are in [CHANGELOG.md](../CHANGELOG.md), and the proposed `v0.3.0`
+GitHub Release text is in
+[docs/release-notes/v0.3.0.md](release-notes/v0.3.0.md). A maintainer deciding
+whether to publish it should read
+[v0.3.0 release preparation](#v030-release-preparation-issue-136), especially
+its evidence boundary and ordered publication checklist. The historical
+[v0.2.0 preparation](#v020-release-preparation-issue-127) remains below.
 
 ## Version identity
 
-`0.2.0` is declared in exactly two places, which are asserted to match by
-`tests/test_release_identity.py`:
+`0.3.0` is declared in exactly two authoritative version surfaces, which are
+asserted to match by `tests/test_release_identity.py`:
 
 | Location | Purpose |
 | --- | --- |
 | `pyproject.toml` `[project] version` | Package metadata; what `pip` records for an installed HarvestGuard |
 | `harvestguard_version.py` `__version__` | Runtime constant; what the CLI and reports print |
 
-Nothing else hard-codes the product version. The normalized finding schema
+Committed samples and release documentation may state the version they describe,
+but they are not version declarations. The normalized finding schema
 carries its own independent `schema_version` (`1.0.0`), and the Markdown report
 carries its own generator/format version (`harvestguard-report 0.1.0`); neither
 tracks the product version and neither should be read as one. The same is true
@@ -38,7 +39,7 @@ declared per scanner in `finding_adapters.py`.
 
 | Path | Command / field | Notes |
 | --- | --- | --- |
-| Installed CLI | `harvestguard --version` (or `-V`) | Prints `harvestguard 0.2.0` |
+| Installed CLI | `harvestguard --version` (or `-V`) | Prints `harvestguard 0.3.0` |
 | Repository checkout | `python -m harvestguard --version` | Same output without installing |
 | Installed package metadata | `pip show harvestguard` | Reports the `pyproject.toml` version |
 | Markdown report | *Scan Information* → `HarvestGuard Version` | Recorded in the artifact itself |
@@ -55,7 +56,7 @@ from the same scan, which states the version in *Scan Information*.
 
 ## Pre-1.0 status and support
 
-HarvestGuard v0.1 is a **controlled diligence pilot** release: intended for
+HarvestGuard is a **pre-1.0 controlled diligence pilot**: intended for
 evaluation by a small number of technically competent users on targets they are
 authorized to scan, not for unattended or production-critical use.
 
@@ -623,6 +624,86 @@ source:
 6. Verify afterwards in a clean environment: `pip install harvestguard`,
    `harvestguard --version` printing `harvestguard 0.2.0`, a basic scan, the
    GitHub Release page, and the PyPI project page.
+
+## v0.3.0 release preparation (issue #136)
+
+Issue #136 prepares **HarvestGuard v0.3.0 — Validation, Trust, and First
+External Use**. The change establishes release identity, reviewable notes, and
+an executable publication checklist. It creates no tag, release, package
+publication, committed build artifact, workflow, or GHCR version tag.
+
+### Prepared release surfaces
+
+| Surface | Prepared state |
+| --- | --- |
+| Version identity | `pyproject.toml` and `harvestguard_version.py` declare `0.3.0`; `harvestguard --version` reports `harvestguard 0.3.0` |
+| Changelog | [CHANGELOG.md](../CHANGELOG.md) records the bounded trust-release work and its evidence limitations |
+| Release notes | [docs/release-notes/v0.3.0.md](release-notes/v0.3.0.md) is the reviewed GitHub Release text |
+| Evaluation path | [README.md](../README.md) leads through installation, an authorized scan, the clone-required demo, sample output, and validation evidence |
+| Validation evidence | [validation examples](../validation/examples/README.md) and the [executive summary](../validation/reports/executive-validation-summary.md) link the committed Ubuntu and AlmaLinux evidence without inventing a run |
+| Pilot feedback | The four forms under `.github/ISSUE_TEMPLATE/` request bounded, sanitized feedback and route vulnerabilities to `SECURITY.md` |
+
+### Validation-evidence boundary
+
+The Ubuntu run was Ubuntu 24.04.4 LTS x86_64 on Hyper-V and has a committed
+report but no committed transcript. The AlmaLinux run was AlmaLinux 9.8 x86_64
+inside an OCI container, not a direct RHEL, Rocky Linux, or CentOS Stream run.
+Its completed historical run used pandas below 3.0; the fresh pandas 3.x run
+halted during Stage 7 summarization, and #140 subsequently fixed that harness
+defect without changing scanner behavior. `age_encrypted` was skipped where
+`age` was unavailable, and only `--type crypto` was exercised.
+
+The evidence does not validate Debian stable, direct RHEL/Rocky/CentOS Stream,
+non-x86_64 hosts, FIPS mode, Windows, WSL, or broader scanner modes. It does not
+establish complete inventory, complete format support, production readiness,
+compliance, quantum readiness, remediation priority, exploitability, runtime
+exposure, business risk, or absence of cryptographic material.
+
+### Separate package verification (#146)
+
+Issue #136 prepares version identity and release documentation only. Building
+the wheel and sdist, inspecting their manifests, and validating clean installs
+are not requirements of its preparation PR. That work remains the separate
+post-merge follow-up tracked by #146, which must verify both local artifacts
+before any publication action.
+
+Package checks already performed while reviewing this preparation may be
+reported as optional supporting evidence, but they do not complete or replace
+#146. That issue owns the authoritative `python -m build --no-isolation`,
+`python -m twine check dist/*`, artifact-content inspection, clean wheel and
+sdist installs, CLI version/help checks, and bounded safe scan verification. It
+publishes nothing and commits no built artifact.
+
+### Maintainer publication checklist (v0.3.0)
+
+Publication is a separate, explicitly authorized maintainer action after the
+preparation PR is reviewed and merged and #146 package verification is
+complete. Run the steps in order and stop on any identity, artifact, install,
+upload, or visibility failure.
+
+1. Verify the working tree is clean; `HEAD`, `main`, and `origin/main` identify
+   the reviewed merge commit; required CI is green; version output is `0.3.0`;
+   and no conflicting `v0.3.0` tag, GitHub Release, PyPI version, or GHCR
+   version tag exists.
+2. Create annotated tag `v0.3.0` on exactly that reviewed merge commit with
+   message `HarvestGuard v0.3.0`, verify its peeled target, and push only that
+   tag.
+3. From the tagged commit, remove old local `dist/`, `build/`, and egg-info
+   outputs; build exactly `harvestguard-0.3.0-py3-none-any.whl` and
+   `harvestguard-0.3.0.tar.gz` using `python -m build --no-isolation`.
+4. Run `python -m twine check dist/*`, inspect both manifests, and repeat the
+   clean wheel/sdist install, CLI help/version, and safe basic-scan checks.
+5. Upload only those two validated artifacts to PyPI. Do not publish a GHCR
+   version tag.
+6. Create GitHub Release `v0.3.0`, titled `HarvestGuard v0.3.0`, from the tag
+   using [docs/release-notes/v0.3.0.md](release-notes/v0.3.0.md). Treat it as a
+   pre-1.0 pilot release and attach no extra artifacts unless separately
+   reviewed and authorized.
+7. Verify the tag target and GitHub Release, confirm PyPI exposes exactly
+   `harvestguard==0.3.0`, install that version into a brand-new environment,
+   and repeat version, help, scan-help, and safe basic-scan checks.
+8. Confirm the README PyPI evaluation path is true, no GHCR `v0.3.0` image was
+   created, and only then complete the release issue.
 
 ## Deferred work
 

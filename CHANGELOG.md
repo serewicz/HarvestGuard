@@ -10,28 +10,83 @@ change between versions. The normalized finding schema is versioned separately
 
 ## Unreleased
 
-No changes since the `0.2.0` entry below.
+No changes since the `0.3.0` entry below.
 
-The repository now declares `0.2.0` in both `pyproject.toml` and
+The repository now declares `0.3.0` in both `pyproject.toml` and
 `harvestguard_version.py`, and `harvestguard --version` prints
-`harvestguard 0.2.0`. That version bump was authorized by issue #127, which
-also authorized tagging `v0.2.0`, publishing a GitHub Release, and publishing
-the wheel and sdist to PyPI.
+`harvestguard 0.3.0`. Issue #136 authorizes release preparation only; tagging,
+the GitHub Release, and PyPI publication remain separate maintainer actions
+after review and merge.
 
 Repository content records the version the code declares; it cannot record
-external publication state. Whether the `v0.2.0` tag, GitHub Release, and PyPI
+external publication state. Whether the `v0.3.0` tag, GitHub Release, and PyPI
 package exist at the moment you read this is verifiable only at their own
 sources — the repository's tags and releases, and
 [pypi.org/project/harvestguard](https://pypi.org/project/harvestguard/) — and
-each was a deliberate maintainer action taken from the merged commit, not
-something any change in this repository performs.
+each must be a deliberate maintainer action taken from the reviewed merge
+commit, not something any change in this repository performs.
 
-The chosen release path, the disposition of every audit open item, and the
-release and packaging validation are recorded in
-[release and distribution decision](docs/RELEASE.md#release-and-distribution-decision-v02-preparation)
-and [v0.2.0 release preparation](docs/RELEASE.md#v020-release-preparation-issue-127);
+The release boundaries, maintainer publication checklist, and packaging
+validation requirements are recorded in
+[v0.3.0 release preparation](docs/RELEASE.md#v030-release-preparation-issue-136);
 the GitHub Release notes are in
-[docs/release-notes/v0.2.0.md](docs/release-notes/v0.2.0.md).
+[docs/release-notes/v0.3.0.md](docs/release-notes/v0.3.0.md).
+
+## 0.3.0 — Validation, Trust, and First External Use
+
+This pre-1.0 trust release improves the path from installation to bounded,
+reviewable evidence. It adds no scanner, detector, finding-schema, dashboard,
+or hosted-service capability.
+
+### Added
+
+- **Phase 1 validation harness** (HG-045) — an operator-driven, eight-gate
+  workflow under `validation/` with bounded generators, frozen manifests,
+  result schemas, dry-run support, and validation-local self-tests.
+- **Linux validation evidence** — committed reports from Ubuntu 24.04.4 LTS
+  x86_64 on Hyper-V and AlmaLinux 9.8 x86_64 in an OCI container, plus
+  sanitized AlmaLinux transcripts. These runs exercise only `--type crypto`;
+  they are not evidence for Debian stable, direct RHEL/Rocky/CentOS Stream,
+  Windows, WSL, other architectures, FIPS mode, or broader scan modes.
+- **Validation examples and executive summary** — an index explaining reports,
+  transcripts, and illustrative snippets, plus a summary that keeps observed
+  fact, scanner inference, validation outcome, business interpretation, and
+  recommended next action distinct.
+- **Pilot feedback issue forms** — bounded install, scan/output, validation,
+  and documentation forms with explicit secret-handling and vulnerability
+  reporting guidance.
+
+### Changed
+
+- **README evaluation path** — an ordered first run from CLI installation and
+  version verification through an authorized scan, the clone-required safe
+  demo corpus, sample evidence, and Linux-host validation. Debian/Ubuntu PEP
+  668 guidance recommends `pipx`, not `--break-system-packages`.
+- **Validation Stage 7 robustness** — missing rule IDs represented as `NaN`,
+  `None`, empty, whitespace-only, or absent values normalize consistently.
+  Summarization failures are recorded durably without hiding scanner invocation
+  statuses or allowing comparison to report a clean run.
+
+### Evidence and claims boundary
+
+The Ubuntu evidence has a committed report but no committed transcript. The
+AlmaLinux run occurred in an OCI container, and its completed historical run
+used pandas below 3.0; its fresh pandas 3.x halted run remains committed as
+historical evidence of the defect later fixed under #140. The `age_encrypted`
+generator path was skipped where `age` was unavailable.
+
+These artifacts demonstrate bounded behavior on the recorded hosts and inputs.
+They do not establish complete inventory or format support, production
+readiness, compliance, quantum readiness, exploitability, runtime exposure,
+remediation priority, business risk, or absence of cryptographic material.
+
+### Release state
+
+The repository declares `0.3.0`. This change prepares and validates release
+materials; it does not create a tag, GitHub Release, PyPI publication, built
+artifact commit, or GHCR version tag. Those external actions follow the
+reviewed maintainer checklist in
+[docs/RELEASE.md](docs/RELEASE.md#maintainer-publication-checklist-v030).
 
 ## 0.2.0 — Cryptographic Inventory and First Public Use
 

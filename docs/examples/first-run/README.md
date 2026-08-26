@@ -24,8 +24,8 @@ fixture produced — nothing more.
 | Command (JSON) | `harvestguard scan demo/sample_target --type all --quiet --json sample-findings.json` |
 | Command (Markdown) | `harvestguard scan demo/sample_target --type all --quiet --markdown sample-report.md` |
 | Working directory | the repository root |
-| Generating version | `harvestguard 0.2.0` (what `harvestguard --version` prints, and what the report's *Scan Information* table records) |
-| Repository state | regenerated on the `v0.2.0` version-bump change, which changes only the version literals, these samples, documentation, and tests — no scanner, report-generator, schema, or evidence-store behavior was changed to produce them |
+| Generating version | `harvestguard 0.3.0` (what `harvestguard --version` prints, and what the report's *Scan Information* table records) |
+| Repository state | regenerated on the `v0.3.0` release-preparation change, which changes release identity, samples, documentation, and tests — no scanner, report-generator, schema, or evidence-store behavior was changed to produce them |
 | Credentials / network | none required; the demo corpus is local and offline |
 
 `--json` and `--markdown` are mutually exclusive on the CLI, so the two

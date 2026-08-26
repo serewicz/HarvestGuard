@@ -317,11 +317,8 @@ def test_changelog_no_longer_describes_the_0_2_0_entry_as_an_unhappened_release(
     # said so. Issue #127 authorized the release, so that framing is gone: the
     # changelog now records the version the repository actually declares, and
     # points at the preparation record instead of at a draft.
-    unreleased = _section(CHANGELOG_TEXT, "## Unreleased")
-    normalized = " ".join(unreleased.lower().split())
-    assert "a **draft for a release that has not happened**" not in unreleased
-    assert "0.2.0` in both `pyproject.toml` and `harvestguard_version.py`" in normalized
-    assert "docs/release.md#v020-release-preparation-issue-127" in normalized
-    # Publication is external state the repository cannot assert either way.
-    assert "repository content records the version the code declares" in normalized
-    assert "it cannot record external publication state" in normalized
+    entry = _section(CHANGELOG_TEXT, "## 0.2.0 — Cryptographic Inventory and First Public Use")
+    normalized = " ".join(entry.lower().split())
+    assert "a **draft for a release that has not happened**" not in entry
+    assert "`0.2.0` is the version this repository declares" in normalized
+    assert "v0.2.0 release preparation" in normalized

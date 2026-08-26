@@ -12,7 +12,7 @@ The report summarizes observed evidence only. It does not infer business risk.
 | --- | --- |
 | Scan Time | 1970-01-01T00:00:00+00:00 |
 | Scan ID | 00000000-0000-0000-0000-000000000000 |
-| HarvestGuard Version | 0.2.0 |
+| HarvestGuard Version | 0.3.0 |
 | Report Generator | harvestguard-report 0.1.0 |
 | Target Path | demo/sample_target |
 | Duration | 0.00 seconds |

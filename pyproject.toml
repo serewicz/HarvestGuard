@@ -8,7 +8,7 @@ name = "harvestguard"
 # CLI's `--version` and the Markdown report both report at runtime. setuptools reads
 # this literal statically at build time, so the two are separate declarations;
 # tests/test_release_identity.py fails if they drift.
-version = "0.2.0"
+version = "0.3.0"
 description = "Open-source cryptographic asset inventory and evidence-collection tool for technology due diligence."
 readme = "README.md"
 license = "Apache-2.0"
