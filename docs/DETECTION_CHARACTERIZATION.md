@@ -1930,37 +1930,44 @@ matched usage is necessarily exploitable in context.
   cryptography" or "this code is safe." See `code-analysis failure/absence
   semantics` below for the distinct case of the scanner not having run at
   all.
-- **Scanner failure vs. clean scan.** If `semgrep` is not installed, times
-  out, exits non-zero, or its output cannot be parsed as JSON, the scanner
-  returns an empty result with no findings — indistinguishable, from the
-  finding data alone, from "the code was scanned and nothing matched,"
-  *unless* the caller checks `scanner_errors`/exit code. `harvestguard.py`
-  raises no exception for this path today (`scan_source_for_crypto_usage`
-  returns an empty DataFrame rather than raising), so a code-analysis
-  environment failure currently does not appear as a nonzero-exit scanner
-  error the way a cloud provider failure does. This is a known asymmetry
-  with the cloud scanners' error-propagation behavior; documented here as a
-  detection-characterization limitation rather than changed, since fixing it
-  is a scanner-error-propagation change beyond this issue's narrow-correction
-  scope.
+- **Scanner failure vs. clean scan.** The normalized wrapper raises
+  `LocalScanError` with usable partial findings. The CLI records failures in
+  `scanner_errors`, retains them in optional evidence storage, and reports them
+  in console and Markdown output. JSON remains a bare finding array and must
+  be read with scan context; an empty array alone does not establish success.
 
-### Behavioral correction: failure diagnostics moved to stderr
+### Execution provenance (collection contract 0.2.0)
 
-`docs/CLI.md` documents that `--json` stdout stays valid, machine-readable
-JSON even when a scanner fails partway through, and that progress/failure
-messages never mix into stdout. Before this fix, `scan_source_for_crypto_usage`
-printed its "semgrep not installed" / timeout / non-zero-exit / JSON-decode
-diagnostics with a bare `print(..., flush=True)`, which defaults to stdout.
+`semgrep_crypto_rules` version `0.2.0` identifies HarvestGuard's collection
+contract, not the installed Semgrep version. A legitimate empty execution
+requires exit zero, a complete JSON object with explicit list-valued `results`
+and `errors`, no analyzer-reported errors, and an empty results list. Missing
+stdout, malformed JSON, missing/wrongly typed arrays, and malformed finding
+entries are failures. Only fields consumed by HarvestGuard are validated;
+this is not validation of every optional Semgrep output field.
 
-Reproduced directly: running a scan with `--type code --json -` while
-`semgrep` is unavailable produced literal stdout content of
-`"Error running code analysis: semgrep is not installed\n[]\n"` — not valid
-JSON, and at exit code `0`. Every diagnostic `print` in this function was
-changed to `file=sys.stderr`, keeping the same message text and
-`flush=True`. Confirmed the same scenario now emits exactly `[]\n` on stdout,
-with the diagnostic on stderr, and this is regression tested in
-`tests/test_detection_characterization.py`. No other code-analysis behavior
-changed.
+A complete JSON response can contain usable findings alongside errors or a
+nonzero exit. Independently valid result entries are retained; malformed
+entries are omitted with a failure diagnostic. Truncated/unparseable output,
+including timeout output, is not recovered. A missing errors array permits
+retention of valid entries but never establishes successful execution.
+
+Diagnostics use fixed categories and a bounded exit number. Arbitrary stderr,
+structured error messages, exception text, source snippets and parser output
+are not copied into diagnostics. This avoids retaining uncontrolled diagnostic
+content; it is not a claim that a secret scrubber detects every secret.
+Existing finding location/rule/message fields remain the evidence contract;
+other analyzer metadata and matched source text are not retained.
+
+The legacy DataFrame function still returns a DataFrame and writes bounded
+failure diagnostics to stderr. Consumers needing execution provenance must use
+the normalized wrapper or supply its error collector. `--no-fail-on-error`
+changes the CLI exit code only; recorded errors and partial coverage remain.
+
+Historical runs with older or missing collection versions cannot establish
+execution completeness merely from zero findings or absent scanner errors.
+They are never rewritten or upgraded. A matching evidence-store digest checks
+internal consistency, not successful scanner execution or source authenticity.
 
 ---
 
