@@ -199,8 +199,9 @@ def test_code_analysis_asymmetry_caveat_only_appears_when_code_analysis_ran():
     with_code_analysis = format_markdown_report([], ran_code_analysis)
     without_code_analysis = format_markdown_report([], filesystem_only)
 
-    assert "diagnostic goes only to the scan's standard error stream" in with_code_analysis
-    assert "diagnostic goes only to the scan's standard error stream" not in without_code_analysis
+    caveat = "Older or unrecorded collection versions cannot establish execution"
+    assert caveat in with_code_analysis
+    assert caveat not in without_code_analysis
     assert "code analysis" not in without_code_analysis.lower()
 
 

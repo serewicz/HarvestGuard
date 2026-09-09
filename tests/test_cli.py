@@ -202,7 +202,7 @@ def test_scan_command_markdown_scanner_versions_cover_every_invoked_scanner(
     assert exit_code == 0
     assert "| crypto_inventory | 0.1.0 | 0 |" in output
     assert "| filesystem | 0.1.0 | 0 |" in output
-    assert "| semgrep_crypto_rules | 0.1.0 | 0 |" in output
+    assert "| semgrep_crypto_rules | 0.2.0 | 0 |" in output
     assert "| sensitive_data_classifier | 0.1.0 | 0 |" in output
     # The one finding came from the test scanner name, not from a declared one.
     assert "| test | 0.1.0 | 1 |" in output

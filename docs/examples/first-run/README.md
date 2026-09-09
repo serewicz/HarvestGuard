@@ -41,7 +41,15 @@ python docs/examples/first-run/generate_samples.py
 The script runs the same CLI (as `python -m harvestguard`, so no install is
 required) into a temporary file, applies the normalization below, and writes
 the two files here. Running the commands in the table yourself produces the
-same artifacts with your own scan id, timestamps, duration, and path.
+same evidence shape with your own scan id, timestamps, duration, and path.
+
+The committed report retains the historical `semgrep_crypto_rules 0.1.0`
+identity and its stderr-only failure caveat. Current collection contract
+`0.2.0` records execution failures in scan context, so regeneration now changes
+that version row and caveat. The original artifacts have not been rewritten to
+imply collection under the newer contract. The regeneration test explicitly
+accounts for these two differences while continuing to compare the evidence.
+See [execution provenance](../../DETECTION_CHARACTERIZATION.md#execution-provenance-collection-contract-020).
 
 ## Normalization applied
 

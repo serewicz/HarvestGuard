@@ -324,7 +324,7 @@ def test_code_analysis_wrapper_can_return_normalized_findings(monkeypatch):
     monkeypatch.setattr(
         code_scanner,
         "scan_source_for_crypto_usage",
-        lambda path: pd.DataFrame([{
+        lambda path, errors=None: pd.DataFrame([{
             "Location": "/repo/app.py:3",
             "Rule": "weak-hash-md5",
             "Message": "MD5 is weak",

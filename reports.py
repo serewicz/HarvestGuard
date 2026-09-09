@@ -486,21 +486,13 @@ def format_markdown_report(
         "`docs/DETECTION_CHARACTERIZATION.md`.",
     ])
     if "code analysis" in context.scanners:
-        # Unlike the bullets above, this one names a specific scanner and its
-        # execution-failure behavior, so it only belongs on a report that
-        # actually ran that scanner -- a filesystem-only or cloud-only report
-        # must not carry a caveat about a scanner it never invoked (see
-        # test_markdown_scope_lists_only_the_scanners_that_ran and its CLI
-        # counterparts, which assert exactly that). A code-analysis
-        # environment failure returns no rows and is not recorded as a
-        # scanner error (unlike a cloud failure), so a report cannot show it
-        # any other way; this is the only place a reader of the artifact
-        # alone can learn that an empty code-analysis result is ambiguous.
         lines.append(
-            "- Source-code analysis matches Python source text only, and an execution "
-            "failure (analyzer unavailable, timed out, or unreadable output) yields no "
-            "findings without appearing above; its diagnostic goes only to the scan's "
-            "standard error stream."
+            "- Source-code analysis matches Python source text only. Collection "
+            "contract semgrep_crypto_rules 0.2.0 records execution and output "
+            "failures in scanner errors, including when partial findings survive. "
+            "Older or unrecorded collection versions cannot establish execution "
+            "completeness from an empty result or absence of recorded errors. "
+            "Stored integrity verification does not establish scanner success."
         )
     lines.extend([
         "",

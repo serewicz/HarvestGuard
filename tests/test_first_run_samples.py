@@ -444,4 +444,19 @@ def test_regenerating_the_samples_reproduces_the_committed_files(sample_findings
     assert live_context[0]["asset_type"] == "volume"
     assert live_context[0]["technical_metadata"]["Files Represented By This Context"] == 4
 
-    assert _host_independent_lines(live_markdown) == _host_independent_lines(sample_markdown)
+    # This committed example is historical evidence from collector 0.1.0.
+    # Do not rewrite it to imply the new execution contract was used then.
+    # Account only for these explicit presentation changes; all other output
+    # remains subject to the original comparison.
+    historical_caveat = next(line for line in sample_markdown.splitlines()
+                             if line.startswith("- Source-code analysis"))
+    current_caveat = next(line for line in live_markdown.splitlines()
+                          if line.startswith("- Source-code analysis"))
+    assert "diagnostic goes only" in historical_caveat
+    assert "Older or unrecorded collection versions" in current_caveat
+    assert "Stored integrity verification does not establish scanner success" in current_caveat
+    assert "| semgrep_crypto_rules | 0.2.0 | 0 |" in live_markdown
+    expected = sample_markdown.replace(
+        "| semgrep_crypto_rules | 0.1.0 | 0 |", "| semgrep_crypto_rules | 0.2.0 | 0 |"
+    ).replace(historical_caveat, current_caveat)
+    assert _host_independent_lines(live_markdown) == _host_independent_lines(expected)

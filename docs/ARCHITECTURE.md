@@ -295,9 +295,10 @@ and migration-difficulty models exist.
   counts, not matched values.
 - `code_analysis/` uses Semgrep with a vendored crypto rule set for local code
   crypto analysis of source text; its rules currently target Python source
-  only, and an execution failure there returns an empty result on stderr rather
-  than propagating through the `scanner_errors` path the cloud adapters use
-  (see [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md)).
+  only. Collection contract `0.2.0` propagates execution/output failures through
+  `LocalScanError` and the existing `scanner_errors` path, retaining usable
+  partial findings. Earlier stored runs retain their execution uncertainty
+  (see [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md)).
 - `scanner/crypto_inventory.py` parses local certificate and key assets into
   evidence-first inventory findings, owns the traversal and scan accounting for
   those scans, and declares the static detector registry.

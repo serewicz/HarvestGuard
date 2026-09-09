@@ -24,7 +24,9 @@ S3_SCANNER = ScannerIdentity("s3", "0.1.0")
 GCS_SCANNER = ScannerIdentity("gcs", "0.1.0")
 AZURE_BLOB_SCANNER = ScannerIdentity("azure_blob", "0.1.0")
 SENSITIVE_DATA_SCANNER = ScannerIdentity("sensitive_data_classifier", "0.1.0")
-CODE_ANALYSIS_SCANNER = ScannerIdentity("semgrep_crypto_rules", "0.1.0")
+# 0.2.0 identifies the strict execution/output collection contract, not the
+# Semgrep binary version. Historical 0.1.0 runs may have swallowed failures.
+CODE_ANALYSIS_SCANNER = ScannerIdentity("semgrep_crypto_rules", "0.2.0")
 # Aggregate filesystem context findings: one record per mount, standing in for
 # the volume/filesystem/platform context shared by every ordinary regular file
 # inspected on that mount, instead of repeating that context once per file.

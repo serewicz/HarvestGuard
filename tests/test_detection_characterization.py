@@ -299,7 +299,8 @@ def test_code_analysis_nonzero_exit_diagnostic_goes_to_stderr_not_stdout(
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "boom" in captured.err
+    assert "exited nonzero" in captured.err
+    assert "boom" not in captured.err
 
 
 @patch("code_analysis.scanner.subprocess.run")

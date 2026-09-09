@@ -351,7 +351,7 @@ def test_installed_console_script_produces_the_documented_demo_artifacts(
         assert section in markdown_run.stdout
     # The vendored Semgrep rules shipped with the install, so the code-analysis
     # scanner ran rather than erroring out on a missing rule file.
-    assert "| semgrep_crypto_rules | 0.1.0 |" in markdown_run.stdout
+    assert "| semgrep_crypto_rules | 0.2.0 |" in markdown_run.stdout
     assert "- Scanner error:" not in markdown_run.stdout
 
     for stream in (summary.stdout, summary.stderr, json_run.stdout, markdown_run.stdout):
@@ -421,7 +421,8 @@ def test_demo_markdown_report_contains_every_documented_section(capsys):
         "sensitive_data_classifier",
         "semgrep_crypto_rules",
     ]:
-        assert f"| {scanner} | 0.1.0 |" in report
+        version = "0.2.0" if scanner == "semgrep_crypto_rules" else "0.1.0"
+        assert f"| {scanner} | {version} |" in report
     assert "- Scanners run: filesystem, crypto inventory, sensitive data, code analysis" in report
     # A default `--max-depth` still bounds coverage, so the demo report reads as
     # limited rather than as unlimited (docs/CLI.md, "Partial and limited scans").

@@ -105,14 +105,12 @@ explicitly rather than dropping it:
   a failed or partial cloud scan is reported as a failure (nonzero CLI exit)
   rather than being silently presented as a clean, empty result. The specific
   objects or pages that could not be read are named in that error.
-- **Source-code analysis execution failures** — the one place this visibility
-  rule is not currently met. If the analyzer is unavailable, times out, exits
-  non-zero, or emits unparsable output, the code-analysis adapter contributes
-  no records and the diagnostic goes to stderr only: it does not become a
-  scan-level scanner error and does not change the CLI exit code the way a
-  cloud failure does. Documented rather than changed; see
-  [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md#identified-for-a-separate-issue) and
-  [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#source-code-crypto-analysis).
+- **Source-code analysis execution failures** — collection contract `0.2.0`
+  propagates bounded diagnostics through `LocalScanError` and `scanner_errors`,
+  retaining independently valid partial findings. Old or missing collection
+  versions remain ambiguous; integrity verification cannot establish their
+  execution completeness. See the
+  [collection contract](DETECTION_CHARACTERIZATION.md#execution-provenance-collection-contract-020).
 - **Confidence** — records whose evidence is indirect or incomplete carry a
   lower `confidence` (and, for the filesystem reference adapter, a
   `confidence_rationale`) rather than being presented as certain.

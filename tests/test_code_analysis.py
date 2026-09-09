@@ -1,7 +1,13 @@
 import subprocess
 from unittest.mock import patch
 
-from code_analysis.scanner import scan_source_for_crypto_usage
+import pytest
+
+from code_analysis.scanner import (
+    scan_source_for_crypto_usage,
+    scan_source_for_crypto_usage_findings,
+)
+from scanner.errors import LocalScanError
 
 
 def test_scan_source_detects_weak_md5_hash(tmp_path):
@@ -98,3 +104,23 @@ def test_scan_source_handles_timeout_gracefully(mock_run, tmp_path):
     df = scan_source_for_crypto_usage(str(tmp_path))
 
     assert df.empty
+
+
+@patch("code_analysis.scanner.subprocess.run")
+def test_normalized_code_scan_propagates_semgrep_failure(mock_run, tmp_path):
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=["semgrep"], returncode=2, stdout="", stderr="invalid rule"
+    )
+
+    with pytest.raises(LocalScanError, match="semgrep.*exit 2|exit 2"):
+        scan_source_for_crypto_usage_findings(str(tmp_path))
+
+
+@patch("code_analysis.scanner.subprocess.run")
+def test_normalized_code_scan_propagates_malformed_output(mock_run, tmp_path):
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=["semgrep"], returncode=0, stdout="not-json", stderr=""
+    )
+
+    with pytest.raises(LocalScanError, match="could not parse semgrep output"):
+        scan_source_for_crypto_usage_findings(str(tmp_path))

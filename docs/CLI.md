@@ -1237,11 +1237,9 @@ does not declare, or if `pyproject.toml` and `requirements.txt` drift apart.
 | **Partial** — findings were collected, then a provider, credential, or traversal failure stopped the scan | `1` | `Not complete` | The collected findings are still listed in *Detailed Findings*, and a `- Scanner error:` line names the failure |
 | **Failed** — a scanner errored before producing anything | `1` | `Not complete` | A `- Scanner error:` line, plus a *Scanner Versions* row for that scanner with a finding count of `0`, so it is never silently dropped |
 
-A `--type code` execution failure is the one case this table does not cover: it
-exits `0`, reports `Coverage` as if nothing constrained the scan, and shows a
-code-analysis *Scanner Versions* row with `0` findings that is indistinguishable
-from a genuinely clean result. Its diagnostic appears on stderr only. See
-[Exit Codes](#exit-codes).
+Code-analysis collection contract `0.2.0` follows the failed/partial rows above.
+Earlier or unrecorded collection versions may have suppressed execution errors;
+absence of errors in such historical evidence cannot establish completeness.
 
 A per-finding `errors` entry is a different thing from a scanner failure: it
 records an observation that partly failed (an unparsable PEM, a JKS entry the
@@ -1381,17 +1379,17 @@ output failure — a scanner failure, or a failure to write requested output or 
 evidence-store record after an otherwise successful scan — so automation can
 branch on the difference.
 
-**One documented exception to `1`:** a `--type code` *execution* failure —
-`semgrep` not installed, timed out, exiting non-zero, or emitting output that
-cannot be parsed — writes its diagnostic to stderr and returns an empty result
-instead of raising. It is therefore not recorded as a scanner error, and the run
-exits `0` with no findings, unlike an equivalent S3/GCS/Azure failure. Read
-stderr, not just the exit code, before treating an empty code-analysis result as
-"the source was analyzed and nothing matched". This asymmetry is characterized
-in [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#source-code-crypto-analysis)
-and tracked as a separate scanner-error-propagation concern in
-[CLAIMS_AUDIT.md](CLAIMS_AUDIT.md#identified-for-a-separate-issue); HG-010 did
-not change the behavior.
+**Code-analysis execution provenance:** missing executables, timeouts, nonzero
+exits, malformed/incomplete output and analyzer-reported errors populate
+`scanner_errors` and normally exit `1`. Valid partial findings survive when a
+complete JSON response contains independently valid entries. A legitimate empty
+result requires exit zero and explicit empty `results` and `errors` arrays.
+`--no-fail-on-error` permits exit `0` but does not erase recorded errors.
+Diagnostics contain fixed categories, not raw analyzer stderr. The collector
+version is recorded as `semgrep_crypto_rules 0.2.0`; it is not the Semgrep binary
+version. Historical evidence is not rewritten. See
+[the collection contract](DETECTION_CHARACTERIZATION.md#execution-provenance-collection-contract-020).
+A successful stored integrity check does not establish scanner success.
 
 A scope you asked for is not a failure: a cloud `--prefix`, an `--exclude`
 pattern, or a `--max-depth` boundary still exits `0`. Boundaries the filesystem

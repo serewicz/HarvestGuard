@@ -128,21 +128,14 @@ conditions itself on which scanners actually ran. Regression-tested in
 
 ## Identified for a separate issue
 
-**Source-code analysis scanner-error propagation asymmetry.** When
-`semgrep` is unavailable, times out, exits non-zero, or emits unparsable
-output, `scan_source_for_crypto_usage` (`code_analysis/scanner.py`) returns
-an empty result and writes its diagnostic to stderr. Unlike an equivalent
-S3/GCS/Azure failure, this does not raise, does not populate
-`scanner_errors`, and does not change the CLI exit code — so a code-analysis
-execution failure is indistinguishable, from the JSON/Markdown artifact
-alone, from a clean scan that found nothing. This is documented truthfully
-in [DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#source-code-crypto-analysis),
-`docs/CLI.md`, `docs/ASSET_INVENTORY.md`, and `reports.py`'s Known
-Limitations section, per this audit's explicit instruction not to change
-scanner behavior to resolve it. If the asymmetry needs fixing, it should be
-a narrowly scoped follow-up issue (propagate code-analysis execution
-failures through the same `scanner_errors`/nonzero-exit path the cloud
-scanners already use), not part of HG-010.
+**Source-code analysis scanner-error propagation asymmetry — corrected after
+this audit.** Collection contract `semgrep_crypto_rules 0.2.0` now uses the
+existing `LocalScanError`/`scanner_errors` path for execution and output
+failures. Usable partial findings survive; diagnostics exclude raw stderr.
+The earlier audit's stderr-only observations describe historical behavior,
+not this collection version. Old evidence is not upgraded, and a matching
+stored digest does not establish successful execution. See
+[DETECTION_CHARACTERIZATION.md](DETECTION_CHARACTERIZATION.md#execution-provenance-collection-contract-020).
 
 ## Areas remaining `Needs Validation` for v0.1
 
