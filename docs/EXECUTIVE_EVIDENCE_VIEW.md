@@ -66,7 +66,10 @@ export time is an error, not a reason to substitute "now".
 
 - Historical technical derivations use the run's **recorded scan time** and
   nothing else.
-- Export time is separate, explicit and never used for a derivation.
+- Export time is separate, explicit and never used for a derivation. ISO-8601
+  strings and datetime inputs are validated and normalized to UTC; naive values
+  are interpreted as UTC. Equivalent instants normalize identically, retaining
+  supplied fractional seconds. Malformed or empty inputs are rejected.
 - A missing or unreadable recorded scan time produces an unknown
   (`EV-CHK-006`), never an invented collection time. Time-based derivations are
   then withheld, and the `expired_certificates` count is omitted rather than
@@ -83,8 +86,10 @@ unchanged; only stored-run readers pass the recorded scan time.
 
 A reference is `(scan_id, ordinal, finding_id)`:
 
+- `scan_id` is always the containing stored run's identity, never inferred
+  from the finding; resolution requires exact run identity, with no wildcard;
 - `ordinal` is the snapshot's occurrence index in canonical stored order, and is
-  the identity;
+  the identity within that run;
 - `finding_id` is carried for traceability, and is **not** the key.
 
 Two snapshots that share a `finding_id` — within a run or across runs — remain
@@ -98,6 +103,18 @@ silently dropped by reconstruction (`EV-EXC-003` names such fields). To supply
 it, `evidence_store.StoredScanRun` gained a `raw_finding_snapshots` field,
 populated by the existing verified read path; every pre-existing attribute is
 unchanged.
+
+Each occurrence exposes `finding: RetainedFinding`, an immutable projection of
+the reconstructed finding fields, plus its exact `raw_snapshot`. The projected
+`observed_at` comes only from that retained snapshot: absent/null means `None`
+and is disclosed as unknown. The loader's historical clock default is never
+exposed by the occurrence. The original reconstructed finding and raw snapshot
+are not mutated. Consumers use the occurrence's retained fields or raw snapshot,
+not a newly reconstructed `NormalizedFinding`.
+
+Missing recorded finding scan IDs make reference consistency unknown; conflicting
+IDs fail that check. Both conditions remain in the original evidence, while
+every disclosure reference still resolves to the containing run and ordinal.
 
 ## Status contract
 
@@ -145,7 +162,7 @@ depends on declared scope.
 | `EV-CHK-002` | `supported_evidence_schema` | Compares the run's and each snapshot's normalized-finding schema version with the versions this policy interprets. | `passed`, `unknown` |
 | `EV-CHK-003` | `supported_collection_contract` | Matches every recorded scanner/version pair against the supported-contract mapping below. | `passed`, `unknown` |
 | `EV-CHK-004` | `execution_completeness` | Reads recorded `scanner_errors`, and requires `EV-CHK-003` to have passed before an empty error list may be read as successful execution. | `passed`, `unknown` |
-| `EV-CHK-005` | `reference_consistency` | Resolves every reference against stored snapshots in stored order and compares each snapshot's recorded `scan_id`/`finding_id` with the run identity and the reconstructed record. | `passed`, `failed` |
+| `EV-CHK-005` | `reference_consistency` | Resolves every reference against stored snapshots in stored order and compares each snapshot's recorded `scan_id`/`finding_id` with the run identity and the reconstructed record. | `passed`, `failed`, `unknown` |
 | `EV-CHK-006` | `scan_time_basis` | Parses the recorded `scan_time` as ISO-8601. | `passed`, `unknown` |
 | `EV-CHK-007` | `scope_observability` | Separates by-design/configured coverage records (`max_depth_boundary`, `skipped_special_file`) from records showing requested scope that could not be read. | `passed`, `unknown` |
 | `EV-CHK-008` | `dated_expiration_basis` | Establishes whether the declared scope includes a scanner that records certificate validity metadata, and whether a recorded scan time is available to date it against. | `passed`, `unknown`, `not_applicable` |
@@ -249,7 +266,14 @@ not a signature, not source authenticity, and no protection against deliberate
 modification of both the payload and the digest by anyone who can write to the
 evidence database. It never establishes that a scanner succeeded.
 
-A digest mismatch fails closed in the existing loader: `EvidenceIntegrityError`,
+The direct builder calls `evidence_store.verify_loaded_scan_run()` before
+projecting. It uses the existing canonical run payload builder and
+`compute_evidence_digest()`, plus an immutable baseline of the loader's
+reconstructed fields, to reject changes to either the retained payload or its
+in-memory reconstruction. This performs no storage writes and defines no new
+digest algorithm. A missing digest remains unperformed, never passed.
+
+A digest mismatch fails closed in the existing loader or in-memory check: `EvidenceIntegrityError`,
 `ScanRunNotFoundError` and `EvidenceStoreError` propagate unchanged, and **no**
 view is constructed — neither a normal view nor one carrying the rejected
 payload. A bounded failure diagnostic may name the requested run and the failed

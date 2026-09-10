@@ -630,7 +630,10 @@ def test_projection_does_not_write_or_alter_stored_evidence(tmp_path):
     stored = load_scan_run(db, "run-1")
     view = load_executive_evidence_view(db, "run-1", export_time=EXPORT_TIME)
     assert db.read_bytes() == before
-    assert [occurrence.finding for occurrence in view.occurrences] == stored.findings
+    for occurrence, finding in zip(view.occurrences, stored.findings):
+        assert dict(occurrence.finding.values) == {
+            name: getattr(finding, name) for name in NormalizedFinding.__dataclass_fields__
+        }
     assert [occurrence.finding.finding_id for occurrence in view.occurrences] == [
         finding.finding_id for finding in stored.findings
     ]
@@ -706,3 +709,117 @@ def test_undeclared_scanners_do_not_require_provenance(tmp_path):
     assert view.check("EV-CHK-003").state == CHECK_PASSED
     assert "filesystem" not in view.check("EV-CHK-003").statement
     assert any("a valid empty result" in item.statement for item in view.conclusions)
+
+
+def test_missing_finding_scan_ids_keep_containing_run_references(tmp_path):
+    views = []
+    for scan_id in ("first", "second"):
+        views.append(stored_view(
+            tmp_path / scan_id, code_context(scan_id=scan_id),
+            [code_finding(scan_id=None)], scan_id=scan_id,
+        ))
+    first, second = views
+    assert first.occurrences[0].reference.scan_id == "first"
+    assert second.occurrences[0].reference.scan_id == "second"
+    for view, other in ((first, second), (second, first)):
+        assert view.occurrences[0].finding.scan_id is None
+        assert view.occurrences[0].raw_snapshot["scan_id"] is None
+        assert view.check("EV-CHK-005").state == CHECK_UNKNOWN
+        assert "missing" in view.check("EV-CHK-005").statement
+        assert view.resolve(view.check("EV-CHK-005").references[0]) == view.occurrences[0]
+        for ref in (other.occurrences[0].reference, EvidenceReference("", 0)):
+            with pytest.raises(KeyError):
+                view.resolve(ref)
+
+
+def test_mismatched_scan_id_disclosures_resolve(tmp_path):
+    view = stored_view(tmp_path, code_context(), [
+        code_finding(scan_id="wrong", full_provenance=False),
+    ])
+    assert view.check("EV-CHK-005").state == CHECK_FAILED
+    assert view.occurrences[0].finding.scan_id == "wrong"
+    for record in view.checks + view.exceptions + view.observations + view.conclusions:
+        for ref in record.references:
+            assert ref.scan_id == view.scan_id
+            assert view.resolve(ref) == view.occurrences[ref.ordinal]
+
+
+def test_missing_retained_observation_time_ignores_reconstruction_clock(tmp_path, monkeypatch):
+    import findings as finding_module
+
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(db, "run-1", code_context(), [code_finding()])
+    rewrite_snapshots(db, "run-1", lambda p: {
+        key: value for key, value in p.items() if key != "observed_at"
+    })
+    original = finding_module._normalize_timestamp
+    views = []
+    for stamp in ("2040-01-01T00:00:00+00:00", "2050-01-01T00:00:00+00:00"):
+        monkeypatch.setattr(
+            finding_module, "_normalize_timestamp",
+            lambda value, stamp=stamp: stamp if value is None else original(value),
+        )
+        run = load_scan_run(db, "run-1")
+        assert run.findings[0].observed_at == stamp
+        view = build_executive_evidence_view(run, EXPORT_TIME)
+        assert run.findings[0].observed_at == stamp
+        assert view.occurrences[0].finding.observed_at is None
+        assert "observed_at" not in view.occurrences[0].raw_snapshot
+        views.append(view)
+    assert views[0] == views[1]
+
+
+@pytest.mark.parametrize("change", [
+    "errors", "scope", "findings", "raw", "producer", "schema", "scan_time",
+])
+def test_direct_builder_rejects_changed_loaded_payload(tmp_path, change):
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(db, "run-1", code_context(errors=["execution failed"]), [code_finding()])
+    run = load_scan_run(db, "run-1")
+    if change == "errors":
+        run.context.scanner_errors.clear()
+    elif change == "scope":
+        run.context.scanners.append("filesystem")
+    elif change == "findings":
+        run.findings[0] = dataclasses.replace(run.findings[0], evidence="changed")
+    elif change == "raw":
+        run.raw_finding_snapshots[0]["evidence"] = "changed"
+    elif change == "producer":
+        run = dataclasses.replace(run, harvestguard_version="changed")
+    elif change == "schema":
+        run = dataclasses.replace(run, finding_schema_version="changed")
+    else:
+        run = dataclasses.replace(run, context=dataclasses.replace(
+            run.context, scan_time="2030-01-01T00:00:00+00:00"
+        ))
+    with pytest.raises(EvidenceIntegrityError):
+        build_executive_evidence_view(run, EXPORT_TIME)
+
+
+def test_direct_builder_reverification_and_unperformed_digest(tmp_path):
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(db, "run-1", code_context(), [code_finding()])
+    run = load_scan_run(db, "run-1")
+    view = build_executive_evidence_view(run, EXPORT_TIME)
+    assert view == load_executive_evidence_view(db, "run-1", EXPORT_TIME)
+    assert view.occurrences[0].finding.observed_at == run.raw_finding_snapshots[0]["observed_at"]
+    undigested = dataclasses.replace(run, evidence_digest="")
+    view = build_executive_evidence_view(undigested, EXPORT_TIME)
+    assert view.check("EV-CHK-001").state == "unperformed"
+    assert view.status == STATUS_INCOMPLETE
+
+
+@pytest.mark.parametrize("stamp", [
+    "2026-09-10T00:00:00Z", "2026-09-10T02:00:00+02:00",
+    "2026-09-10T00:00:00", datetime(2026, 9, 10),
+    datetime(2026, 9, 10, tzinfo=timezone.utc),
+])
+def test_export_timestamps_normalize_to_utc(tmp_path, stamp):
+    view = stored_view(tmp_path, code_context(), [], export_time=stamp)
+    assert view.export_time == EXPORT_TIME
+
+
+@pytest.mark.parametrize("stamp", ["not-a-time", "2026-99-99T00:00:00Z", "", " ", None])
+def test_invalid_export_timestamps_are_rejected(tmp_path, stamp):
+    with pytest.raises(ExecutiveEvidenceError):
+        stored_view(tmp_path, code_context(), [], export_time=stamp)

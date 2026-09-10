@@ -47,7 +47,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from evidence_store import StoredScanRun, load_scan_run
+from evidence_store import StoredScanRun, load_scan_run, verify_loaded_scan_run
 from findings import SCHEMA_VERSION as CURRENT_FINDING_SCHEMA_VERSION
 from findings import NormalizedFinding
 from harvestguard_version import __version__ as HARVESTGUARD_VERSION
@@ -225,23 +225,42 @@ class EvidenceReference:
 
 
 @dataclass(frozen=True)
+class RetainedFinding:
+    """Immutable projection fields, with observation time taken only from storage.
+
+    NormalizedFinding's legacy reconstruction can invent an observed_at value.
+    This representation exposes the retained value (None when absent), never
+    that reconstruction default. Raw snapshots remain separately available.
+    """
+
+    values: Mapping[str, Any]
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self.values[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+@dataclass(frozen=True)
 class FindingOccurrence:
     """One retained snapshot occurrence, in canonical stored order.
 
     `raw_snapshot` is the exact stored payload, including any key this release
     does not recognize, so a projection built by a newer or older reader does
     not silently discard what was stored. `finding` is the reconstructed
-    immutable `NormalizedFinding`, unchanged.
+    projection of its fields; absent retained observation time stays unknown.
     """
 
     ordinal: int
-    finding: NormalizedFinding
+    finding: RetainedFinding
     raw_snapshot: Mapping[str, Any]
+    scan_id: str
 
     @property
     def reference(self) -> EvidenceReference:
         return EvidenceReference(
-            scan_id=self.finding.scan_id or "",
+            scan_id=self.scan_id,
             ordinal=self.ordinal,
             finding_id=self.finding.finding_id,
         )
@@ -370,7 +389,7 @@ class ExecutiveEvidenceView:
         Resolution is by ordinal, so two occurrences sharing a `finding_id`
         resolve to their own distinct snapshots.
         """
-        if reference.scan_id and reference.scan_id != self.scan_id:
+        if reference.scan_id != self.scan_id:
             raise KeyError(reference.to_reference_string())
         for occurrence in self.occurrences:
             if occurrence.ordinal == reference.ordinal:
@@ -399,6 +418,7 @@ def build_executive_evidence_view(
             "an executive evidence view is built from a verified StoredScanRun, "
             f"got {type(run).__name__}"
         )
+    verify_loaded_scan_run(run)
     export_stamp = _normalize_export_time(export_time)
     context = run.context
     occurrences = _occurrences(run)
@@ -411,7 +431,7 @@ def build_executive_evidence_view(
 
     observations = _observations(run, occurrences, counts)
     conclusions = _conclusions(run, occurrences, counts, scan_dt, checks)
-    unknowns = _unknowns(checks, scan_dt)
+    unknowns = _unknowns(checks, scan_dt, occurrences)
 
     return ExecutiveEvidenceView(
         schema_version=EXECUTIVE_SCHEMA_VERSION,
@@ -493,8 +513,15 @@ def _occurrences(run: StoredScanRun) -> tuple[FindingOccurrence, ...]:
         occurrences.append(
             FindingOccurrence(
                 ordinal=ordinal,
-                finding=finding,
+                finding=RetainedFinding(_freeze({
+                    **{
+                        name: getattr(finding, name)
+                        for name in NormalizedFinding.__dataclass_fields__
+                    },
+                    "observed_at": payload.get("observed_at"),
+                })),
                 raw_snapshot=_freeze(dict(payload)),
+                scan_id=run.scan_id,
             )
         )
     return tuple(occurrences)
@@ -554,8 +581,10 @@ def _integrity_check(run: StoredScanRun) -> CheckRecord:
     method = (
         "evidence_store.load_scan_run() recomputed the stored run's SHA-256 "
         "digest over its canonical run payload and ordered finding snapshots "
-        "and compared it with the stored digest before this projection was "
-        "built. A mismatch fails closed in the loader, so no view is produced."
+        "and compared it with the stored digest. verify_loaded_scan_run() "
+        "rechecked the current payload with the same canonical digest definition "
+        "and checked reconstruction consistency before this projection was built. "
+        "A mismatch fails closed with EvidenceIntegrityError; no view is produced."
     )
     limitations = (
         "Internal consistency of the stored run only: not a signature, not "
@@ -835,6 +864,7 @@ def _reference_check(
     )
     problems: list[str] = []
     failing: list[EvidenceReference] = []
+    missing: list[EvidenceReference] = []
     context_scan_id = run.context.scan_id
     if context_scan_id and context_scan_id != run.scan_id:
         problems.append(
@@ -848,7 +878,9 @@ def _reference_check(
             finding_id=occurrence.finding.finding_id,
         )
         snapshot_scan_id = occurrence.raw_snapshot.get("scan_id")
-        if snapshot_scan_id is not None and str(snapshot_scan_id) != run.scan_id:
+        if snapshot_scan_id is None or snapshot_scan_id == "":
+            missing.append(reference)
+        elif str(snapshot_scan_id) != run.scan_id:
             problems.append(
                 f"snapshot {reference.to_reference_string()} records scan_id "
                 f"{snapshot_scan_id}"
@@ -876,8 +908,26 @@ def _reference_check(
             statement=(
                 f"{len(problems)} stored reference inconsistency(ies) were "
                 "found: " + "; ".join(problems) + "."
+                + (f" {len(missing)} snapshot(s) also have a missing scan_id." if missing else "")
             ),
-            references=tuple(failing),
+            references=tuple(sorted(failing + missing, key=lambda ref: ref.ordinal)),
+            limitations=limitations,
+        )
+    if missing:
+        return CheckRecord(
+            check_id="EV-CHK-005",
+            name="reference_consistency",
+            title="Evidence reference consistency",
+            required=True,
+            applicable=True,
+            state=CHECK_UNKNOWN,
+            method=method,
+            statement=(
+                f"{len(missing)} retained snapshot(s) have a missing scan_id. "
+                "Their recorded run identity is unknown; references use the "
+                "containing stored run and occurrence without changing the evidence."
+            ),
+            references=tuple(missing),
             limitations=limitations,
         )
     duplicates = _duplicate_finding_ids(occurrences)
@@ -1582,13 +1632,23 @@ def _conclusions(
     return tuple(records)
 
 
-def _unknowns(checks: tuple[CheckRecord, ...], scan_dt: datetime | None) -> tuple[str, ...]:
+def _unknowns(
+    checks: tuple[CheckRecord, ...],
+    scan_dt: datetime | None,
+    occurrences: tuple[FindingOccurrence, ...],
+) -> tuple[str, ...]:
     """Everything this view could not establish, stated plainly."""
     unknowns = [
         f"{check.check_id} {check.name}: {check.statement}"
         for check in checks
         if check.state in (CHECK_UNKNOWN, CHECK_UNPERFORMED)
     ]
+    missing_times = sum(occ.finding.observed_at is None for occ in occurrences)
+    if missing_times:
+        unknowns.append(
+            f"{missing_times} retained snapshot(s) have no observed_at; "
+            "their observation time is unknown and is not reconstructed."
+        )
     unknowns.append(
         "Conflicts between records: not assessed. No conflict assessment ran "
         "for this run."
@@ -1628,7 +1688,9 @@ def _parse_timestamp(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
     try:
-        parsed = datetime.fromisoformat(value.strip())
+        text = value.strip()
+        # Python 3.10's fromisoformat does not accept the ISO UTC "Z" suffix.
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
     except ValueError:
         return None
     if parsed.tzinfo is None:
@@ -1638,15 +1700,14 @@ def _parse_timestamp(value: Any) -> datetime | None:
 
 def _normalize_export_time(value: str | datetime) -> str:
     """The caller's explicit export time, normalized but never invented."""
-    if isinstance(value, datetime):
-        stamp = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-        return stamp.replace(microsecond=0).isoformat()
-    if isinstance(value, str) and value.strip():
-        return value.strip()
-    raise ExecutiveEvidenceError(
-        "export time must be an explicit timestamp string or datetime; this "
-        "projection never reads the current clock"
-    )
+    stamp = value if isinstance(value, datetime) else _parse_timestamp(value)
+    if stamp is None:
+        raise ExecutiveEvidenceError(
+            "export time must be an explicit valid ISO-8601 timestamp or datetime"
+        )
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(timezone.utc).isoformat()
 
 
 def _freeze(value: Any) -> Any:
