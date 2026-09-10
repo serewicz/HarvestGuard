@@ -74,7 +74,9 @@ def test_workflow_trigger_is_manual_only(workflow):
 
 
 def test_build_job_permissions_are_read_only(build_job):
-    assert build_job["permissions"] == {"contents": "read", "issues": "read"}
+    assert build_job["permissions"] == {
+        "contents": "read", "issues": "read", "id-token": "write",
+    }
 
 
 def test_build_job_has_no_write_permissions(build_job):
@@ -475,6 +477,7 @@ def test_correct_n_runs_only_after_a_blockers_verdict_from_the_prior_review(work
 @pytest.mark.parametrize("n", CORRECTION_CYCLES)
 def test_correct_n_permissions_are_read_only(workflow, n):
     assert workflow["jobs"][f"correct_{n}"]["permissions"] == {
+        "id-token": "write",
         "contents": "read",
         "issues": "read",
         "pull-requests": "read",
@@ -704,10 +707,13 @@ def test_gh_pr_create_appears_exactly_once_in_the_whole_workflow(workflow):
 
 def test_no_agent_runs_in_a_write_capable_job(workflow):
     # "Write-capable" covers both a write-scoped GITHUB_TOKEN and the
-    # automation PAT -- an agent may hold neither.
+    # automation PAT -- an agent may hold neither. OIDC token issuance
+    # does not grant repository write authority.
     for job_id, job in workflow["jobs"].items():
         perms = job.get("permissions", {})
-        has_write = any(scope == "write" for scope in perms.values())
+        has_write = any(
+            level == "write" for scope, level in perms.items() if scope != "id-token"
+        )
         has_write = has_write or "HARVESTGUARD_AUTOMATION_TOKEN" in repr(job)
         runs_agent = any(
             "claude-code-action" in u or "codex-action" in u for u in _all_uses(job)
@@ -1330,9 +1336,9 @@ def test_failure_diagnostics_steps_precede_the_stage_and_check_step(workflow, jo
 @pytest.mark.parametrize("job_id", CLAUDE_PROMPT_JOB_IDS)
 def test_failure_diagnostics_job_permissions_unchanged_and_read_only(workflow, job_id):
     # Diagnostics upload requires no additional permission -- the job's
-    # existing read-only permissions block is untouched by this feature.
+    # repository permissions remain read-only; OIDC is only for authentication.
     perms = workflow["jobs"][job_id]["permissions"]
-    assert all(scope == "read" for scope in perms.values())
+    assert all(level == "read" for scope, level in perms.items() if scope != "id-token")
 
 
 def test_no_failure_diagnostics_step_references_secrets(workflow):
@@ -1344,11 +1350,7 @@ def test_no_failure_diagnostics_step_references_secrets(workflow):
             "OPENAI_API_KEY",
             "GITHUB_TOKEN",
         ):
-            # These secrets legitimately never appear in build/correct_N at
-            # all except ANTHROPIC_API_KEY, which is passed only to the
-            # claude-code-action `with:` block (not a `run:` step) -- so no
-            # `run:` step text (including the new diagnostics steps) may
-            # reference any of them.
+            # No run step, including diagnostics, may reference these secrets.
             assert forbidden not in combined, f"{job_id}: {forbidden} referenced in a run: step"
 
 
@@ -1381,3 +1383,39 @@ def test_failure_diagnostics_configured_max_turns_matches_workflow(workflow):
         if line.startswith("--max-turns")
     )
     assert int(workflow_max_turns) == diag.CONFIGURED_MAX_TURNS
+
+
+@pytest.mark.parametrize("job_id", ("build",) + CORRECT_IDS)
+def test_claude_uses_only_tested_workload_identity(workflow, job_id):
+    job = workflow["jobs"][job_id]
+    assert job["permissions"]["id-token"] == "write"
+    steps = [
+        step for step in job["steps"]
+        if step.get("uses") == "anthropics/claude-code-action@v1"
+    ]
+    assert len(steps) == (2 if job_id == "build" else 1)
+    expected = {
+        "anthropic_federation_rule_id": "fdrl_01TsUsxYdC4kKk8JH3KAJocd",
+        "anthropic_organization_id": "57ddc762-972e-4da0-b45e-b5771a1eb597",
+        "anthropic_service_account_id": "svac_01G2TwbEvoHVopKcbQ3KwTiN",
+        "anthropic_workspace_id": "wrkspc_012VrYeLuZYsW7H5ACbo1F42",
+    }
+    for step in steps:
+        inputs = step["with"]
+        for key, value in expected.items():
+            assert inputs[key] == value
+        assert "anthropic_api_key" not in inputs
+        assert "claude_code_oauth_token" not in inputs
+        assert "secrets.ANTHROPIC_API_KEY" not in repr(step)
+
+
+def test_oidc_permission_is_exclusive_to_claude_jobs(workflow):
+    assert "id-token" not in workflow.get("permissions", {})
+    for job_id, job in workflow["jobs"].items():
+        if job_id not in ("build",) + CORRECT_IDS:
+            assert "id-token" not in job.get("permissions", {})
+    assert "ANTHROPIC_API_KEY" not in WORKFLOW_PATH.read_text()
+
+
+def test_temporary_wif_workflow_is_absent():
+    assert not WORKFLOW_PATH.with_name("anthropic-wif-test.yml").exists()

@@ -121,14 +121,19 @@ name: Agent Orchestrator
 #      the full authority split: Claude read-only, deterministic publish
 #      only for writes, Codex read-only.
 #
+# Claude authentication uses GitHub OIDC and Anthropic Workload Identity Federation.
+# The Anthropic federation rule is administratively restricted to
+# serewicz/HarvestGuard, main, and workflow_dispatch; YAML does not enforce
+# those federation restrictions. The federated service account is limited to
+# the HarvestGuard Anthropic workspace. Its short-lived token remains subject
+# to that workspace's billing, rate, and spending limits.
+# Only Claude jobs receive id-token: write: permission to request an OIDC token,
+# not repository write access. Federation identifiers are configuration, not
+# credentials; no static API key or OAuth token fallback is configured.
+#
 # Required secrets (Tim must add these in GitHub repo Settings -> Secrets
 # and variables -> Actions -> New repository secret; this workflow does not,
 # and cannot, create them):
-#
-#   ANTHROPIC_API_KEY  --  a dedicated Anthropic API key for this workflow.
-#     Used only via `secrets.ANTHROPIC_API_KEY` in the `build` job, never
-#     printed, never committed, never exposed in issue/PR text, and never
-#     referenced at all in `publish` or `review`.
 #
 #   OPENAI_API_KEY  --  a dedicated OpenAI API key for this workflow. Used
 #     only via `secrets.OPENAI_API_KEY` in the Codex review jobs, never
@@ -212,6 +217,7 @@ jobs:
     name: Build (Claude)
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: read
       issues: read
     outputs:
@@ -402,7 +408,10 @@ jobs:
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_federation_rule_id: fdrl_01TsUsxYdC4kKk8JH3KAJocd
+          anthropic_organization_id: 57ddc762-972e-4da0-b45e-b5771a1eb597
+          anthropic_service_account_id: svac_01G2TwbEvoHVopKcbQ3KwTiN
+          anthropic_workspace_id: wrkspc_012VrYeLuZYsW7H5ACbo1F42
           github_token: ${{ github.token }}
           prompt: |
             You are the HarvestGuard Agent Orchestrator's Builder (Claude), operating
@@ -642,7 +651,10 @@ jobs:
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_federation_rule_id: fdrl_01TsUsxYdC4kKk8JH3KAJocd
+          anthropic_organization_id: 57ddc762-972e-4da0-b45e-b5771a1eb597
+          anthropic_service_account_id: svac_01G2TwbEvoHVopKcbQ3KwTiN
+          anthropic_workspace_id: wrkspc_012VrYeLuZYsW7H5ACbo1F42
           github_token: ${{ github.token }}
           prompt: |
             You are the HarvestGuard Agent Orchestrator's Builder (Claude),
@@ -1469,6 +1481,7 @@ jobs:
     if: needs.review.result == 'success' && needs.review.outputs.review_status == 'BLOCKERS'
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: read
       issues: read
       pull-requests: read
@@ -1600,7 +1613,10 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_federation_rule_id: fdrl_01TsUsxYdC4kKk8JH3KAJocd
+          anthropic_organization_id: 57ddc762-972e-4da0-b45e-b5771a1eb597
+          anthropic_service_account_id: svac_01G2TwbEvoHVopKcbQ3KwTiN
+          anthropic_workspace_id: wrkspc_012VrYeLuZYsW7H5ACbo1F42
           github_token: ${{ github.token }}
           prompt: |
             You are the HarvestGuard Agent Orchestrator's Builder (Claude),
@@ -2351,6 +2367,7 @@ jobs:
     if: needs.review_1.result == 'success' && needs.review_1.outputs.review_status == 'BLOCKERS'
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: read
       issues: read
       pull-requests: read
@@ -2482,7 +2499,10 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_federation_rule_id: fdrl_01TsUsxYdC4kKk8JH3KAJocd
+          anthropic_organization_id: 57ddc762-972e-4da0-b45e-b5771a1eb597
+          anthropic_service_account_id: svac_01G2TwbEvoHVopKcbQ3KwTiN
+          anthropic_workspace_id: wrkspc_012VrYeLuZYsW7H5ACbo1F42
           github_token: ${{ github.token }}
           prompt: |
             You are the HarvestGuard Agent Orchestrator's Builder (Claude),
@@ -3233,6 +3253,7 @@ jobs:
     if: needs.review_2.result == 'success' && needs.review_2.outputs.review_status == 'BLOCKERS'
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: read
       issues: read
       pull-requests: read
@@ -3364,7 +3385,10 @@ jobs:
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_federation_rule_id: fdrl_01TsUsxYdC4kKk8JH3KAJocd
+          anthropic_organization_id: 57ddc762-972e-4da0-b45e-b5771a1eb597
+          anthropic_service_account_id: svac_01G2TwbEvoHVopKcbQ3KwTiN
+          anthropic_workspace_id: wrkspc_012VrYeLuZYsW7H5ACbo1F42
           github_token: ${{ github.token }}
           prompt: |
             You are the HarvestGuard Agent Orchestrator's Builder (Claude),
