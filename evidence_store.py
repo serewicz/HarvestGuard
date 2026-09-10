@@ -182,6 +182,14 @@ class StoredScanRun:
     harvestguard_version: str
     finding_schema_version: str
     evidence_digest: str
+    # The exact verified snapshot payloads, in stored order, as they were
+    # digested. `findings` above is the reconstruction of those payloads through
+    # `finding_from_dict`, which ignores keys this release does not know; a
+    # reader that needs the stored payload itself -- for technical traceability,
+    # or to report a field written by a different schema version instead of
+    # silently dropping it -- reads this. Declared last with a default so
+    # existing construction and every existing attribute are unaffected.
+    raw_finding_snapshots: tuple[dict[str, Any], ...] = ()
 
 
 def store_scan_run(
@@ -343,6 +351,7 @@ def load_scan_run(db_path: str | Path, scan_id: str) -> StoredScanRun:
         harvestguard_version=run["harvestguard_version"],
         finding_schema_version=run["finding_schema_version"],
         evidence_digest=stored_digest,
+        raw_finding_snapshots=tuple(finding_dicts),
     )
 
 
