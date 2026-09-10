@@ -662,6 +662,18 @@ def _scanner_pairs(run: StoredScanRun) -> tuple[tuple[str, str], ...]:
     pairs = {
         (str(name), str(version)) for name, version in run.context.scanner_versions.items()
     }
+    # Stored scope uses CLI labels; provenance uses normalized scanner names.
+    # Reconcile names only, never substitute a current scanner version.
+    scope_names = {
+        "crypto inventory": "crypto_inventory",
+        "sensitive data": "sensitive_data_classifier",
+        "code analysis": "semgrep_crypto_rules",
+        "azure blob": "azure_blob",
+    }
+    for declared in run.context.scanners:
+        name = scope_names.get(str(declared), str(declared))
+        if name not in run.context.scanner_versions:
+            pairs.add((name, "unknown"))
     pairs.update(
         (str(finding.scanner_name), str(finding.scanner_version)) for finding in run.findings
     )

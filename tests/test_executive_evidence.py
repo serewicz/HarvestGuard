@@ -229,7 +229,7 @@ def test_missing_scanner_provenance_is_incomplete(tmp_path):
     view = stored_view(tmp_path, code_context(versions={}), [])
     assert view.status == STATUS_INCOMPLETE
     assert view.check("EV-CHK-003").state == CHECK_UNKNOWN
-    assert "no scanner/version pair" in view.check("EV-CHK-003").statement
+    assert "semgrep_crypto_rules unknown" in view.check("EV-CHK-003").statement
 
 
 def test_optional_provenance_omission_is_a_named_warning(tmp_path):
@@ -677,3 +677,32 @@ def test_expired_certificate_helper_keeps_its_legacy_default():
         ]
         == 0
     )
+
+
+@pytest.mark.parametrize("declared, missing", [
+    (["filesystem", "code analysis"], ["filesystem"]),
+    (["filesystem", "crypto inventory", "code analysis"],
+     ["filesystem", "crypto_inventory"]),
+    (["filesystem", "semgrep_crypto_rules"], ["filesystem"]),
+])
+def test_declared_scanners_missing_versions_are_incomplete(tmp_path, declared, missing):
+    context = dataclasses.replace(code_context(), scanners=declared, scan_type="all")
+    view = stored_view(tmp_path, context, [])
+    contract = view.check("EV-CHK-003")
+    assert contract.state == CHECK_UNKNOWN
+    for scanner in missing:
+        assert f"{scanner} unknown" in contract.statement
+    assert view.check("EV-CHK-004").state == CHECK_UNKNOWN
+    assert view.status == STATUS_INCOMPLETE
+    assert not any("a valid empty result" in item.statement for item in view.conclusions)
+    assert view == load_executive_evidence_view(
+        tmp_path / "evidence.sqlite", "run-1", export_time=EXPORT_TIME
+    )
+
+
+def test_undeclared_scanners_do_not_require_provenance(tmp_path):
+    view = stored_view(tmp_path, code_context(), [])
+    assert view.status == STATUS_VERIFIED
+    assert view.check("EV-CHK-003").state == CHECK_PASSED
+    assert "filesystem" not in view.check("EV-CHK-003").statement
+    assert any("a valid empty result" in item.statement for item in view.conclusions)

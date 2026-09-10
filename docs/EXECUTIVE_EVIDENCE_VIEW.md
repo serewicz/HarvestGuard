@@ -178,6 +178,14 @@ scanner whose failure semantics are undocumented does not establish that the
 scanner ran to completion. Adding a pair to this table is a policy change and
 requires the contract to be documented first.
 
+Every scanner declared in stored scope must have a recorded collection-version
+mapping. Scope labels are reconciled to normalized scanner names without
+inferring a version. A missing mapping is explicitly represented as
+`<scanner> unknown`, making the collection-contract and execution-completeness
+checks unknown, even with zero findings and no scanner errors. Undeclared
+scanners do not acquire a missing-provenance requirement; existing recorded
+pairs and finding provenance remain evaluated as before.
+
 Being listed here says nothing about detection quality or coverage. It says only
 that the scanner's failure semantics are known.
 
