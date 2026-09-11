@@ -251,6 +251,35 @@ scan-history UI, and drift comparison between runs remain future work; they are
 expected to consume this durable record rather than introduce a second
 persistence model.
 
+### Shared Executive Evidence Projection
+
+One derived read model sits between a verified stored run and any
+executive-facing renderer (`executive_evidence.py`). A stored scan run is read
+through the existing verified load path, projected once into an immutable
+executive view — scan identity and declared scope, identified checks with their
+methods, results and limitations, existing evidence counts, observations and
+resolvable evidence references, bounded technical conclusions, unknowns and
+named exceptions — and renderers consume that projection. No renderer derives
+status, counts, references or conclusions independently, so Markdown and an
+executive JSON export cannot assign different meanings to the same stored run.
+
+The projection is derived, never stored: it adds no schema, no verifier, no
+scanner, and performs no scanning at export time. It reuses `ScanReportContext`,
+`scanner_errors`, the evidence store's verified loading and digest contract, and
+the existing reporting and count helpers. Derived check and explanation records
+are kept separate from the immutable `NormalizedFinding` snapshots they
+reference. Historical derivations use the run's recorded scan time; export time
+is an explicit, separate input, so a fixed stored run and export time project
+identically every time. A run the loader rejects produces its bounded failure
+and no view at all.
+
+The status vocabulary, the required-check policy, the supported scanner/version
+collection-contract mapping, evidence-reference identity and the executive JSON
+schema are specified in
+[EXECUTIVE_EVIDENCE_VIEW.md](EXECUTIVE_EVIDENCE_VIEW.md). The model exists and
+is tested; no executive renderer, export format or CLI mode ships against it
+yet.
+
 ### CLI and Service Layer
 
 The CLI is the first stable user interface for scanner execution and export.

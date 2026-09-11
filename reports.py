@@ -506,7 +506,17 @@ def format_markdown_report(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def summarize_findings(findings: list[NormalizedFinding]) -> dict[str, int]:
+def summarize_findings(
+    findings: list[NormalizedFinding], reference_time: datetime | None = None
+) -> dict[str, int]:
+    """Existing scan counts, unchanged for every current caller.
+
+    `reference_time` is the instant `expired_certificates` is dated against.
+    It defaults to None, which keeps the historical behaviour of reading the
+    current clock, so console and Markdown output is unaffected. A caller
+    reporting on a *stored* run passes the run's recorded scan time instead, so
+    a historical count does not silently change every time it is re-exported.
+    """
     by_source = Counter(finding.source_type for finding in findings)
     # Coverage-limitation findings (an unreadable directory, a directory beyond
     # max_depth, a symlink/special file skipped for safety) are deliberately
@@ -542,7 +552,9 @@ def summarize_findings(findings: list[NormalizedFinding]) -> dict[str, int]:
         "encrypted_keys": sum("Encrypted" in finding.asset_type for finding in findings),
         "ssh_keys": sum("OpenSSH" in finding.asset_type for finding in findings),
         "pkcs12": sum("PKCS#12" in finding.asset_type for finding in findings),
-        "expired_certificates": sum(_is_expired_certificate(finding) for finding in certificates),
+        "expired_certificates": sum(
+            _is_expired_certificate(finding, reference_time) for finding in certificates
+        ),
         "sensitive_files": by_source["local_sensitive_data"],
         "semgrep_findings": by_source["code_analysis"],
         "malformed_assets": sum("Malformed" in finding.asset_type for finding in findings),
@@ -718,7 +730,16 @@ def _finding_sort_key(finding: NormalizedFinding) -> tuple[str, str, str]:
     return (finding.asset_type, finding.location, finding.finding_id or "")
 
 
-def _is_expired_certificate(finding: NormalizedFinding) -> bool:
+def _is_expired_certificate(
+    finding: NormalizedFinding, reference_time: datetime | None = None
+) -> bool:
+    """Was this certificate's recorded expiration before `reference_time`?
+
+    `reference_time` defaults to the current clock, which is what the live scan
+    summaries have always compared against. Passing an explicit instant lets a
+    stored-run reader date the derivation against the run's recorded scan time
+    rather than against whenever the export happens to run.
+    """
     expiration = finding.technical_metadata.get("Expiration")
     if not expiration:
         return False
@@ -728,7 +749,10 @@ def _is_expired_certificate(finding: NormalizedFinding) -> bool:
         return False
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
-    return expires_at < datetime.now(timezone.utc)
+    reference = reference_time if reference_time is not None else datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    return expires_at < reference
 
 
 def _schema_version(findings: list[NormalizedFinding]) -> str:

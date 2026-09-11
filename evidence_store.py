@@ -46,7 +46,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +182,17 @@ class StoredScanRun:
     harvestguard_version: str
     finding_schema_version: str
     evidence_digest: str
+    # The exact verified snapshot payloads, in stored order, as they were
+    # digested. `findings` above is the reconstruction of those payloads through
+    # `finding_from_dict`, which ignores keys this release does not know; a
+    # reader that needs the stored payload itself -- for technical traceability,
+    # or to report a field written by a different schema version instead of
+    # silently dropping it -- reads this. Added with a default so
+    # existing construction and every existing attribute are unaffected.
+    raw_finding_snapshots: tuple[dict[str, Any], ...] = ()
+    # Immutable baseline of the loader's reconstruction, separate from the raw
+    # payload covered by the digest (legacy reconstruction may supply defaults).
+    _loaded_findings: tuple[str, ...] | None = field(default=None, repr=False, compare=False)
 
 
 def store_scan_run(
@@ -343,7 +354,43 @@ def load_scan_run(db_path: str | Path, scan_id: str) -> StoredScanRun:
         harvestguard_version=run["harvestguard_version"],
         finding_schema_version=run["finding_schema_version"],
         evidence_digest=stored_digest,
+        raw_finding_snapshots=tuple(finding_dicts),
+        _loaded_findings=tuple(_snapshot_json(finding.to_dict()) for finding in findings),
     )
+
+
+def verify_loaded_scan_run(run: StoredScanRun) -> bool:
+    """Recheck current in-memory evidence using the store's canonical digest.
+
+    Raw retained snapshots, rather than reconstructed defaults, define the
+    digest. Also require the reconstructed findings to match what the loader
+    returned, so editing either representation fails closed. No digest means
+    verification is unperformed; it never means passed.
+    """
+    if not run.evidence_digest:
+        return False
+    try:
+        current = tuple(_snapshot_json(finding.to_dict()) for finding in run.findings)
+        record = _run_record(
+            run.scan_id, run.context, len(run.raw_finding_snapshots), run.harvestguard_version
+        )
+        record["finding_schema_version"] = run.finding_schema_version
+        consistent = (
+            run._loaded_findings is not None
+            and current == run._loaded_findings
+            and len(run.findings) == len(run.raw_finding_snapshots)
+            and run.context.scan_id == run.scan_id
+            and compute_evidence_digest(record, list(run.raw_finding_snapshots))
+            == run.evidence_digest
+        )
+    except (TypeError, ValueError, AttributeError, KeyError):
+        consistent = False
+    if not consistent:
+        raise EvidenceIntegrityError(
+            "loaded scan run failed integrity verification: current evidence "
+            "is inconsistent with its verified payload and was not emitted."
+        )
+    return True
 
 
 def verify_scan_run(db_path: str | Path, scan_id: str) -> StoredScanRun:
