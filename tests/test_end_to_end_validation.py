@@ -32,7 +32,9 @@ import json
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -41,6 +43,7 @@ from botocore.exceptions import ClientError
 from google.api_core.exceptions import GoogleAPIError
 
 import harvestguard
+import scanner.filesystem as fs_module
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -215,6 +218,93 @@ def _azure_blob(name: str, encryption_scope: str | None = None) -> MagicMock:
     blob.last_modified = "2026-01-01"
     blob.encryption_scope = encryption_scope
     return blob
+
+
+# --- Controlled host platform capability ----------------------------------
+#
+# Two assertions below read the *coverage status* of a real scan, and coverage
+# status depends on whether any finding carries a limitation (documented in
+# docs/SCAN_COVERAGE.md). The filesystem scanner records platform capability
+# gaps -- ACL presence that cannot be determined, owner/group names that cannot
+# be resolved -- once on the aggregate mount context record (HG-029), so on a
+# host with such a gap the very same scan legitimately reports "Not complete"
+# instead of "Bounded by configured scan scope". Read against the real host,
+# those assertions were therefore asserting a property of the developer's
+# machine: they passed on Linux and failed on macOS, where ACL presence
+# genuinely cannot be determined portably.
+#
+# The fixture below pins those host capability probes -- and only those --
+# at their existing probe boundary inside scanner.filesystem, and parameterizes
+# the ACL capability so both outcomes are exercised deterministically on every
+# host. Traversal, the adapters, the CLI, coverage aggregation and the Markdown
+# renderer all still run for real, and each test asserts the exact evidence and
+# report wording expected for the capability it was given.
+
+ACL_LIMITATION = "ACL presence could not be portably determined on this platform."
+
+
+class _ResolvableNameDatabase:
+    """Stand-in for the stdlib `pwd`/`grp` modules that always resolves a name.
+
+    Owner/group name resolution is a host capability distinct from the ACL
+    question these tests parameterize, but it feeds the same aggregate record:
+    a platform without `pwd`/`grp`, or a container running as a uid with no
+    passwd entry, would add a limitation of its own and move the coverage
+    status independently of the ACL parameter. Holding it at "resolvable"
+    keeps the ACL capability the only variable, and the tests still assert the
+    resulting limitation list exactly, so neither a dropped nor an invented
+    platform limitation can pass unnoticed.
+    """
+
+    @staticmethod
+    def getpwuid(uid: int) -> SimpleNamespace:
+        return SimpleNamespace(pw_name=f"uid-{uid}")
+
+    @staticmethod
+    def getgrgid(gid: int) -> SimpleNamespace:
+        return SimpleNamespace(gr_name=f"gid-{gid}")
+
+
+@dataclass(frozen=True)
+class _HostCapability:
+    """What the controlled host is expected to be able to observe."""
+
+    acl_determinable: bool
+    # Volume status is pinned too, because it is host-dependent as well. It is
+    # deliberately pinned to the *uncertain* value: "Unknown" volume status is
+    # not itself a limitation (it is recorded as an explicit unknown), so the
+    # ACL-determinable case proves the aggregate record can be
+    # `volume_status:unknown` while carrying no limitation at all. Unknown
+    # volume state and unavailable ACL capability are separate conditions and
+    # the assertions below keep them separate.
+    volume_status: str = "Unknown"
+    volume_rule_id: str = "volume_status:unknown"
+
+    @property
+    def aggregate_limitations(self) -> list[str]:
+        """Limitations the one aggregate mount-context record must carry."""
+        return [] if self.acl_determinable else [ACL_LIMITATION]
+
+
+@pytest.fixture(params=[True, False], ids=["acl-determinable", "acl-undeterminable"])
+def controlled_host_capability(request, monkeypatch) -> _HostCapability:
+    """Real scan, controlled platform capability inputs.
+
+    Scoped to the tests that ask for it rather than autouse: the rest of the
+    suite must keep observing the actual host, and this fixture must never
+    become a blanket mask that hides real platform limitations.
+    """
+    acl_determinable = bool(request.param)
+    capability = _HostCapability(acl_determinable=acl_determinable)
+    monkeypatch.setattr(
+        fs_module, "_acl_support_unavailable", lambda: not acl_determinable
+    )
+    monkeypatch.setattr(fs_module, "pwd", _ResolvableNameDatabase)
+    monkeypatch.setattr(fs_module, "grp", _ResolvableNameDatabase)
+    monkeypatch.setattr(
+        fs_module, "_detect_volume_encryption", lambda mount: capability.volume_status
+    )
+    return capability
 
 
 # --- Fresh-user install and invocation ------------------------------------
@@ -403,7 +493,9 @@ def test_demo_json_output_is_a_valid_normalized_finding_array(capsys):
         assert "NOT-A-REAL-KEY-THIS-IS-FAKE-DEMO-CONTENT-ONLY-DO-NOT-USE" not in stream
 
 
-def test_demo_markdown_report_contains_every_documented_section(capsys):
+def test_demo_markdown_report_contains_every_documented_section(
+    controlled_host_capability, capsys
+):
     exit_code = harvestguard.main(
         ["scan", str(DEMO_TARGET), "--type", "all", "--markdown", "--quiet"]
     )
@@ -424,10 +516,32 @@ def test_demo_markdown_report_contains_every_documented_section(capsys):
         version = "0.2.0" if scanner == "semgrep_crypto_rules" else "0.1.0"
         assert f"| {scanner} | {version} |" in report
     assert "- Scanners run: filesystem, crypto inventory, sensitive data, code analysis" in report
-    # A default `--max-depth` still bounds coverage, so the demo report reads as
-    # limited rather than as unlimited (docs/CLI.md, "Partial and limited scans").
-    assert "| Coverage | Bounded by configured scan scope |" in report
+    # A default `--max-depth` always bounds coverage, on every host.
     assert "  - Maximum directory depth: 3" in report
+    # The demo fixture records a finding-level error but no scanner error, on
+    # either controlled host.
+    assert "- Scanner error:" not in report
+    if controlled_host_capability.acl_determinable:
+        # Nothing limited what could be observed, so the only bound on this
+        # scan is the configured depth and the report reads as limited rather
+        # than as unlimited (docs/CLI.md, "Partial and limited scans").
+        assert "| Coverage | Bounded by configured scan scope |" in report
+        assert "Coverage was not complete" not in report
+        assert "finding(s) record limitations on what could be observed" not in report
+        assert ACL_LIMITATION not in report
+    else:
+        # One recorded platform limitation is enough to make coverage "Not
+        # complete" (docs/SCAN_COVERAGE.md), and the limitation text itself
+        # stays visible to a reviewer rather than being summarized away.
+        assert "| Coverage | Not complete |" in report
+        assert (
+            "Coverage was not complete: this scan recorded 1 finding(s) with "
+            "recorded limitations" in report
+        )
+        assert "  - `volume_status:unknown`: 1" in report
+        # Aggregate context, recorded exactly once for the whole mount --
+        # never repeated onto each of the four inspected files.
+        assert report.count(ACL_LIMITATION) == 1
     for stream in (captured.out, captured.err):
         assert "FAKE-DEMO-PASSWORD-VALUE-0000000000" not in stream
 
@@ -870,32 +984,89 @@ def test_configured_exclude_is_reported_as_limited_scope_not_a_failure(
     assert "valid_key.pem" not in report  # the excluded finding really is gone
 
 
-def test_max_depth_boundary_is_reported_as_a_limitation_not_an_error(tmp_path, capsys):
+def test_max_depth_boundary_is_reported_as_a_limitation_not_an_error(
+    controlled_host_capability, tmp_path, capsys
+):
+    """A configured depth bound is limited scope, not a failure -- and the
+    report's coverage statement counts *findings that carry limitations*, not
+    directory boundaries.
+
+    That distinction is why this test is parameterized over host capability:
+    the declared depth boundary is one limitation finding, and on a host where
+    ACL presence cannot be determined the aggregate mount context is a second,
+    independent one. Both counts are asserted exactly, so the boundary record
+    itself can never go missing unnoticed behind a host-dependent total.
+    """
     (tmp_path / "top.txt").write_text("hello", encoding="utf-8")
     (tmp_path / "deeper").mkdir()
     (tmp_path / "deeper" / "buried.txt").write_text("buried", encoding="utf-8")
+    scan_args = ["scan", str(tmp_path), "--type", "filesystem", "--max-depth", "0"]
+    # The depth boundary is one limitation finding; the aggregate mount context
+    # is a second one only when the host cannot determine ACL presence.
+    expected_limitation_findings = 1 if controlled_host_capability.acl_determinable else 2
 
-    exit_code = harvestguard.main(
-        [
-            "scan",
-            str(tmp_path),
-            "--type",
-            "filesystem",
-            "--max-depth",
-            "0",
-            "--markdown",
-            "--quiet",
-        ]
+    exit_code = harvestguard.main([*scan_args, "--json", "--quiet"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0  # bounded, not failed
+    # Exactly two normalized records: the declared boundary, and the aggregate
+    # context standing in for the one ordinary top-level file.
+    assert len(payload) == 2
+    boundaries = [record for record in payload if record["rule_id"] == "max_depth_boundary"]
+    assert len(boundaries) == 1
+    assert boundaries[0]["location"] == str(tmp_path / "deeper")
+    assert boundaries[0]["asset_type"] == "directory"
+    assert boundaries[0]["limitations"] == [
+        "Not inspected: scan depth boundary (max_depth=0) reached."
+    ]
+    contexts = [
+        record
+        for record in payload
+        if record["rule_id"] == controlled_host_capability.volume_rule_id
+    ]
+    assert len(contexts) == 1
+    # The platform limitation lives here, once, and nowhere else.
+    assert contexts[0]["limitations"] == controlled_host_capability.aggregate_limitations
+    assert contexts[0]["technical_metadata"]["Encryption"] == (
+        controlled_host_capability.volume_status
     )
+    # One inspected regular file (top.txt), represented by this record. The
+    # pruned directory is a boundary record, never counted as a file.
+    assert contexts[0]["technical_metadata"]["Regular Files Inspected"] == 1
+    assert contexts[0]["technical_metadata"]["Files Represented By This Context"] == 1
+    # The buried file was never inspected, and nothing was invented for it.
+    assert all("buried.txt" not in record["location"] for record in payload)
+    limitation_findings = [record for record in payload if record["limitations"]]
+    assert len(limitation_findings) == expected_limitation_findings
+    # Deliberate pruning and platform uncertainty are limitations, never errors.
+    assert all(not record["errors"] for record in payload)
+
+    exit_code = harvestguard.main([*scan_args, "--markdown", "--quiet"])
 
     report = capsys.readouterr().out
-    assert exit_code == 0  # bounded, not failed
-    assert "`max_depth_boundary`: 1" in report
+    assert exit_code == 0
+    # Markdown parity with the normalized evidence above.
+    assert "  - `max_depth_boundary`: 1" in report
     assert "| Coverage | Not complete |" in report
-    # The distinguishing detail for a reviewer: the coverage statement counts a
-    # limitation finding, and no scanner error is listed.
-    assert "1 finding(s) with recorded limitations" in report
+    assert "| Files Scanned | 1 |" in report
+    assert "| Coverage limitation records | 1 |" in report
+    assert "| Aggregate filesystem context records | 1 |" in report
+    assert "Not inspected: scan depth boundary (max_depth=0) reached." in report
+    assert str(tmp_path / "deeper") in report
+    assert "buried.txt" not in report
+    # The distinguishing detail for a reviewer: the coverage statement counts
+    # every limitation-carrying finding, and no scanner error is listed.
+    assert (
+        f"Coverage was not complete: this scan recorded {expected_limitation_findings} "
+        "finding(s) with recorded limitations" in report
+    )
     assert "- Scanner error:" not in report
+    if controlled_host_capability.acl_determinable:
+        assert ACL_LIMITATION not in report
+        assert "`volume_status:unknown`: 1" not in report
+    else:
+        assert report.count(ACL_LIMITATION) == 1
+        assert "  - `volume_status:unknown`: 1" in report
 
 
 def test_finding_level_errors_are_visible_without_being_a_scanner_failure(
