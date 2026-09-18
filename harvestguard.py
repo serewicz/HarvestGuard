@@ -9,11 +9,10 @@ import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
+from importlib import import_module
 from pathlib import Path
 from typing import Callable
 
-from classifier.scanner import scan_filesystem_for_sensitive_data_findings
-from code_analysis.scanner import scan_source_for_crypto_usage_findings
 from evidence_store import EvidenceStoreError, list_scan_runs, load_scan_run, store_scan_run
 from executive_evidence import ExecutiveEvidenceError, build_executive_evidence_view
 from executive_reports import executive_json, format_executive_markdown
@@ -35,15 +34,50 @@ from reports import (
     format_markdown_report,
     make_report_context,
 )
-from scanner.azure_blob import scan_azure_container_findings
-from scanner.cloud import scan_s3_bucket_findings
-from scanner.crypto_inventory import scan_crypto_inventory_findings
-from scanner.filesystem import scan_filesystem_findings
-from scanner.gcs import scan_gcs_bucket_findings
+
+# Scanner implementations (classifier, code_analysis, scanner.*) are
+# deliberately NOT imported here. Each one is heavy (semgrep, boto3,
+# google-cloud-storage, azure SDKs) and some carry import-time side effects on
+# certain Python versions -- google-cloud-storage's google.api_core prints a
+# Python-3.10 deprecation FutureWarning to stderr the moment it is imported,
+# even if never used. `harvestguard evidence ...` never touches a scanner and
+# must stay silent and dependency-light; `harvestguard scan --type X` only
+# needs the one scanner X selects.
+#
+# The module-level names below are placeholders, not imports: `_load_scanner`
+# resolves each one lazily, importing the real implementation only when the
+# scan type that needs it actually runs. They exist as attributes so a caller
+# (or a test, via monkeypatch.setattr(harvestguard, "scan_x_findings", fake))
+# can override a scanner without importing its dependency at all -- the
+# override is used as-is and `_load_scanner` never touches the real module.
+scan_filesystem_findings = None
+scan_crypto_inventory_findings = None
+scan_filesystem_for_sensitive_data_findings = None
+scan_source_for_crypto_usage_findings = None
+scan_s3_bucket_findings = None
+scan_gcs_bucket_findings = None
+scan_azure_container_findings = None
 
 # A scanner thunk closes over its target/options and returns normalized
 # findings. Errors raised here are captured per scanner, not fatal.
 ScannerThunk = Callable[[], list[NormalizedFinding]]
+
+
+def _load_scanner(module_path: str, func_name: str) -> Callable[..., list[NormalizedFinding]]:
+    """Resolve the scanner callable bound to `func_name` in this module.
+
+    If this module's `func_name` attribute has been overridden (still `None`
+    otherwise -- see the placeholders above), that override is returned
+    unchanged and `module_path` is never imported. Otherwise the real scanner
+    is imported lazily from `module_path`, so a scan type that is not
+    selected -- and every `evidence` command -- never pays for a scanner
+    dependency it does not use.
+    """
+    override = globals()[func_name]
+    if override is not None:
+        return override
+    module = import_module(module_path)
+    return getattr(module, func_name)
 
 DEFAULT_MAX_DEPTH = 3
 
@@ -572,54 +606,73 @@ def _local_scanner_specs(
     max_depth: int,
     crypto_stats: dict[str, int] | None = None,
 ) -> list[tuple[str, ScannerThunk]]:
+    """Build the (label, thunk) pairs for the requested local scan type.
+
+    Each scanner is resolved through `_load_scanner`, not imported at module
+    scope, so that only the module(s) the requested `scan_type` actually
+    needs are loaded -- `--type filesystem` never imports semgrep, and
+    `evidence`/other scan types never import any local scanner at all.
+    """
     patterns = exclude_patterns or []
-    specs: dict[str, tuple[str, ScannerThunk]] = {
-        "filesystem": (
-            "filesystem",
-            lambda: scan_filesystem_findings(target, max_depth=max_depth),
-        ),
-        "crypto": (
-            "crypto inventory",
-            lambda: scan_crypto_inventory_findings(
-                target, exclude_patterns=patterns, stats=crypto_stats
-            ),
-        ),
-        "sensitive-data": (
-            "sensitive data",
-            lambda: scan_filesystem_for_sensitive_data_findings(target, max_depth=max_depth),
-        ),
-        "code": (
-            "code analysis",
-            lambda: scan_source_for_crypto_usage_findings(target),
-        ),
+
+    def _filesystem_spec() -> tuple[str, ScannerThunk]:
+        scanner = _load_scanner("scanner.filesystem", "scan_filesystem_findings")
+        return "filesystem", lambda: scanner(target, max_depth=max_depth)
+
+    def _crypto_spec() -> tuple[str, ScannerThunk]:
+        scanner = _load_scanner("scanner.crypto_inventory", "scan_crypto_inventory_findings")
+        return "crypto inventory", lambda: scanner(
+            target, exclude_patterns=patterns, stats=crypto_stats
+        )
+
+    def _sensitive_data_spec() -> tuple[str, ScannerThunk]:
+        scanner = _load_scanner(
+            "classifier.scanner", "scan_filesystem_for_sensitive_data_findings"
+        )
+        return "sensitive data", lambda: scanner(target, max_depth=max_depth)
+
+    def _code_spec() -> tuple[str, ScannerThunk]:
+        scanner = _load_scanner("code_analysis.scanner", "scan_source_for_crypto_usage_findings")
+        return "code analysis", lambda: scanner(target)
+
+    builders: dict[str, Callable[[], tuple[str, ScannerThunk]]] = {
+        "filesystem": _filesystem_spec,
+        "crypto": _crypto_spec,
+        "sensitive-data": _sensitive_data_spec,
+        "code": _code_spec,
     }
     if scan_type == "all":
-        return [specs["filesystem"], specs["crypto"], specs["sensitive-data"], specs["code"]]
-    return [specs[scan_type]]
+        return [builders[key]() for key in ("filesystem", "crypto", "sensitive-data", "code")]
+    return [builders[scan_type]()]
 
 
 def _cloud_scanner_specs(
     scan_type: str, target: str, prefix: str
 ) -> tuple[list[tuple[str, ScannerThunk]] | None, str | None]:
+    """Build the (label, thunk) pair for the requested cloud scan type.
+
+    Each provider SDK is resolved through `_load_scanner`, not imported at
+    module scope, so that `--type s3` never imports google-cloud-storage or
+    the Azure SDKs, and so that no cloud SDK is imported for a local scan or
+    an `evidence` command.
+    """
     prefix = prefix or ""
     if scan_type == "s3":
-        return [("s3", lambda: scan_s3_bucket_findings(target, prefix=prefix))], None
+        scanner = _load_scanner("scanner.cloud", "scan_s3_bucket_findings")
+        return [("s3", lambda: scanner(target, prefix=prefix))], None
     if scan_type == "gcs":
-        return [("gcs", lambda: scan_gcs_bucket_findings(target, prefix=prefix))], None
+        scanner = _load_scanner("scanner.gcs", "scan_gcs_bucket_findings")
+        return [("gcs", lambda: scanner(target, prefix=prefix))], None
     if scan_type == "azure":
         account, separator, container = target.partition("/")
         if not separator or not account or not container:
             return None, (
                 "azure target must be 'account-name/container-name', got: " + target
             )
+        scanner = _load_scanner("scanner.azure_blob", "scan_azure_container_findings")
         account_url = f"https://{account}.blob.core.windows.net"
         return (
-            [
-                (
-                    "azure blob",
-                    lambda: scan_azure_container_findings(account_url, container, prefix=prefix),
-                )
-            ],
+            [("azure blob", lambda: scanner(account_url, container, prefix=prefix))],
             None,
         )
     return None, f"unknown scan type: {scan_type}"
