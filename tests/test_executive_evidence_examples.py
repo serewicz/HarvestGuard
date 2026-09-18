@@ -530,6 +530,52 @@ def test_documented_export_commands_use_options_the_cli_accepts(manifest):
     assert "--export-time" not in help_text
 
 
+def test_the_documented_relative_work_dir_command_generates_the_collection(tmp_path):
+    """The README's `--work-dir ./eev-work`, run exactly as documented.
+
+    Relative paths, from a directory that is not the checkout. The corruption
+    example runs the real CLI with its `cwd` set to the work directory, so a
+    relative work directory that is not pinned absolute first gets resolved a
+    second time against that cwd: the CLI then reports a missing database, and
+    the bounded *integrity* failure the sample exists to show never happens.
+    Every other generation test passes an absolute temporary path, so none of
+    them can see that.
+    """
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(GENERATOR),
+            "--output-dir",
+            "./eev-output",
+            "--work-dir",
+            "./eev-work",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=_cli_environment(),
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    # Kept where the documented follow-up CLI commands go looking for it.
+    assert (tmp_path / "eev-work" / "example-evidence.sqlite").is_file()
+    # The disposable copy is removed; nothing else is left behind.
+    assert [path.name for path in (tmp_path / "eev-work").iterdir()] == [
+        "example-evidence.sqlite"
+    ]
+
+    samples = tmp_path / "eev-output" / "samples"
+    transcript = (samples / "failed-integrity-corruption.stderr.txt").read_text(
+        encoding="utf-8"
+    )
+    # The real rejection, not a missing-database error that merely also exits 1.
+    assert transcript.count("failed integrity verification") == 2
+    assert transcript.count("exit status: 1") == 2
+    assert transcript.count("stdout bytes: 0") == 2
+    assert (samples / "verified.json").is_file()
+
+
 # --- acceptance records claim nothing that has not happened ----------------
 
 

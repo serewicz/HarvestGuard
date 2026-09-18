@@ -615,7 +615,12 @@ def _refuse_occupied_work_dir(work_dir: Path) -> None:
 def generate(output_dir: Path, work_dir: Path) -> dict[str, object]:
     """Generate every sample plus the provenance manifest. Returns the manifest."""
     output_dir = Path(output_dir)
-    work_dir = Path(work_dir)
+    # Pinned absolute while this process' working directory is still the
+    # caller's: the corruption example runs the real CLI with `cwd` set to the
+    # work directory, so a relative `--work-dir` (the documented `./eev-work`)
+    # would otherwise be resolved a second time against that cwd and point at
+    # `eev-work/eev-work/...`.
+    work_dir = Path(work_dir).resolve()
     _refuse_occupied_work_dir(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     samples_dir = output_dir / SAMPLES_DIR
