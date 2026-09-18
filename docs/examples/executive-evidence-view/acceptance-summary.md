@@ -18,7 +18,9 @@ work is never described here as human validation.
 | Generated through store → verified load → shared projection → both serializers | Done | [`generate_examples.py`](generate_examples.py) |
 | Exact commands, producer/exporter versions, executive schema and policy versions, finding and evidence-store schema versions, scope, scanners, times, provenance, digests, artifact SHA-256 | Done | [`manifest.json`](manifest.json) |
 | Deterministic regeneration with an explicit export time, without a public CLI override | Done | `tests/test_executive_evidence_examples.py::test_generation_is_deterministic` |
-| Both real CLI export modes exercised end to end, from outside the checkout | Done | `…::test_cli_reproduces_each_sample_apart_from_its_export_time` |
+| Both real CLI export modes exercised end to end, from outside the checkout, on the documented no-install path | Done | `…::test_cli_reproduces_each_sample_apart_from_its_export_time` |
+| The same collection regenerated, and both export modes rerun, from a **non-editable install** outside the checkout with no repository import override | Done | `…::test_a_non_editable_install_regenerates_the_committed_collection`, `…::test_installed_cli_reproduces_each_sample_apart_from_its_export_time`, `…::test_the_installed_generator_imports_the_install_not_the_checkout` |
+| Generation never deletes or overwrites an existing evidence database or output file | Done | `…::test_generation_refuses_a_work_dir_holding_an_evidence_database`, `…::test_generation_refuses_every_occupied_work_dir_destination` |
 | Corruption fails closed: bounded diagnostic, no report, no file | Done | [`samples/failed-integrity-corruption.stderr.txt`](samples/failed-integrity-corruption.stderr.txt) |
 | Exact reference resolution, including duplicate finding IDs | Done | `…::test_every_reference_resolves_to_exactly_one_occurrence`, `…::test_duplicate_finding_ids_stay_separate_occurrences` |
 | JSON/Markdown semantic parity | Done | `…::test_json_and_markdown_stay_semantically_parallel` |
@@ -35,12 +37,22 @@ is green with two skips, both pre-existing and both in
 `tests/test_release_artifacts.py`, which skip unless
 `HARVESTGUARD_RUN_NETWORK_INSTALL_TESTS=1` enables networked install
 validation. No test in this collection is skipped,
-and none is environment-dependent beyond needing a Python interpreter and the
-repository or installed package. The CLI subprocess tests run the shipped
-entry point; where HarvestGuard is not pip-installed in the test environment,
-they reach the same entry point as a module with the repository root on
-`PYTHONPATH`. A HarvestGuard version change makes the committed samples stale
-by design, and the regeneration test fails until they are regenerated.
+and none is environment-dependent beyond needing a Python interpreter, `pip`
+and the repository.
+
+Two distinct CLI levels are reported separately, because they prove different
+things. The `…::test_cli_reproduces_each_sample…` tests run the documented
+no-install entry point (`python -m harvestguard`) from outside the checkout
+with the repository on `PYTHONPATH`; that is the no-install path, not an
+installed release. The installed-package tests build a throwaway virtual
+environment, `pip install --no-deps` the project into it non-editably, and then
+regenerate the whole collection and rerun both export modes from outside the
+checkout with `PYTHONPATH` removed — so the committed samples are established
+as reproducible from an installed release, with no repository import override.
+Dependency-metadata completeness is out of scope there (`--no-deps`,
+`--system-site-packages`) and is covered by `tests/test_clean_install.py`
+instead. A HarvestGuard version change makes the committed samples stale by
+design, and the regeneration tests fail until they are regenerated.
 
 ## Category 2 — Independent technical-review evidence
 

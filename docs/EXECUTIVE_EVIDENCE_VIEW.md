@@ -512,8 +512,11 @@ collection ([issue #153](https://github.com/serewicz/HarvestGuard/issues/153)):
 - **Established by automated checks.** Every required outcome is reproducible
   through the real store → verified load → projection → both serializers path;
   generation is deterministic for fixed evidence and an explicit export time;
-  both CLI export modes, run from outside the checkout, reproduce the published
-  samples for representative scenarios apart from the export time the CLI owns;
+  the published samples are reproducible byte-for-byte from a non-editable
+  install, regenerated outside the checkout with no repository import
+  override; both CLI export modes — the documented no-install entry point and
+  the installed console script — reproduce the published samples for
+  representative scenarios apart from the export time the CLI owns;
   every evidence reference in a published sample resolves to
   exactly one stored occurrence, with duplicate finding IDs staying separate;
   JSON and Markdown agree, including withheld unrecognized field names and the

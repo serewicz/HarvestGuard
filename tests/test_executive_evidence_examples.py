@@ -13,7 +13,14 @@ results that have not happened.
 These tests exercise the implementation rather than searching for headings:
 every assertion is made against output regenerated through
 `evidence_store` -> verified load -> the shared projection -> both serializers,
-or against the real CLI run as a subprocess from outside the checkout.
+or against the real CLI run as a subprocess.
+
+Two levels of "real", kept apart deliberately. Most tests here regenerate the
+collection in-process, which reaches this checkout's modules. That is not what
+a reader installs, so the last section regenerates the whole collection again
+from a *non-editable install*, runs the shipped console script from a directory
+outside the checkout with no `PYTHONPATH` and no repository import override,
+and requires the committed bytes either way.
 """
 
 from __future__ import annotations
@@ -164,6 +171,66 @@ def test_generation_needs_no_network(tmp_path, generator, monkeypatch):
     monkeypatch.setattr(socket, "socket", refuse)
     monkeypatch.setattr(socket, "create_connection", refuse)
     generator.generate(tmp_path / "offline", tmp_path / "offline-work")
+
+
+# --- generation never destroys what is already there -----------------------
+
+# Every path the generator writes inside the work directory. Pinned here so the
+# refusal is proven per destination, not only for the database.
+WORK_DIR_DESTINATIONS = (
+    "example-evidence.sqlite",
+    "corrupted-copy.sqlite",
+    "rejected-run.md",
+)
+PRE_EXISTING = b"pre-existing bytes that are not the generator's to remove"
+
+
+def test_the_refused_destinations_are_the_ones_the_generator_writes(generator):
+    assert set(generator.WORK_DIR_ARTIFACTS) == set(WORK_DIR_DESTINATIONS)
+
+
+def test_generation_refuses_a_work_dir_holding_an_evidence_database(tmp_path, generator):
+    """A database in the work directory may be someone's real evidence.
+
+    The generator cannot tell a leftover fixture from evidence that has to
+    survive, so it refuses rather than deleting or overwriting either. What
+    matters is that the pre-existing run is still there, byte-identical, and
+    still passes the verifying loader afterwards.
+    """
+    import evidence_store
+
+    work = tmp_path / "work"
+    work.mkdir()
+    database = work / "example-evidence.sqlite"
+    context, findings = generator._build_verified("pre-existing-run")
+    evidence_store.store_scan_run(
+        database, scan_id="pre-existing-run", context=context, findings=findings
+    )
+    before = database.read_bytes()
+    output = tmp_path / "output"
+
+    with pytest.raises(FileExistsError):
+        generator.generate(output, work)
+
+    assert database.read_bytes() == before
+    stored = evidence_store.load_scan_run(database, "pre-existing-run")
+    assert stored.scan_id == "pre-existing-run"
+    # A refused run writes nothing anywhere: no second database, no samples.
+    assert [path.name for path in work.iterdir()] == ["example-evidence.sqlite"]
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("name", WORK_DIR_DESTINATIONS)
+def test_generation_refuses_every_occupied_work_dir_destination(tmp_path, generator, name):
+    work = tmp_path / "work"
+    work.mkdir()
+    occupied = work / name
+    occupied.write_bytes(PRE_EXISTING)
+
+    with pytest.raises(FileExistsError):
+        generator.generate(tmp_path / "output", work)
+
+    assert occupied.read_bytes() == PRE_EXISTING
 
 
 # --- required coverage and recorded provenance -----------------------------
@@ -393,63 +460,64 @@ def _run_cli(argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
     )
 
 
+def _assert_live_json_matches_committed(stdout: str, slug: str, fixed: str) -> None:
+    """A live JSON export equals the sample once its export time is normalized."""
+    live = json.loads(stdout)
+    committed = json.loads((SAMPLES / f"{slug}.json").read_text(encoding="utf-8"))
+    assert live["export_time"] != ""
+    live["export_time"] = fixed
+    assert live == committed
+
+
+def _assert_live_markdown_matches_committed(stdout: str, slug: str, fixed: str) -> None:
+    """The same for Markdown, whose export time appears in the identity table."""
+    committed = (SAMPLES / f"{slug}.md").read_text(encoding="utf-8")
+    export_row = re.search(r"\| Export time \| (.+) \|", stdout)
+    assert export_row is not None
+    normalized = stdout.replace(
+        export_row.group(1), fixed.replace("-", "\\-").replace("+", "\\+")
+    )
+    assert normalized.strip() == committed.strip()
+
+
 @pytest.mark.parametrize(
     "slug", ["verified", "incomplete-partial-execution", "warning-unrecognized-fields"]
 )
 def test_cli_reproduces_each_sample_apart_from_its_export_time(slug, regenerated, manifest):
     """CLI -> store -> verified load -> projection -> both exports, for real.
 
-    Run from a directory that is not the checkout. The CLI owns its export
-    time and has no public override, so the committed sample and a live export
-    are compared with that one value normalized away -- nothing else may
-    differ. Three representative scenarios keep the subprocess cost bounded;
-    every scenario's byte-for-byte content is already covered above.
+    This is the repository's entry point (`python -m harvestguard` with the
+    checkout importable), run from a directory that is not the checkout: it
+    covers the documented no-install path, not what an installed release does
+    -- that is the last section's job. The CLI owns its export time and has no
+    public override, so the committed sample and a live export are compared
+    with that one value normalized away; nothing else may differ. Three
+    representative scenarios keep the subprocess cost bounded; every
+    scenario's byte-for-byte content is already covered above.
     """
     _output, work, _result = regenerated
     scenario = next(item for item in manifest["scenarios"] if item["slug"] == slug)
     database = work / "example-evidence.sqlite"
     fixed = manifest["regeneration"]["explicit_export_time"]
 
-    json_run = _run_cli(
-        [
-            "evidence",
-            "export",
-            scenario["scan_id"],
-            "--evidence-db",
-            str(database),
-            "--executive-json",
-            "-",
-        ],
-        cwd=work,
-    )
-    assert json_run.returncode == 0, json_run.stderr
-    live = json.loads(json_run.stdout)
-    committed = json.loads((SAMPLES / f"{slug}.json").read_text(encoding="utf-8"))
-    assert live["export_time"] != ""
-    live["export_time"] = fixed
-    assert live == committed
-
-    markdown_run = _run_cli(
-        [
-            "evidence",
-            "export",
-            scenario["scan_id"],
-            "--evidence-db",
-            str(database),
-            "--executive-markdown",
-            "-",
-        ],
-        cwd=work,
-    )
-    assert markdown_run.returncode == 0, markdown_run.stderr
-    committed_markdown = (SAMPLES / f"{slug}.md").read_text(encoding="utf-8")
-    live_markdown = markdown_run.stdout
-    export_row = re.search(r"\| Export time \| (.+) \|", live_markdown)
-    assert export_row is not None
-    normalized = live_markdown.replace(export_row.group(1), fixed.replace("-", "\\-").replace(
-        "+", "\\+"
-    ))
-    assert normalized.strip() == committed_markdown.strip()
+    for option, check in (
+        ("--executive-json", _assert_live_json_matches_committed),
+        ("--executive-markdown", _assert_live_markdown_matches_committed),
+    ):
+        completed = _run_cli(
+            [
+                "evidence",
+                "export",
+                scenario["scan_id"],
+                "--evidence-db",
+                str(database),
+                option,
+                "-",
+            ],
+            cwd=work,
+        )
+        assert completed.returncode == 0, completed.stderr
+        check(completed.stdout, slug, fixed)
 
 
 def test_documented_export_commands_use_options_the_cli_accepts(manifest):
@@ -490,3 +558,167 @@ def test_acceptance_summary_separates_the_evidence_categories():
     ):
         assert category in text
     assert "INCOMPLETE" in text
+
+
+# --- the installed package, from outside the checkout ----------------------
+
+# A regeneration that imports this checkout says nothing about the release a
+# reader installs, so the collection is regenerated once more from a
+# non-editable install: outside the checkout, with no `PYTHONPATH` and no
+# repository import override, driving the shipped console script. The committed
+# bytes have to come out either way.
+#
+# `--system-site-packages` plus `--no-deps` keeps this offline and fast -- the
+# same narrowing `tests/test_end_to_end_validation.py` documents. What is under
+# test is HarvestGuard's own installed modules answering the imports, not
+# dependency resolution; `tests/test_clean_install.py` covers that separately.
+
+
+def _venv_bin(venv_dir: Path, name: str) -> Path:
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / f"{name}.exe"
+    return venv_dir / "bin" / name
+
+
+def _installed_environment(venv_dir: Path) -> dict[str, str]:
+    """No repository import path, and the environment's own console script first."""
+    environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    bin_dir = _venv_bin(venv_dir, "python").parent
+    environment["PATH"] = f"{bin_dir}{os.pathsep}{environment.get('PATH', '')}"
+    return environment
+
+
+@pytest.fixture(scope="module")
+def installed_generation(tmp_path_factory):
+    """The whole collection, regenerated by a non-editable install.
+
+    Returns the environment directory, the outside-the-checkout run directory
+    (whose `work/` keeps the generated evidence database), the regenerated
+    collection, and the clean environment used to produce it.
+    """
+    venv_dir = tmp_path_factory.mktemp("eev-installed") / "venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
+    )
+    install = [str(_venv_bin(venv_dir, "python")), "-m", "pip", "install", "--no-deps"]
+    if importlib.util.find_spec("setuptools") is not None:
+        install.append("--no-build-isolation")
+    installed = subprocess.run(
+        [*install, str(ROOT)], capture_output=True, text=True, timeout=600, check=False
+    )
+    assert installed.returncode == 0, (installed.stdout + installed.stderr)[-3000:]
+
+    outside = tmp_path_factory.mktemp("eev-installed-run")
+    assert ROOT not in outside.parents and outside != ROOT
+    output = outside / "collection"
+    environment = _installed_environment(venv_dir)
+    completed = subprocess.run(
+        [
+            str(_venv_bin(venv_dir, "python")),
+            str(GENERATOR),
+            "--output-dir",
+            str(output),
+            "--work-dir",
+            str(outside / "work"),
+        ],
+        cwd=str(outside),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=environment,
+        check=False,
+    )
+    assert completed.returncode == 0, (completed.stdout + completed.stderr)[-3000:]
+    return venv_dir, outside, output, environment
+
+
+def test_the_installed_generator_imports_the_install_not_the_checkout(installed_generation):
+    """Every module the generator drives resolves from the installed package."""
+    venv_dir, outside, _output, environment = installed_generation
+    probe = (
+        "import importlib.util, sys\n"
+        f"spec = importlib.util.spec_from_file_location('eev_probe', {str(GENERATOR)!r})\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "sys.modules['eev_probe'] = module\n"
+        "spec.loader.exec_module(module)\n"
+        "for name in ('evidence_store', 'executive_evidence', 'executive_reports'):\n"
+        "    print(sys.modules[name].__file__)\n"
+        "print(str(module._REPO_ROOT) in sys.path)\n"
+    )
+    completed = subprocess.run(
+        [str(_venv_bin(venv_dir, "python")), "-c", probe],
+        cwd=str(outside),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=environment,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    *origins, repo_root_on_path = completed.stdout.split()
+    # The checkout is never put on the import path when an install answers.
+    assert repo_root_on_path == "False"
+    for origin in (Path(item) for item in origins):
+        assert venv_dir in origin.parents, origin
+        assert ROOT not in origin.parents, origin
+
+
+def test_a_non_editable_install_regenerates_the_committed_collection(installed_generation):
+    """The published bytes are reproducible from an installed release."""
+    _venv_dir, _outside, output, _environment = installed_generation
+    generated = {
+        path.relative_to(output).as_posix(): path.read_bytes()
+        for path in sorted(output.rglob("*"))
+        if path.is_file()
+    }
+    committed = {
+        path.relative_to(COLLECTION).as_posix(): path.read_bytes()
+        for path in [MANIFEST, *sorted(SAMPLES.iterdir())]
+    }
+
+    assert set(generated) == set(committed)
+    for name, content in committed.items():
+        assert generated[name] == content, (
+            f"{name} differs when generated from a non-editable install"
+        )
+
+
+@pytest.mark.parametrize("slug", ["verified", "warning-unrecognized-fields"])
+def test_installed_cli_reproduces_each_sample_apart_from_its_export_time(
+    slug, installed_generation, manifest
+):
+    """The shipped console script, outside the checkout, against the kept store."""
+    venv_dir, outside, _output, environment = installed_generation
+    scenario = next(item for item in manifest["scenarios"] if item["slug"] == slug)
+    database = outside / "work" / "example-evidence.sqlite"
+    fixed = manifest["regeneration"]["explicit_export_time"]
+
+    for option, check in (
+        ("--executive-json", _assert_live_json_matches_committed),
+        ("--executive-markdown", _assert_live_markdown_matches_committed),
+    ):
+        completed = subprocess.run(
+            [
+                str(_venv_bin(venv_dir, "harvestguard")),
+                "evidence",
+                "export",
+                scenario["scan_id"],
+                "--evidence-db",
+                str(database),
+                option,
+                "-",
+            ],
+            cwd=str(outside),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=environment,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr[-2000:]
+        check(completed.stdout, slug, fixed)

@@ -52,6 +52,15 @@ committed**.
       → both serializers (executive_reports.executive_json /
         format_executive_markdown)
 
+Those are the modules an install ships, and when HarvestGuard is installed the
+generator imports them from the installed distribution rather than from this
+checkout. `tests/test_executive_evidence_examples.py` regenerates the whole
+collection that way — from a non-editable `pip install .`, run outside the
+checkout, with no repository import override — and requires the committed
+bytes; it then reruns both export modes through the shipped `harvestguard`
+console script. From a bare checkout, before any install, the generator falls
+back to the repository root so it still runs.
+
 ## Regenerating everything
 
 ```bash
@@ -60,7 +69,9 @@ python docs/examples/executive-evidence-view/generate_examples.py
 
 That rewrites `samples/` and `manifest.json` byte-for-byte; the evidence
 database is built in a temporary directory and discarded. To keep the database
-and drive the real CLI against it yourself:
+and drive the real CLI against it yourself — `--work-dir` has to be a new or
+empty directory, because the generator never deletes or overwrites an existing
+evidence database:
 
 ```bash
 python docs/examples/executive-evidence-view/generate_examples.py --work-dir ./eev-work
@@ -87,7 +98,9 @@ still have to be byte-stable, so the generator passes one explicit fixed
 API the CLI calls. A live CLI export of the same fixture therefore differs from
 the committed sample **only** in that one value.
 `tests/test_executive_evidence_examples.py` proves exactly that: it runs both
-real CLI export modes and compares the remaining content.
+real CLI export modes — as the documented no-install `python -m harvestguard`
+path *and* as the console script from a non-editable install outside the
+checkout — and compares the remaining content.
 
 ## The samples
 

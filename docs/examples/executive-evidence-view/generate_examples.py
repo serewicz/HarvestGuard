@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regenerate the committed executive evidence view examples (GitHub issue #153).
 
-Every sample in this directory is produced through the real installed path:
+Every sample in this directory is produced through the real shipped path:
 
     labelled synthetic fixture
       -> real evidence store (`evidence_store.store_scan_run`)
@@ -12,9 +12,17 @@ Every sample in this directory is produced through the real installed path:
 
 This is *example tooling*, not a second reporting pipeline and not a new public
 CLI mode. It adds no projection, no serializer, no status policy and no verifier
-of its own: it only builds fixtures, stores them, and calls the installed APIs
-that `harvestguard evidence export --executive-json/--executive-markdown`
-already calls.
+of its own: it only builds fixtures, stores them, and calls the same APIs that
+`harvestguard evidence export --executive-json/--executive-markdown` calls.
+
+Where those APIs come from. When HarvestGuard is installed, they are imported
+from the installed distribution and this helper adds nothing to `sys.path`;
+`tests/test_executive_evidence_examples.py` regenerates the whole collection
+and reruns both CLI export modes that way -- from a non-editable install, run
+outside the checkout, with no repository import override -- and requires the
+result to match the committed bytes. Only when nothing is installed to import
+(a bare checkout) does this file fall back to the repository root, so that
+`python docs/examples/.../generate_examples.py` still works before an install.
 
 Determinism. The installed CLI reads its own UTC clock for the export time, by
 design (there is deliberately no public override). Committed samples have to be
@@ -40,13 +48,16 @@ Usage:
 The generated evidence database is a sensitive-by-default artifact, so it is
 *not* committed: without `--work-dir` it is built in a temporary directory and
 discarded. Pass `--work-dir` when you want to keep it and run the documented
-CLI commands against it yourself.
+CLI commands against it yourself -- it must be a new or empty directory. This
+helper never deletes or overwrites an existing evidence database, because it
+cannot tell a disposable fixture from evidence someone needs to keep.
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import shutil
@@ -59,10 +70,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-# Running from a checkout without installing: the modules live at the
-# repository root, which is four levels above this file.
+# The installed distribution comes first: issue #153 requires the committed
+# samples to be reproducible from an installed release, so an install must
+# never be shadowed by this checkout. The repository root -- four levels above
+# this file -- is added only when there is no installed package to import,
+# which is the uninstalled-checkout case.
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:  # pragma: no cover - import-path bootstrap
+if importlib.util.find_spec("evidence_store") is None:  # pragma: no cover - bootstrap
     sys.path.insert(0, str(_REPO_ROOT))
 
 import evidence_store  # noqa: E402
@@ -107,6 +121,13 @@ SAMPLES_DIR = "samples"
 MANIFEST_NAME = "manifest.json"
 CORRUPTION_DB_NAME = "corrupted-copy.sqlite"
 CORRUPTION_DIAGNOSTIC = "failed-integrity-corruption.stderr.txt"
+#: The output path the corruption example asks the CLI for, which the CLI must
+#: refuse to write. Nothing here may overwrite a file that is already there.
+REJECTED_OUTPUT_NAME = "rejected-run.md"
+
+#: Every name `generate` writes inside the work directory. If any of them
+#: already exists, the directory is not a disposable work directory.
+WORK_DIR_ARTIFACTS = (DB_NAME, CORRUPTION_DB_NAME, REJECTED_OUTPUT_NAME)
 
 
 # --- fixture builders ------------------------------------------------------
@@ -495,13 +516,22 @@ SCENARIOS: tuple[Scenario, ...] = (
 def _cli_invocation() -> tuple[list[str], dict[str, str]]:
     """The real CLI plus the environment it needs, and nothing else.
 
-    Prefers the installed `harvestguard` console script. From an uninstalled
-    checkout it falls back to running the same entry point as a module, with
-    the repository root on `PYTHONPATH` -- the same code, reached the only
-    other way it can be reached.
+    Prefers the `harvestguard` console script belonging to the interpreter
+    running this helper -- so an installed environment is answered by its own
+    CLI rather than by whatever is first on `PATH` -- then one off `PATH`. Only
+    from an uninstalled checkout does it fall back to running the same entry
+    point as a module with the repository root on `PYTHONPATH`: the same code,
+    reached the only other way it can be reached.
     """
     environment = dict(os.environ)
-    executable = shutil.which("harvestguard")
+    script = "harvestguard.exe" if os.name == "nt" else "harvestguard"
+    # Not resolved: a virtual environment's `bin/python` is a symlink to the
+    # base interpreter, and resolving it would look for the console script next
+    # to *that* instead of in the environment actually in use.
+    sibling = Path(sys.executable).parent / script
+    if sibling.exists():
+        return [str(sibling)], environment
+    executable = shutil.which(script)
     if executable:
         return [executable], environment
     existing = environment.get("PYTHONPATH")
@@ -564,17 +594,34 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
+def _refuse_occupied_work_dir(work_dir: Path) -> None:
+    """Never write over something already in the work directory.
+
+    This helper cannot tell a leftover fixture database from an evidence
+    database someone needs to keep, so it refuses both rather than deleting or
+    overwriting either. Checked before anything is created, so a refused run
+    leaves the directory exactly as it was.
+    """
+    occupied = [name for name in WORK_DIR_ARTIFACTS if (work_dir / name).exists()]
+    if occupied:
+        raise FileExistsError(
+            f"refusing to write into {work_dir}: it already holds "
+            f"{', '.join(occupied)}. This helper never deletes or overwrites an "
+            "existing evidence database or output file. Pass --work-dir pointing "
+            "at a new or empty directory, or omit it to use a temporary one."
+        )
+
+
 def generate(output_dir: Path, work_dir: Path) -> dict[str, object]:
     """Generate every sample plus the provenance manifest. Returns the manifest."""
     output_dir = Path(output_dir)
     work_dir = Path(work_dir)
+    _refuse_occupied_work_dir(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     samples_dir = output_dir / SAMPLES_DIR
     samples_dir.mkdir(parents=True, exist_ok=True)
 
     db = work_dir / DB_NAME
-    if db.exists():
-        db.unlink()
 
     scenario_records: list[dict[str, object]] = []
 
@@ -694,9 +741,13 @@ def _generate_corruption_example(
     """Capture the bounded diagnostic a corrupted run produces -- and no report.
 
     The corruption happens in a disposable copy of the synthetic fixture. The
-    real installed CLI is then asked for both executive exports; each must fail
-    closed with a bounded stderr diagnostic naming the requested run and the
-    failed check, emit no evidence payload, and write no file.
+    real CLI is then asked for both executive exports; each must fail closed
+    with a bounded stderr diagnostic naming the requested run and the failed
+    check, emit no evidence payload, and write no file.
+
+    Both work-directory paths used here -- the disposable copy and the output
+    the CLI must refuse to write -- were checked as unoccupied before anything
+    was generated, so nothing pre-existing is copied over.
     """
     scan_id = SCENARIOS[0].scan_id
     corrupted_db = work_dir / CORRUPTION_DB_NAME
@@ -721,7 +772,7 @@ def _generate_corruption_example(
     command_prefix, environment = _cli_invocation()
     for mode, destination in (
         ("executive-json", "-"),
-        ("executive-markdown", "rejected-run.md"),
+        ("executive-markdown", REJECTED_OUTPUT_NAME),
     ):
         target = work_dir / destination if destination != "-" else None
         argv = [
@@ -802,20 +853,26 @@ def main(argv: list[str] | None = None) -> int:
         "--work-dir",
         default=None,
         help=(
-            "Where to build the evidence database. Omitted, a temporary directory "
-            "is used and the database is discarded; pass a path to keep it and run "
-            "the documented CLI commands against it yourself."
+            "Where to build the evidence database. Must be a new or empty "
+            "directory: an existing database is never deleted or overwritten. "
+            "Omitted, a temporary directory is used and the database is "
+            "discarded; pass a path to keep it and run the documented CLI "
+            "commands against it yourself."
         ),
     )
     args = parser.parse_args(argv)
 
-    if args.work_dir:
-        work_dir = Path(args.work_dir)
-        manifest = generate(Path(args.output_dir), work_dir)
-        print(f"Evidence database: {work_dir / DB_NAME} (sensitive artifact)")
-    else:
-        with tempfile.TemporaryDirectory(prefix="harvestguard-examples-") as temporary:
-            manifest = generate(Path(args.output_dir), Path(temporary))
+    try:
+        if args.work_dir:
+            work_dir = Path(args.work_dir)
+            manifest = generate(Path(args.output_dir), work_dir)
+            print(f"Evidence database: {work_dir / DB_NAME} (sensitive artifact)")
+        else:
+            with tempfile.TemporaryDirectory(prefix="harvestguard-examples-") as temporary:
+                manifest = generate(Path(args.output_dir), Path(temporary))
+    except FileExistsError as refusal:
+        print(refusal, file=sys.stderr)
+        return 1
 
     scenarios = manifest["scenarios"]
     assert isinstance(scenarios, list)
