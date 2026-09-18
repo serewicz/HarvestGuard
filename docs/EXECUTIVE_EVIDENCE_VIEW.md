@@ -3,10 +3,12 @@
 The policy, schema and meaning contract for HarvestGuard's shared executive
 projection (`executive_evidence.py`).
 
-**Availability.** This document describes a derived read model that exists in
-the codebase and is covered by tests. No executive Markdown renderer, executive
-JSON export, or CLI mode ships against it yet. Nothing here should be read as a
-statement that a user-facing executive export is available.
+**Availability.** The projection ships in `executive_evidence.py`, and its two
+serializers ship in `executive_reports.py`, exposed as
+`harvestguard evidence export SCAN-ID --evidence-db PATH --executive-markdown
+[PATH]` and `--executive-json [PATH]` (see [CLI.md](CLI.md#executive-evidence-exports)).
+Both require an already-stored run: there is no live-scan executive export, and
+no HTML or PDF renderer.
 
 HarvestGuard establishes evidence. Humans establish meaning. This view answers
 exactly three questions:
@@ -233,7 +235,7 @@ Exceptions are ordered by stable ID, then by evidence occurrence.
 | --- | --- | --- |
 | `EV-EXC-001` | `optional_provenance_incomplete` | A retained record omits one or more *optional* provenance details (`collection_method`, `collection_source`, `repeatable`, `verification_rationale`). Provenance required to establish completion is handled by `EV-CHK-003`/`EV-CHK-004` and is incomplete, not a warning. |
 | `EV-EXC-002` | `record_level_errors_recorded` | A retained record carries its own recorded errors. |
-| `EV-EXC-003` | `unrecognized_stored_fields` | A stored snapshot carries a field this release does not interpret. Field *names* are reported; values are not, because an unrecognized field's content has no established privacy classification. |
+| `EV-EXC-003` | `unrecognized_stored_fields` | A stored snapshot carries a field this release does not interpret. Field *names* are reported; values are not, because an unrecognized field's content has no established privacy classification. The statement also records that those values were intentionally withheld from executive disclosure views and remain retained in the verified local evidence store, covered by the existing digest. |
 
 ## Observations, conclusions and unknowns
 
@@ -294,11 +296,18 @@ the existing already-sanitized `scanner_errors` strings. Paths and generated
 reports are treated as potentially sensitive. Generation is local-only: no
 service, account, telemetry or upload.
 
-## Executive JSON schema (for the renderer issue)
+## Executive JSON schema
 
-Documented here, **not implemented here**: this issue adds no serializer. A
-serializing consumer maps the projection field-for-field as below. Field order
-in this table is the intended document order.
+Executive schema version `0.1.0`, serialized by
+`executive_reports.executive_json()`. The field mapping and the document order
+below are binding: a serializer maps the projection field-for-field, and field
+order in this table *is* the document order. Renaming, omitting, adding or
+reinterpreting a field is a schema change, not an implementation detail.
+
+This schema version had not shipped to users before the exports did, so its
+evidence-item mapping was completed rather than migrated. There is no migration
+from an earlier published executive schema, because there was no earlier
+published executive schema.
 
 | JSON field | Source | Notes |
 | --- | --- | --- |
@@ -324,9 +333,127 @@ in this table is the intended document order.
 | `limits[]` | `limits` | Standing limits; render with `conclusions`. |
 | `counts` | `counts` | Existing report counts, unchanged. `expired_certificates` is absent when scan time is unknown. |
 | `scanner_errors[]` | `scanner_errors` | As stored. |
-| `evidence[]` | `occurrences` | `ordinal`, `finding_id`, and the stored snapshot. Canonical stored order; never deduplicated. |
+| `evidence[]` | `occurrences` | One item per retained snapshot occurrence, in canonical stored order, never deduplicated. Members and disclosure boundary are defined below. |
 
 An evidence reference serializes as `{"scan_id": ..., "ordinal": ..., "finding_id": ...}`.
+
+### Evidence occurrences and the disclosure boundary
+
+Each `evidence[]` item is an object with **exactly these members, in this
+order**:
+
+| Member | Meaning |
+| --- | --- |
+| `ordinal` | The occurrence identity within the containing scan run. |
+| `finding_id` | Retained for readability and traceability. It is **not** the occurrence key. |
+| `snapshot` | Recognized normalized-finding fields that were actually present in the stored snapshot. |
+| `unrecognized_field_names` | Lexically sorted names of stored fields the exporting version does not recognize. Always present, `[]` when there are none. |
+
+The complete reference to one occurrence is the containing document's `scan_id`
+plus `ordinal` plus `finding_id`. Duplicate finding IDs produce separate
+`evidence[]` items distinguished by `ordinal`.
+
+`snapshot` rules:
+
+- Values come from `FindingOccurrence.raw_snapshot` — the exact stored payload —
+  never from a reconstructed `NormalizedFinding`, whose defaults would invent a
+  value the stored snapshot never carried.
+- Recognized members appear in the canonical field order established by
+  `NormalizedFinding.to_dict()`, irrespective of the order the stored object
+  lists them in. `provenance` keeps its documented object nesting, and its
+  recognized members follow `Provenance.to_dict()` order.
+- A recognized field absent from the stored snapshot **stays absent**. It is
+  never invented, backfilled or defaulted. A historical run that recorded no
+  `observed_at` therefore has no `observed_at` in its snapshot.
+
+`unrecognized_field_names` rules:
+
+- Names are disclosed; **values are not**, because an unrecognized field's
+  content has no established privacy classification. A withheld value appears
+  in no export, no stdout or stderr output, no log, no example and no generated
+  artifact.
+- A stored member of the nested `provenance` object that this release does not
+  recognize is reported as `provenance.<name>`, on the same names-only basis.
+- A renderer never falls back to serializing `raw_snapshot` wholesale.
+
+This is not silent data loss, and both formats say so through the existing
+`EV-EXC-003` exception statement: when unrecognized fields are present, the
+statement records that their values were intentionally withheld from the
+disclosure view and remain retained, unchanged, in the verified local evidence
+store. No new top-level export field and no check- or status-policy change is
+involved.
+
+**Disclosure view versus evidence store.** An executive export is a disclosure
+view, not a replacement for the store:
+
+- the exact raw snapshot, including unrecognized fields *and their values*,
+  stays retained in the verified local evidence store and in the internal
+  projection used for integrity and reference resolution;
+- the existing evidence digest continues to cover the complete raw snapshot,
+  including withheld values — digest serialization is unchanged, and the
+  digested payload is *not* replaced by the disclosure snapshot. Changing only
+  an unrecognized value without updating the digest therefore invalidates the
+  run, which fails closed in the existing loader and produces no export;
+- the local store remains the source for technical traceability. An export
+  resolves a reference to an occurrence; reading the exact stored bytes of that
+  occurrence means reading the database.
+
+### Example (abridged)
+
+```json
+{
+  "executive_schema_version": "0.1.0",
+  "executive_policy_version": "0.1.0",
+  "scan_id": "9f1c…",
+  "scan_time": "2026-03-04T05:06:07+00:00",
+  "scan_time_basis": "recorded scan time",
+  "export_time": "2026-09-11T12:30:45+00:00",
+  "status": "WARNING",
+  "status_statement": "Evidence evaluation: WARNING. …",
+  "evidence": [
+    {
+      "ordinal": 0,
+      "finding_id": "18ad1f56…",
+      "snapshot": {
+        "finding_id": "18ad1f56…",
+        "scan_id": "9f1c…",
+        "source_type": "code_analysis",
+        "location": "/target/src/hashing.py:5",
+        "provenance": { "scanner_name": "semgrep_crypto_rules", "…": "…" },
+        "schema_version": "1.0.0"
+      },
+      "unrecognized_field_names": ["future_field", "provenance.future_detail"]
+    }
+  ]
+}
+```
+
+The Markdown document carries the same content: an overview with the qualified
+status, its reasons and every defined exception; **What HarvestGuard observed**;
+**Evidence checks and limitations**; **Defined exceptions**; **Supported
+conclusions and limits** (including what could not be established and the
+standing limits); and **Technical evidence detail**, one entry per occurrence
+with the same recognized stored values and unrecognized names.
+
+### Markdown renderer safety
+
+- Every value read out of the projection is backslash-escaped, so a stored
+  filename, identifier or scanner error cannot open a heading, a link, a table
+  row or raw HTML. The escaped text still shows exactly what was stored, and no
+  escaped value is placed at the start of a line.
+- Occurrence anchors are derived from exact scan and snapshot identity
+  (`evidence-<scan-id>-<ordinal>`) and are deterministic; every rendered
+  reference link resolves to an occurrence the same document contains.
+- Nothing in a generated document links stored text to an external resource,
+  and no renderer fetches anything.
+
+### Check limitations the exports do not change
+
+Both formats render the check catalogue as it was evaluated. They add no check,
+retire none, and never recompute a state: an export cannot turn an `unknown`
+into a pass, and recording a signature algorithm is never a claim that a
+signature was validated. `EV-CHK-001` remains internal consistency of the
+stored run, not authenticity.
 
 ### Renderer rules
 

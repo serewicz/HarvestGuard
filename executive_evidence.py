@@ -1228,6 +1228,11 @@ def _unrecognized_field_exception(
     presence is reported so a reader knows the reconstructed record is not the
     whole stored payload. Key *names* are reported; values are not, because
     an unrecognized field's content has no established privacy classification.
+
+    This is also the one channel that tells a reader the withholding happened:
+    both executive serializers render exceptions, so stating it here means
+    neither renderer has to decide on its own what a withheld value implies,
+    and no new top-level export field is needed for it.
     """
     affected = []
     names: set[str] = set()
@@ -1246,7 +1251,12 @@ def _unrecognized_field_exception(
             "does not interpret: "
             + ", ".join(sorted(names))
             + ". They are retained in the stored payload rather than discarded, "
-            "and are not interpreted by this view."
+            "and are not interpreted by this view. Their values are "
+            "intentionally withheld from executive disclosure views, which "
+            "disclose recognized stored values and unrecognized field names "
+            "only; the complete stored payload, including those values, remains "
+            "retained unchanged in the verified local evidence store and stays "
+            "covered by the existing evidence digest."
         ),
         outcome_affecting=True,
         references=tuple(occurrence.reference for occurrence in affected),

@@ -118,7 +118,8 @@ harvestguard scan <target> [--type <type>] [--max-depth N] [--prefix <prefix>] \
 harvestguard evidence list --evidence-db PATH
 harvestguard evidence verify <scan-id> --evidence-db PATH
 harvestguard evidence export <scan-id> --evidence-db PATH \
-    (--json [PATH] | --markdown [PATH] | --summary) [--quiet]
+    (--json [PATH] | --markdown [PATH] | --summary \
+     | --executive-markdown [PATH] | --executive-json [PATH]) [--quiet]
 ```
 
 `<target>` is a local file or directory path for local scan types, a bucket
@@ -1319,6 +1320,79 @@ The store is append-only: there is no update, delete, or purge command, and
 storing a scan ID that already exists fails instead of replacing prior
 evidence. To remove stored evidence, delete the database file yourself.
 
+### Executive evidence exports
+
+Two additional, explicitly requested export modes render the **executive
+evidence view** of a stored run — one human-readable, one machine-readable,
+both from the same projection:
+
+```bash
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --executive-markdown evidence.md
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --executive-json evidence.json
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --executive-markdown   # stdout
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --executive-json -      # stdout
+```
+
+Both take an optional `PATH`; an omitted `PATH` or `-` writes to stdout, like
+`--json` and `--markdown`. All five output options are mutually exclusive, so
+asking for two of them is invalid usage (exit `2`).
+
+**They require a stored run.** There is no live-scan executive export: run
+`harvestguard scan ... --evidence-db PATH` first, find the run with `evidence
+list`, then export it. The view is built from the stored evidence through the
+same verifying load path every `evidence export` uses; nothing is rescanned,
+no source file is re-read, and nothing is written back to the database.
+
+What the two formats contain is the same set of assertions, check outcomes and
+reasons, counts, evidence references, exceptions and conclusions; they differ
+only in presentation. The Markdown document opens with a compact overview that
+answers *what did HarvestGuard observe*, *what evidence supports those
+observations*, and *what can and cannot we conclude from that evidence*,
+followed by **Evidence checks and limitations**, **Supported conclusions and
+limits**, and a **Technical evidence detail** section listing every retained
+snapshot occurrence. The executive JSON is a versioned document — not a finding
+array — described field by field in
+[EXECUTIVE_EVIDENCE_VIEW.md](EXECUTIVE_EVIDENCE_VIEW.md#executive-json-schema).
+
+`--json` is unchanged and is never reused for this document: it remains a bare
+array of normalized findings with the same field names and order, including for
+a run whose findings are partial. `--markdown` and `--summary` keep their
+existing technical output exactly as before.
+
+**Navigating from an executive statement to the technical evidence.** Every
+reference identifies one occurrence as *this run's scan ID plus its ordinal
+plus its finding ID*. Two records that share a finding ID stay two occurrences
+and are never collapsed. In Markdown each reference links to that occurrence's
+entry under *Technical evidence detail*; in JSON each `evidence[]` item carries
+the same `ordinal` and `finding_id`. The export is a **disclosure view**: it
+carries the exact stored values of fields this release recognizes, and for a
+field it does not recognize it discloses the name and withholds the value. The
+verified local evidence database remains the technical-traceability source for
+the exact raw snapshot, and the existing digest still covers that complete raw
+snapshot.
+
+**Report outcome versus export process.** The stored run's own evidence
+evaluation — `VERIFIED`, `WARNING`, `INCOMPLETE` or `FAILED` — is content, not
+an exit code. A successful export exits `0` even when the evaluation is
+`WARNING`, `INCOMPLETE` or `FAILED`, and reading the outcome means reading the
+document. Exit `1` means the export process itself failed: the run could not be
+loaded or verified, the view could not be built, or the output could not be
+written. In that case no evidence payload is emitted at all — only a bounded
+failure message on stderr naming the requested run and what failed.
+
+**File output is atomic.** The document is serialized completely before the
+destination is touched, then moved into place. A load, projection,
+serialization or write failure leaves an existing destination file exactly as
+it was and leaves no partial artifact behind.
+
+**Treat both files as sensitive.** An executive export contains the same
+already-retained evidence metadata the technical report and the database do —
+paths, cloud object names, certificate metadata, technical ownership signals
+and bounded scanner diagnostics. Generation is entirely local: no service, no
+account, no telemetry, no upload. Store and share the files with the same care
+as the evidence database itself (see
+[The database is a sensitive evidence artifact](#the-database-is-a-sensitive-evidence-artifact)).
+
 ### Integrity verification
 
 Each stored run carries a SHA-256 digest over its canonical scan context and
@@ -1364,6 +1438,14 @@ Evidence-store failures use the same `1`/`2` split. A failure to write the
 store, an unreadable or unsupported database, an unknown scan ID, and a failed
 integrity check are all execution failures (`1`), reported on stderr; a missing
 `--evidence-db` or an unknown subcommand is invalid usage (`2`).
+
+The executive exports follow the same convention, and the stored run's own
+evidence evaluation never changes it: a successful
+`--executive-markdown`/`--executive-json` export exits `0` even when the stored
+evaluation is `WARNING`, `INCOMPLETE` or `FAILED`, while a failure to load,
+verify, project or write exits `1` with no evidence payload emitted. Requesting
+two output modes at once is invalid usage (`2`). See
+[Executive evidence exports](#executive-evidence-exports).
 
 Two ordering guarantees follow from persisting before emitting output:
 

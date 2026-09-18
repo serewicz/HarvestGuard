@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import fnmatch
+import os
 import sys
+import tempfile
 import time
 import uuid
 from datetime import datetime, timezone
@@ -13,6 +15,8 @@ from typing import Callable
 from classifier.scanner import scan_filesystem_for_sensitive_data_findings
 from code_analysis.scanner import scan_source_for_crypto_usage_findings
 from evidence_store import EvidenceStoreError, list_scan_runs, load_scan_run, store_scan_run
+from executive_evidence import ExecutiveEvidenceError, build_executive_evidence_view
+from executive_reports import executive_json, format_executive_markdown
 from finding_adapters import (
     AZURE_BLOB_SCANNER,
     CODE_ANALYSIS_SCANNER,
@@ -269,6 +273,33 @@ def _add_evidence_parser(subparsers: argparse._SubParsersAction) -> None:
     export_output.add_argument(
         "--summary", action="store_true", help="Emit a human-readable summary of the stored run"
     )
+    # Additive, explicit executive modes. They are in the same mutually
+    # exclusive group as the legacy output options, so `--json` keeps its exact
+    # bare normalized-finding array shape and is never reused for the executive
+    # envelope. Both accept an optional PATH, with omitted PATH or "-" meaning
+    # stdout, like the options above.
+    export_output.add_argument(
+        "--executive-markdown",
+        dest="executive_markdown",
+        nargs="?",
+        const="-",
+        metavar="PATH",
+        help=(
+            "Emit the executive evidence view for the stored run as Markdown, "
+            "to stdout or an optional file"
+        ),
+    )
+    export_output.add_argument(
+        "--executive-json",
+        dest="executive_json",
+        nargs="?",
+        const="-",
+        metavar="PATH",
+        help=(
+            "Emit the executive evidence view for the stored run as executive "
+            "JSON, to stdout or an optional file"
+        ),
+    )
     export.add_argument(
         "--quiet",
         action="store_true",
@@ -446,9 +477,18 @@ def _run_evidence_verify(args: argparse.Namespace) -> int:
 
 
 def _run_evidence_export(args: argparse.Namespace) -> int:
+    # One UTC instant, read once here and passed explicitly into the executive
+    # projection. The projection and both serializers never read the clock, so
+    # a fixed stored run plus this one export time always produces identical
+    # output. There is deliberately no public option to override it.
+    export_time = datetime.now(timezone.utc)
+
     stored = _load_stored_run(args)
     if stored is None:
         return EXIT_SCAN_ERROR
+
+    if args.executive_markdown is not None or args.executive_json is not None:
+        return _emit_executive_export(args, stored, export_time)
 
     # The same formatters a live scan uses -- never a parallel stored-run
     # report implementation that could drift from them.
@@ -466,6 +506,49 @@ def _run_evidence_export(args: argparse.Namespace) -> int:
             return EXIT_SCAN_ERROR
     else:
         print(format_console_summary(stored.findings, stored.context))
+    return EXIT_OK
+
+
+def _emit_executive_export(
+    args: argparse.Namespace, stored, export_time: datetime
+) -> int:
+    """Project one already-loaded stored run and serialize it, or fail closed.
+
+    The run has already come through the existing verified load path; the
+    projection re-verifies it and is the only thing that decides what the run
+    means. Both serializers are thin renderers over that one projection, so the
+    Markdown and the executive JSON cannot disagree.
+
+    Everything that can fail -- projection and serialization -- happens before
+    the destination is touched, and the write itself is atomic. A failure
+    therefore leaves an existing valid destination exactly as it was and never
+    leaves a partial-success artifact behind.
+    """
+    if args.executive_json is not None:
+        destination, label = args.executive_json, "executive evidence JSON"
+        serialize = executive_json
+    else:
+        destination, label = args.executive_markdown, "executive evidence Markdown"
+        serialize = format_executive_markdown
+
+    try:
+        view = build_executive_evidence_view(stored, export_time=export_time)
+        content = serialize(view)
+    except (EvidenceStoreError, ExecutiveEvidenceError, KeyError, TypeError, ValueError) as exc:
+        # Bounded failure naming the requested run and what failed. No part of
+        # the evidence payload is emitted, and nothing is written.
+        print(
+            f"Error: could not build the {label} for scan {args.scan_id}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_SCAN_ERROR
+
+    if not _emit_atomic_output(content, destination, label, args.quiet):
+        return EXIT_SCAN_ERROR
+    # Exit 0 reports that the export process succeeded. It says nothing about
+    # the stored run's own evidence evaluation, which stays whatever the
+    # projection established (docs/CLI.md, "Report outcome versus export
+    # process").
     return EXIT_OK
 
 
@@ -694,6 +777,54 @@ def _emit_output(content: str, destination: str, label: str, quiet: bool) -> boo
     try:
         Path(destination).write_text(output, encoding="utf-8")
     except OSError as exc:
+        print(f"Error: could not write {label} to {destination}: {exc}", file=sys.stderr)
+        return False
+
+    if not quiet:
+        print(f"Wrote {label}: {destination}", file=sys.stderr)
+    return True
+
+
+def _emit_atomic_output(content: str, destination: str, label: str, quiet: bool) -> bool:
+    """Write a fully serialized document, replacing the destination atomically.
+
+    Deliberately separate from `_emit_output`, which keeps its existing
+    truncate-in-place behaviour for the legacy scan and export outputs. Here the
+    content is written to a temporary file beside the destination and moved into
+    place with `os.replace`, so a reader of the destination sees either the
+    previous file or the complete new one -- never a half-written evidence
+    artifact, and never an empty file where a valid one used to be.
+    """
+    output = content if content.endswith("\n") else content + "\n"
+    if destination == "-":
+        print(output, end="")
+        return True
+
+    target = Path(destination)
+    temporary: Path | None = None
+    try:
+        handle = tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=target.parent if str(target.parent) else Path("."),
+            prefix=f".{target.name}.",
+            suffix=".partial",
+            delete=False,
+        )
+        temporary = Path(handle.name)
+        with handle:
+            handle.write(output)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
+    except OSError as exc:
+        if temporary is not None:
+            # The destination is untouched; the incomplete temporary file must
+            # not be left behind either.
+            try:
+                temporary.unlink()
+            except OSError:
+                pass
         print(f"Error: could not write {label} to {destination}: {exc}", file=sys.stderr)
         return False
 
