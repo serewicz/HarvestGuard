@@ -43,38 +43,26 @@ from typing import Any
 
 from executive_evidence import (
     CHECK_NOT_APPLICABLE,
+    UNRECOGNIZED_FIELD_VALUE_DISCLOSURE,
     EvidenceReference,
     ExecutiveEvidenceView,
     FindingOccurrence,
 )
-from findings import NormalizedFinding
+from findings import NORMALIZED_FINDING_FIELD_ORDER, PROVENANCE_FIELD_ORDER
 
-# The canonical recognized-field order, taken from `NormalizedFinding.to_dict()`
-# itself rather than restated here, so the two cannot drift. The probe instance
-# supplies *names and order only*; no stored value is ever read from it, and no
-# finding is reconstructed to obtain a value.
-_FIELD_ORDER_PROBE = NormalizedFinding(
-    source_type="",
-    asset_type="",
-    location="",
-    scanner_name="",
-    evidence="",
-    confidence="",
-)
-RECOGNIZED_SNAPSHOT_FIELDS: tuple[str, ...] = tuple(_FIELD_ORDER_PROBE.to_dict())
-RECOGNIZED_PROVENANCE_FIELDS: tuple[str, ...] = tuple(
-    _FIELD_ORDER_PROBE.provenance.to_dict()
-)
+# The canonical recognized-field order, taken directly from findings.py's
+# explicit field-order contract (shared with `NormalizedFinding.to_dict()` and
+# `Provenance.to_dict()`) -- never discovered by constructing a probe
+# NormalizedFinding, which would read the clock through __post_init__'s
+# `observed_at` default the moment this module is imported. Re-exported under
+# these names for existing callers.
+RECOGNIZED_SNAPSHOT_FIELDS: tuple[str, ...] = NORMALIZED_FINDING_FIELD_ORDER
+RECOGNIZED_PROVENANCE_FIELDS: tuple[str, ...] = PROVENANCE_FIELD_ORDER
 
-# The one sentence that keeps withholding from being silent data loss. Rendered
-# in both formats wherever unrecognized stored fields are disclosed.
-WITHHELD_VALUE_DISCLOSURE = (
-    "Their values are withheld from this disclosure view because an "
-    "unrecognized field's content has no established privacy classification. "
-    "They remain retained unchanged in the verified local evidence store, which "
-    "is the technical-traceability source, and stay covered by the existing "
-    "evidence digest."
-)
+# The one sentence that keeps withholding from being silent data loss. Owned by
+# the shared executive projection (`executive_evidence`), not by this
+# renderer; re-exported under this name for existing callers.
+WITHHELD_VALUE_DISCLOSURE = UNRECOGNIZED_FIELD_VALUE_DISCLOSURE
 
 _MARKDOWN_TITLE = "HarvestGuard Executive Evidence View"
 
@@ -98,61 +86,23 @@ _OVERVIEW_EXCEPTION_DETAIL_LIMIT = 3
 def disclosed_snapshot(occurrence: FindingOccurrence) -> dict[str, Any]:
     """Recognized stored fields of one occurrence, in canonical field order.
 
-    Values are the exact stored ones. A recognized field the stored snapshot
-    does not carry is omitted rather than defaulted, so a historical run does
-    not appear to have recorded something it never did. Ordering follows
-    `NormalizedFinding.to_dict()` regardless of the order the stored object
-    happens to list its members in.
+    A thin read of `occurrence.disclosed_snapshot`: unknown-field
+    classification is owned entirely by the shared executive projection
+    (`executive_evidence._classify_snapshot`). This renderer does not decide
+    what is recognized and does not reclassify `raw_snapshot` on its own.
     """
-    stored = occurrence.raw_snapshot
-    disclosed: dict[str, Any] = {}
-    for name in RECOGNIZED_SNAPSHOT_FIELDS:
-        if name not in stored:
-            continue
-        if name == "provenance":
-            disclosed[name] = _disclosed_provenance(stored[name])
-            continue
-        disclosed[name] = _json_ready(stored[name])
-    return disclosed
-
-
-def _disclosed_provenance(stored: Any) -> Any:
-    """The nested provenance object, filtered to its recognized members.
-
-    `provenance` is a recognized member whose value is itself a mapping of
-    recognized members, so the same boundary applies one level down: a member
-    this release does not recognize is named (see
-    `unrecognized_field_names`), never disclosed by value.
-    """
-    if not isinstance(stored, (Mapping, MappingProxyType)):
-        # Not the documented nesting. `provenance` is still a recognized field,
-        # so its exact stored value is disclosed rather than replaced by a
-        # reconstructed one; there are simply no members to filter.
-        return _json_ready(stored)
-    return {
-        name: _json_ready(stored[name])
-        for name in RECOGNIZED_PROVENANCE_FIELDS
-        if name in stored
-    }
+    return _json_ready(occurrence.disclosed_snapshot)
 
 
 def unrecognized_field_names(occurrence: FindingOccurrence) -> list[str]:
     """Lexically sorted names of stored fields this release does not recognize.
 
-    Names only, never values. Nested provenance members are reported with their
-    `provenance.` path so a reader can tell exactly what was withheld and
-    where, without the value being disclosed.
+    A thin read of `occurrence.unrecognized_field_names`, exactly as the
+    shared executive projection classified them (including unrecognized
+    direct `provenance` members, reported as `provenance.<member-name>`).
+    Names only, never values.
     """
-    stored = occurrence.raw_snapshot
-    names = {str(name) for name in stored if name not in RECOGNIZED_SNAPSHOT_FIELDS}
-    provenance = stored.get("provenance")
-    if isinstance(provenance, (Mapping, MappingProxyType)):
-        names.update(
-            f"provenance.{name}"
-            for name in provenance
-            if name not in RECOGNIZED_PROVENANCE_FIELDS
-        )
-    return sorted(names)
+    return list(occurrence.unrecognized_field_names)
 
 
 # --- Executive JSON --------------------------------------------------------

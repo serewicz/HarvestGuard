@@ -557,6 +557,97 @@ def test_no_raw_snapshot_wholesale_fallback(tmp_path):
     assert json.loads(serialized)["evidence"][0]["snapshot"].get("future_field") is None
 
 
+def test_nested_only_unknown_canary_is_absent_from_every_generated_artifact(tmp_path, capsys):
+    """The gap the independent review found: an occurrence whose *only*
+    unrecognized field is a nested provenance member. Before the fix, this
+    case raised no EV-EXC-003 and produced no withholding disclosure at all
+    (the top-level-only classifier never looked inside `provenance`), even
+    though the renderer already correctly excluded the value from
+    `disclosed_snapshot`. This proves the value stays absent from every
+    format and that the now-required disclosure is present.
+    """
+    db = store(tmp_path, findings=[code_finding()])
+    rewrite_snapshots(
+        db,
+        "run-1",
+        lambda snapshot: {
+            **snapshot,
+            "provenance": {**snapshot["provenance"], "future_provenance": NESTED_CANARY},
+        },
+    )
+    json_path = tmp_path / "executive.json"
+    markdown_path = tmp_path / "executive.md"
+    for option, destination in (
+        ("--executive-json", json_path),
+        ("--executive-markdown", markdown_path),
+    ):
+        code, out, err = export_cli(capsys, db, option, str(destination))
+        assert code == 0
+        for stream in (out, err, destination.read_text(encoding="utf-8")):
+            assert NESTED_CANARY not in stream
+
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    assert document["evidence"][0]["unrecognized_field_names"] == ["provenance.future_provenance"]
+    assert any(record["exception_id"] == "EV-EXC-003" for record in document["exceptions"])
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert (
+        "provenance.future\\_provenance" in markdown
+        or "provenance.future_provenance" in markdown
+    )
+    # The withheld value is still retained, unchanged, in the store itself.
+    stored = load_scan_run(db, "run-1")
+    assert stored.raw_finding_snapshots[0]["provenance"]["future_provenance"] == NESTED_CANARY
+
+
+def test_renderers_consume_projection_classification_without_reclassifying(tmp_path):
+    """Both serializers must read `FindingOccurrence.disclosed_snapshot` and
+    `.unrecognized_field_names` exactly as given, never recompute their own
+    classification from `raw_snapshot`.
+
+    Constructs a `FindingOccurrence` whose projection-supplied classification
+    deliberately disagrees with what any raw-snapshot-based classifier would
+    produce: `raw_snapshot` alone would recognize every field (nothing here is
+    outside `RECOGNIZED_SNAPSHOT_FIELDS`), but the projection has already
+    decided one field is unrecognized and withheld it from the disclosed
+    snapshot. If either renderer function reclassified `raw_snapshot` on its
+    own, the withheld value would leak back into the output; both must reflect
+    only what the manufactured `FindingOccurrence` states.
+    """
+    from types import MappingProxyType
+
+    from executive_evidence import FindingOccurrence, RetainedFinding
+
+    raw_snapshot = MappingProxyType({
+        "finding_id": "f1",
+        "scan_id": "run-1",
+        "source_type": "code_analysis",
+        "location": "app.py:3",
+        "confidence": "High",
+        # `raw_snapshot` alone contains nothing a naive classifier would call
+        # unrecognized; only the manufactured projection fields say otherwise.
+    })
+    finding = RetainedFinding(MappingProxyType({
+        "finding_id": "f1",
+        "scan_id": "run-1",
+        "source_type": "code_analysis",
+        "location": "app.py:3",
+        "confidence": "High",
+        "observed_at": None,
+    }))
+    occurrence = FindingOccurrence(
+        ordinal=0,
+        finding=finding,
+        raw_snapshot=raw_snapshot,
+        scan_id="run-1",
+        disclosed_snapshot=MappingProxyType({"location": "app.py:3"}),
+        unrecognized_field_names=("confidence",),
+    )
+
+    assert executive_reports.disclosed_snapshot(occurrence) == {"location": "app.py:3"}
+    assert "confidence" not in executive_reports.disclosed_snapshot(occurrence)
+    assert executive_reports.unrecognized_field_names(occurrence) == ["confidence"]
+
+
 # --- failing closed -------------------------------------------------------
 
 
@@ -620,6 +711,42 @@ def test_missing_run_and_missing_database_fail_closed(tmp_path, capsys):
 
 
 # --- atomic output --------------------------------------------------------
+
+
+def test_encoding_failure_is_bounded_atomic_and_preserves_the_destination(tmp_path, capsys):
+    """A stored value can carry an unpaired UTF-16 surrogate (for example
+    from a filename decoded elsewhere with `surrogateescape`). Markdown
+    escaping is presentation safety, not a Unicode sanitizer, so that
+    character reaches the rendered Markdown text unencoded; writing it to a
+    UTF-8 destination raises `UnicodeEncodeError` -- a `UnicodeError`, not an
+    `OSError`. Before the fix this propagated uncaught: a traceback, no exit
+    code discipline, and a leaked `.partial` temporary file. It must instead
+    get exactly the same bounded, atomic treatment as any other write
+    failure: exit 1, a bounded stderr diagnostic, no traceback, no normal
+    payload, the temporary file cleaned up, and an existing valid destination
+    left byte-for-byte unchanged.
+
+    The surrogate is injected through `rewrite_snapshots`, which stores the
+    *JSON-encoded* (ASCII-escaped) text -- so SQLite text storage never has to
+    encode the raw surrogate itself. `json.loads()` on the read-back path
+    reconstructs the exact original lone-surrogate Python string, so the
+    failure is reproduced only at the point this fix targets: encoding
+    already-rendered text for the destination file.
+    """
+    db = store(tmp_path, findings=[code_finding()])
+    rewrite_snapshots(db, "run-1", lambda snapshot: {**snapshot, "location": "app.py:\ud800"})
+    destination = tmp_path / "executive.md"
+    previous_content = "PREVIOUS VALID ARTIFACT\n"
+    destination.write_text(previous_content, encoding="utf-8")
+
+    code, out, err = export_cli(capsys, db, "--executive-markdown", str(destination))
+
+    assert code == 1
+    assert out == ""
+    assert "could not write" in err
+    assert "Traceback" not in err
+    assert destination.read_text(encoding="utf-8") == previous_content
+    assert not list(tmp_path.glob(".executive.md.*"))
 
 
 def test_write_failure_preserves_an_existing_valid_destination(tmp_path, capsys):

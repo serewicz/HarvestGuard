@@ -21,7 +21,12 @@ from finding_adapters import (
     normalize_gcs_df,
     normalize_s3_df,
 )
-from findings import NormalizedFinding, findings_to_dicts
+from findings import (
+    NORMALIZED_FINDING_FIELD_ORDER,
+    PROVENANCE_FIELD_ORDER,
+    NormalizedFinding,
+    findings_to_dicts,
+)
 from scanner.crypto_inventory import scan_crypto_inventory_findings
 from scanner.filesystem import scan_filesystem_findings
 
@@ -52,6 +57,41 @@ def test_normalized_finding_serializes_to_json_compatible_dict():
     assert payload["technical_metadata"]["Empty"] is None
     assert payload["errors"] == ["partial parse"]
     json.dumps(payload)
+
+
+def test_field_order_constant_matches_to_dict_key_order():
+    """`NORMALIZED_FINDING_FIELD_ORDER` is the same order `to_dict()` emits.
+
+    This is the explicit, testable field-order contract other modules (the
+    executive serializer) read instead of constructing a throwaway
+    NormalizedFinding merely to discover key order -- which would read the
+    clock through __post_init__'s `observed_at` default (issue #152 review).
+    `to_dict()` itself is built from this tuple (findings.py), so this test
+    guards against the two ever being edited out of step.
+    """
+    finding = NormalizedFinding(
+        source_type="local_filesystem",
+        asset_type="file",
+        location="/tmp/example.pem",
+        scanner_name="test_scanner",
+        evidence="observed",
+        confidence="High",
+        observed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    assert list(finding.to_dict()) == list(NORMALIZED_FINDING_FIELD_ORDER)
+
+
+def test_provenance_field_order_constant_matches_to_dict_key_order():
+    finding = NormalizedFinding(
+        source_type="local_filesystem",
+        asset_type="file",
+        location="/tmp/example.pem",
+        scanner_name="test_scanner",
+        evidence="observed",
+        confidence="High",
+        observed_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    assert list(finding.provenance.to_dict()) == list(PROVENANCE_FIELD_ORDER)
 
 
 def test_normalized_findings_do_not_include_assessment_fields():

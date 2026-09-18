@@ -13,6 +13,53 @@ import pandas as pd
 
 SCHEMA_VERSION = "1.0.0"
 
+# The canonical member order `NormalizedFinding.to_dict()` and
+# `Provenance.to_dict()` emit. Defined explicitly, as plain tuples, so a module
+# that needs field order (e.g. the executive serializer) never has to
+# construct a throwaway NormalizedFinding merely to inspect its output --
+# doing so would read the clock through __post_init__'s `observed_at` default
+# the moment such a probe is built. Both `to_dict()` methods below build their
+# payload from these same tuples, so the order and the tuple cannot drift
+# apart.
+NORMALIZED_FINDING_FIELD_ORDER: tuple[str, ...] = (
+    "finding_id",
+    "scan_id",
+    "source_type",
+    "asset_type",
+    "location",
+    "asset_name",
+    "scanner_name",
+    "scanner_version",
+    "observed_at",
+    "evidence",
+    "confidence",
+    "confidence_rationale",
+    "collection_method",
+    "collection_source",
+    "rule_id",
+    "repeatable",
+    "verification_rationale",
+    "provenance",
+    "identity_key",
+    "ownership_signals",
+    "unknowns",
+    "limitations",
+    "errors",
+    "technical_metadata",
+    "schema_version",
+)
+
+PROVENANCE_FIELD_ORDER: tuple[str, ...] = (
+    "scanner_name",
+    "scanner_version",
+    "collection_method",
+    "source",
+    "rule_id",
+    "collected_at",
+    "repeatable",
+    "verification_rationale",
+)
+
 
 @dataclass(frozen=True)
 class NormalizedFinding:
@@ -116,7 +163,7 @@ class NormalizedFinding:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        values = {
             "finding_id": self.finding_id,
             "scan_id": self.scan_id,
             "source_type": self.source_type,
@@ -146,6 +193,9 @@ class NormalizedFinding:
             "technical_metadata": _json_safe(self.technical_metadata),
             "schema_version": self.schema_version,
         }
+        # Ordered from NORMALIZED_FINDING_FIELD_ORDER, not the literal above,
+        # so the two cannot silently drift apart.
+        return {name: values[name] for name in NORMALIZED_FINDING_FIELD_ORDER}
 
     def _generate_id(self) -> str:
         """Finding identity is deliberately narrow: a small, logical identity,
@@ -210,7 +260,7 @@ class Provenance:
     verification_rationale: str | None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        values = {
             "scanner_name": self.scanner_name,
             "scanner_version": self.scanner_version,
             "collection_method": self.collection_method,
@@ -220,6 +270,9 @@ class Provenance:
             "repeatable": self.repeatable,
             "verification_rationale": self.verification_rationale,
         }
+        # Ordered from PROVENANCE_FIELD_ORDER, not the literal above, so the
+        # two cannot silently drift apart.
+        return {name: values[name] for name in PROVENANCE_FIELD_ORDER}
 
 
 def findings_to_dicts(findings: list[NormalizedFinding]) -> list[dict[str, Any]]:

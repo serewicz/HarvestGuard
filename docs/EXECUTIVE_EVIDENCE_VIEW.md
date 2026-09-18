@@ -235,7 +235,7 @@ Exceptions are ordered by stable ID, then by evidence occurrence.
 | --- | --- | --- |
 | `EV-EXC-001` | `optional_provenance_incomplete` | A retained record omits one or more *optional* provenance details (`collection_method`, `collection_source`, `repeatable`, `verification_rationale`). Provenance required to establish completion is handled by `EV-CHK-003`/`EV-CHK-004` and is incomplete, not a warning. |
 | `EV-EXC-002` | `record_level_errors_recorded` | A retained record carries its own recorded errors. |
-| `EV-EXC-003` | `unrecognized_stored_fields` | A stored snapshot carries a field this release does not interpret. Field *names* are reported; values are not, because an unrecognized field's content has no established privacy classification. The statement also records that those values were intentionally withheld from executive disclosure views and remain retained in the verified local evidence store, covered by the existing digest. |
+| `EV-EXC-003` | `unrecognized_stored_fields` | A stored snapshot carries a field this release does not recognize -- at the snapshot top level, or as a direct member of the recognized `provenance` object (reported as `provenance.<member-name>`), including an occurrence whose *only* unrecognized field is nested. Field *names* are reported; values are not, because an unrecognized field's content has no established privacy classification. The statement also records that those values were intentionally withheld from executive disclosure views and remain retained in the verified local evidence store, covered by the existing digest. |
 
 ## Observations, conclusions and unknowns
 
@@ -361,7 +361,13 @@ plus `ordinal` plus `finding_id`. Duplicate finding IDs produce separate
 - Recognized members appear in the canonical field order established by
   `NormalizedFinding.to_dict()`, irrespective of the order the stored object
   lists them in. `provenance` keeps its documented object nesting, and its
-  recognized members follow `Provenance.to_dict()` order.
+  recognized members follow `Provenance.to_dict()` order. That order comes
+  from two explicit tuples in `findings.py`
+  (`NORMALIZED_FINDING_FIELD_ORDER`, `PROVENANCE_FIELD_ORDER`) that
+  `to_dict()` itself is built from; the serializer imports them directly and
+  never constructs a `NormalizedFinding` merely to discover field order --
+  doing so would read the clock through `__post_init__`'s `observed_at`
+  default the moment the module is imported.
 - A recognized field absent from the stored snapshot **stays absent**. It is
   never invented, backfilled or defaulted. A historical run that recorded no
   `observed_at` therefore has no `observed_at` in its snapshot.
@@ -373,8 +379,34 @@ plus `ordinal` plus `finding_id`. Duplicate finding IDs produce separate
   in no export, no stdout or stderr output, no log, no example and no generated
   artifact.
 - A stored member of the nested `provenance` object that this release does not
-  recognize is reported as `provenance.<name>`, on the same names-only basis.
+  recognize is reported as `provenance.<name>`, on the same names-only basis --
+  including when it is the *only* unrecognized field on that occurrence (no
+  unrecognized top-level field need also be present).
+- Names are lexically sorted per occurrence.
 - A renderer never falls back to serializing `raw_snapshot` wholesale.
+
+**Classification is owned by the shared projection, not by either renderer.**
+`executive_evidence.py`'s `_classify_snapshot()` is the *only* place that
+decides what is recognized; it populates `FindingOccurrence.disclosed_snapshot`
+and `FindingOccurrence.unrecognized_field_names` once per occurrence, and both
+`executive_json_document()` and `format_executive_markdown()` read those two
+fields directly. Neither serializer implements its own recursive classifier or
+disclosure policy, and neither reclassifies `raw_snapshot` on its own.
+
+Only two structural levels are closed and participate in classification:
+
+1. The stored snapshot's top level, against the fields `NormalizedFinding.
+   to_dict()` defines.
+2. The recognized `provenance` object's direct members: `scanner_name`,
+   `scanner_version`, `collection_method`, `source`, `rule_id`, `collected_at`,
+   `repeatable`, `verification_rationale`. Any other direct member is
+   unrecognized.
+
+`technical_metadata` and `ownership_signals` are recognized *open-content*
+maps: they are disclosed by their exact stored value, and their nested keys are
+retained observation data -- never classified as unknown schema fields merely
+for being scanner-specific or unusual. No object nested any deeper than the two
+levels above is recursively classified.
 
 This is not silent data loss, and both formats say so through the existing
 `EV-EXC-003` exception statement: when unrecognized fields are present, the

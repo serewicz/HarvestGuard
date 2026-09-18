@@ -847,6 +847,15 @@ def _emit_atomic_output(content: str, destination: str, label: str, quiet: bool)
     place with `os.replace`, so a reader of the destination sees either the
     previous file or the complete new one -- never a half-written evidence
     artifact, and never an empty file where a valid one used to be.
+
+    `handle.write(output)` can fail with `UnicodeEncodeError` -- a
+    `UnicodeError`, not an `OSError` -- when `output` carries a code point the
+    destination's UTF-8 encoding cannot represent (for example an unpaired
+    surrogate that reached a stored value through a permissive decode
+    elsewhere). That failure gets exactly the same bounded, atomic treatment
+    as a write failure: the partial temporary file is removed, any existing
+    valid destination is left untouched, and a bounded diagnostic is printed
+    instead of letting the encode error's traceback escape.
     """
     output = content if content.endswith("\n") else content + "\n"
     if destination == "-":
@@ -870,7 +879,7 @@ def _emit_atomic_output(content: str, destination: str, label: str, quiet: bool)
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, target)
-    except OSError as exc:
+    except (OSError, UnicodeError) as exc:
         if temporary is not None:
             # The destination is untouched; the incomplete temporary file must
             # not be left behind either.

@@ -384,6 +384,186 @@ def test_unrecognized_stored_fields_are_retained_and_named(tmp_path):
     assert [record.exception_id for record in view.exceptions] == ["EV-EXC-003"]
     assert view.exceptions[0].details == ("future_field",)
     assert view.occurrences[0].raw_snapshot["future_field"] == "kept"
+    assert view.occurrences[0].unrecognized_field_names == ("future_field",)
+
+
+# --- projection-owned unknown-field classification (#152 review) -----------
+
+
+def test_nested_only_provenance_unknown_field_raises_ev_exc_003(tmp_path):
+    """A snapshot whose *only* unrecognized field is a nested provenance
+    member (no unrecognized top-level field on the same occurrence) must
+    still be classified, disclosed, and raise EV-EXC-003 -- the gap the
+    independent review found: the old top-level-only classifier only ever
+    diffed the snapshot's own keys against a flat known-keys set, so it never
+    even looked inside `provenance` and silently missed this case entirely
+    (no exception, no WARNING, no disclosure).
+    """
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(db, scan_id="run-1", context=code_context(), findings=[code_finding()])
+    rewrite_snapshots(
+        db,
+        "run-1",
+        lambda snapshot: {
+            **snapshot,
+            "provenance": {**snapshot["provenance"], "future_provenance": "kept-nested"},
+        },
+    )
+    view = load_executive_evidence_view(db, "run-1", export_time=EXPORT_TIME)
+    assert view.occurrences[0].unrecognized_field_names == ("provenance.future_provenance",)
+    assert view.status == STATUS_WARNING
+    assert [record.exception_id for record in view.exceptions] == ["EV-EXC-003"]
+    assert view.exceptions[0].details == ("provenance.future_provenance",)
+    # The nested value itself is retained in the raw snapshot, never disclosed.
+    assert (
+        view.occurrences[0].raw_snapshot["provenance"]["future_provenance"] == "kept-nested"
+    )
+    assert "future_provenance" not in view.occurrences[0].disclosed_snapshot.get(
+        "provenance", {}
+    )
+
+
+def test_top_level_and_nested_unknowns_on_one_occurrence_are_one_exception(tmp_path):
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(db, scan_id="run-1", context=code_context(), findings=[code_finding()])
+    rewrite_snapshots(
+        db,
+        "run-1",
+        lambda snapshot: {
+            **snapshot,
+            "future_field": "kept",
+            "provenance": {**snapshot["provenance"], "future_provenance": "kept-nested"},
+        },
+    )
+    view = load_executive_evidence_view(db, "run-1", export_time=EXPORT_TIME)
+    assert view.occurrences[0].unrecognized_field_names == (
+        "future_field",
+        "provenance.future_provenance",
+    )
+    assert [record.exception_id for record in view.exceptions] == ["EV-EXC-003"]
+    assert view.exceptions[0].details == ("future_field", "provenance.future_provenance")
+    assert len(view.exceptions[0].references) == 1
+
+
+def test_unrecognized_field_names_are_lexically_sorted_mixing_top_level_and_nested(tmp_path):
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(db, scan_id="run-1", context=code_context(), findings=[code_finding()])
+    rewrite_snapshots(
+        db,
+        "run-1",
+        lambda snapshot: {
+            **snapshot,
+            "zeta_field": "z",
+            "beta_field": "b",
+            "provenance": {
+                **snapshot["provenance"],
+                "zulu_provenance": "zp",
+                "alpha_provenance": "ap",
+            },
+        },
+    )
+    view = load_executive_evidence_view(db, "run-1", export_time=EXPORT_TIME)
+    assert view.occurrences[0].unrecognized_field_names == tuple(
+        sorted(view.occurrences[0].unrecognized_field_names)
+    )
+    assert view.occurrences[0].unrecognized_field_names == (
+        "beta_field",
+        "provenance.alpha_provenance",
+        "provenance.zulu_provenance",
+        "zeta_field",
+    )
+
+
+def test_multiple_occurrences_have_independent_unrecognized_field_names(tmp_path):
+    """Occurrence-specific names: two occurrences with different unrecognized
+    fields must each carry only their own, while the run-level EV-EXC-003
+    aggregates the union across both.
+    """
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(
+        db,
+        scan_id="run-1",
+        context=code_context(),
+        findings=[code_finding(location="app.py:3"), code_finding(location="app.py:9")],
+    )
+    rewrite_snapshots(
+        db,
+        "run-1",
+        lambda snapshot: (
+            {**snapshot, "alpha_top": "a"}
+            if snapshot["location"] == "app.py:3"
+            else {
+                **snapshot,
+                "provenance": {**snapshot["provenance"], "zeta_nested": "z"},
+            }
+        ),
+    )
+    view = load_executive_evidence_view(db, "run-1", export_time=EXPORT_TIME)
+    by_location = {occ.finding.location: occ for occ in view.occurrences}
+    assert by_location["app.py:3"].unrecognized_field_names == ("alpha_top",)
+    assert by_location["app.py:9"].unrecognized_field_names == ("provenance.zeta_nested",)
+    assert [record.exception_id for record in view.exceptions] == ["EV-EXC-003"]
+    assert view.exceptions[0].details == ("alpha_top", "provenance.zeta_nested")
+    assert len(view.exceptions[0].references) == 2
+
+
+def test_technical_metadata_and_ownership_signals_keys_are_never_unknown_fields(tmp_path):
+    """Scanner-specific keys inside the recognized open-content maps
+    (`technical_metadata`, `ownership_signals`) are retained observation data,
+    never classified as unrecognized schema fields -- even when their key
+    names are unusual or scanner-specific.
+    """
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(db, scan_id="run-1", context=code_context(), findings=[code_finding()])
+    rewrite_snapshots(
+        db,
+        "run-1",
+        lambda snapshot: {
+            **snapshot,
+            "technical_metadata": {
+                **snapshot["technical_metadata"],
+                "Vendor-Specific Extension!!": "value",
+            },
+            "ownership_signals": {"custom_uid_mapping": 501},
+        },
+    )
+    view = load_executive_evidence_view(db, "run-1", export_time=EXPORT_TIME)
+    assert view.occurrences[0].unrecognized_field_names == ()
+    assert view.status != STATUS_WARNING or not any(
+        record.exception_id == "EV-EXC-003" for record in view.exceptions
+    )
+    disclosed = view.occurrences[0].disclosed_snapshot
+    assert disclosed["technical_metadata"]["Vendor-Specific Extension!!"] == "value"
+    assert disclosed["ownership_signals"]["custom_uid_mapping"] == 501
+
+
+def test_duplicate_finding_ids_with_different_unrecognized_fields_stay_separate(tmp_path):
+    db = tmp_path / "evidence.sqlite"
+    store_scan_run(
+        db,
+        scan_id="run-1",
+        context=code_context(),
+        findings=[
+            code_finding(location="app.py:3", finding_id="shared-id"),
+            code_finding(location="app.py:9", finding_id="shared-id"),
+        ],
+    )
+    rewrite_snapshots(
+        db,
+        "run-1",
+        lambda snapshot: (
+            {**snapshot, "only_on_first": "x"}
+            if snapshot["location"] == "app.py:3"
+            else {**snapshot, "only_on_second": "y"}
+        ),
+    )
+    view = load_executive_evidence_view(db, "run-1", export_time=EXPORT_TIME)
+    assert len(view.occurrences) == 2
+    first, second = view.occurrences
+    assert first.unrecognized_field_names == ("only_on_first",)
+    assert second.unrecognized_field_names == ("only_on_second",)
+    assert view.exceptions[0].details == ("only_on_first", "only_on_second")
+    assert {ref.ordinal for ref in view.exceptions[0].references} == {0, 1}
 
 
 def test_duplicate_finding_ids_resolve_to_separate_occurrences(tmp_path):

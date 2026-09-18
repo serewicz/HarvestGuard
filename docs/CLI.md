@@ -1382,8 +1382,12 @@ failure message on stderr naming the requested run and what failed.
 
 **File output is atomic.** The document is serialized completely before the
 destination is touched, then moved into place. A load, projection,
-serialization or write failure leaves an existing destination file exactly as
-it was and leaves no partial artifact behind.
+serialization or write failure — including a text-encoding failure such as
+`UnicodeEncodeError` while writing the destination's UTF-8 text — leaves an
+existing destination file exactly as it was and leaves no partial artifact
+behind; the temporary file used for the atomic replace is removed, and the
+failure is reported as a bounded stderr diagnostic with exit `1`, never a
+traceback.
 
 **Treat both files as sensitive.** An executive export contains the same
 already-retained evidence metadata the technical report and the database do —
