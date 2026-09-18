@@ -485,7 +485,18 @@ harvestguard scan ./project --type crypto --evidence-db ./evidence.db
 harvestguard evidence list --evidence-db ./evidence.db
 harvestguard evidence verify <scan-id> --evidence-db ./evidence.db
 harvestguard evidence export <scan-id> --evidence-db ./evidence.db --markdown report.md
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --executive-markdown evidence.md
+harvestguard evidence export <scan-id> --evidence-db ./evidence.db --executive-json evidence.json
 ```
+
+The last two render the **executive evidence view** of a stored run: what
+HarvestGuard observed, what evidence supports it, and what can and cannot be
+concluded — human-readable Markdown and machine-readable JSON from the same
+projection, generated entirely locally with no service, account or upload. You
+can use them on your own, without a dashboard, hosted infrastructure or
+professional assistance: see
+[docs/CLI.md](docs/CLI.md#executive-evidence-exports) and
+[docs/EXECUTIVE_EVIDENCE_VIEW.md](docs/EXECUTIVE_EVIDENCE_VIEW.md).
 
 Stored runs are append-only and carry a SHA-256 digest that detects corruption
 or internal inconsistency; it is deliberately not a signature, not tamper-proof,

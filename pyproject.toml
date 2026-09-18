@@ -92,6 +92,12 @@ py-modules = [
     "finding_adapters",
     "reports",
     "evidence_store",
+    # The executive evidence projection and its two serializers: `harvestguard
+    # evidence export --executive-markdown/--executive-json` imports both, so
+    # an installed CLI has to ship them. They add no runtime dependency and no
+    # data resource -- the executive schema is code, not a packaged file.
+    "executive_evidence",
+    "executive_reports",
 ]
 
 [tool.setuptools.packages.find]

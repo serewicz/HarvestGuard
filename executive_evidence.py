@@ -48,8 +48,8 @@ from types import MappingProxyType
 from typing import Any
 
 from evidence_store import StoredScanRun, load_scan_run, verify_loaded_scan_run
+from findings import NORMALIZED_FINDING_FIELD_ORDER, PROVENANCE_FIELD_ORDER, NormalizedFinding
 from findings import SCHEMA_VERSION as CURRENT_FINDING_SCHEMA_VERSION
-from findings import NormalizedFinding
 from harvestguard_version import __version__ as HARVESTGUARD_VERSION
 from reports import (
     CATEGORY_COVERAGE_LIMITATION,
@@ -159,10 +159,17 @@ SUPPORTED_COLLECTION_CONTRACTS = MappingProxyType({
 # not by themselves make scope observability unknown.
 BY_DESIGN_SCOPE_RULE_IDS = frozenset({"max_depth_boundary", "skipped_special_file"})
 
-# Keys a stored finding snapshot is expected to carry: every NormalizedFinding
-# constructor field plus the nested provenance view `to_dict()` emits. Anything
-# else is retained and named rather than silently dropped.
-_KNOWN_SNAPSHOT_KEYS = frozenset(NormalizedFinding.__dataclass_fields__) | {"provenance"}
+# The one sentence that keeps withholding an unrecognized field's value from
+# being silent data loss. Owned here -- the shared projection -- and reused
+# verbatim by both executive serializers, so neither renderer states its own
+# version of the disclosure policy.
+UNRECOGNIZED_FIELD_VALUE_DISCLOSURE = (
+    "Their values are withheld from this disclosure view because an "
+    "unrecognized field's content has no established privacy classification. "
+    "They remain retained unchanged in the verified local evidence store, "
+    "which is the technical-traceability source, and stay covered by the "
+    "existing evidence digest."
+)
 
 _OPTIONAL_PROVENANCE_FIELDS = (
     "collection_method",
@@ -250,12 +257,22 @@ class FindingOccurrence:
     does not recognize, so a projection built by a newer or older reader does
     not silently discard what was stored. `finding` is the reconstructed
     projection of its fields; absent retained observation time stays unknown.
+
+    `disclosed_snapshot` and `unrecognized_field_names` are this occurrence's
+    projection-owned classification (see `_classify_snapshot`): the recognized
+    fields and their exact stored values, and the lexically sorted names of
+    fields this release does not recognize -- including unrecognized direct
+    `provenance` members, reported as `provenance.<member-name>`. Both
+    serializers read these two fields directly; neither one classifies
+    `raw_snapshot` on its own.
     """
 
     ordinal: int
     finding: RetainedFinding
     raw_snapshot: Mapping[str, Any]
     scan_id: str
+    disclosed_snapshot: Mapping[str, Any]
+    unrecognized_field_names: tuple[str, ...]
 
     @property
     def reference(self) -> EvidenceReference:
@@ -510,6 +527,8 @@ def _occurrences(run: StoredScanRun) -> tuple[FindingOccurrence, ...]:
     occurrences = []
     for ordinal, finding in enumerate(run.findings):
         payload = raw[ordinal] if ordinal < len(raw) else finding.to_dict()
+        frozen_snapshot = _freeze(dict(payload))
+        disclosed_snapshot, unrecognized_field_names = _classify_snapshot(frozen_snapshot)
         occurrences.append(
             FindingOccurrence(
                 ordinal=ordinal,
@@ -520,11 +539,66 @@ def _occurrences(run: StoredScanRun) -> tuple[FindingOccurrence, ...]:
                     },
                     "observed_at": payload.get("observed_at"),
                 })),
-                raw_snapshot=_freeze(dict(payload)),
+                raw_snapshot=frozen_snapshot,
                 scan_id=run.scan_id,
+                disclosed_snapshot=disclosed_snapshot,
+                unrecognized_field_names=unrecognized_field_names,
             )
         )
     return tuple(occurrences)
+
+
+def _classify_snapshot(
+    raw_snapshot: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], tuple[str, ...]]:
+    """Projection-owned recognized/unrecognized classification of one stored
+    snapshot (docs/EXECUTIVE_EVIDENCE_VIEW.md, "Projection-owned unknown-field
+    classification"). This is the *only* place that decides what is
+    recognized; both `disclosed_snapshot()` and `unrecognized_field_names()`
+    in `executive_reports.py` read the result off `FindingOccurrence` rather
+    than reclassifying `raw_snapshot` themselves.
+
+    Only two closed structural levels participate: the snapshot top level, and
+    the recognized `provenance` object's direct members. `technical_metadata`
+    and `ownership_signals` are recognized open-content maps disclosed by
+    their exact stored value; their nested keys are retained observation data,
+    never classified as unknown schema fields. No other nested object is
+    recursively classified.
+    """
+    disclosed: dict[str, Any] = {}
+    unrecognized: set[str] = {
+        str(key) for key in raw_snapshot if key not in NORMALIZED_FINDING_FIELD_ORDER
+    }
+    for name in NORMALIZED_FINDING_FIELD_ORDER:
+        if name not in raw_snapshot:
+            continue
+        if name == "provenance":
+            nested_disclosed, nested_unrecognized = _classify_provenance(raw_snapshot[name])
+            disclosed[name] = nested_disclosed
+            unrecognized.update(nested_unrecognized)
+            continue
+        disclosed[name] = raw_snapshot[name]
+    return MappingProxyType(disclosed), tuple(sorted(unrecognized))
+
+
+def _classify_provenance(stored: Any) -> tuple[Any, set[str]]:
+    """The recognized `provenance` object's closed direct-member contract:
+    scanner_name, scanner_version, collection_method, source, rule_id,
+    collected_at, repeatable, verification_rationale (`PROVENANCE_FIELD_ORDER`).
+    Any other direct member is unrecognized, reported as
+    `provenance.<member-name>`.
+
+    A `provenance` value that is not the documented mapping is still a
+    recognized field: its exact stored value is disclosed unchanged, and there
+    are no members to classify.
+    """
+    if not isinstance(stored, (Mapping, MappingProxyType)):
+        return stored, set()
+    disclosed = {name: stored[name] for name in PROVENANCE_FIELD_ORDER if name in stored}
+    unrecognized = {
+        f"provenance.{name}" for name in stored if name not in PROVENANCE_FIELD_ORDER
+    }
+    return MappingProxyType(disclosed), unrecognized
 
 
 def _counts(findings: list[NormalizedFinding], scan_dt: datetime | None) -> dict[str, int]:
@@ -1221,36 +1295,49 @@ def _finding_error_exception(
 def _unrecognized_field_exception(
     occurrences: tuple[FindingOccurrence, ...],
 ) -> ExceptionRecord | None:
-    """Stored snapshot keys this release does not recognize.
+    """Stored snapshot fields this release does not recognize.
+
+    Covers both top-level unrecognized fields and unrecognized direct
+    `provenance` members (reported as `provenance.<member-name>`), including
+    an occurrence whose only unrecognized field is nested: classification is
+    entirely `_classify_snapshot`'s (via `FindingOccurrence.
+    unrecognized_field_names`), so this function only aggregates it into one
+    exception. It never reclassifies `raw_snapshot` itself.
 
     Named rather than dropped: a payload written by a different schema version
-    keeps its unrecognized keys in `FindingOccurrence.raw_snapshot`, and their
-    presence is reported so a reader knows the reconstructed record is not the
-    whole stored payload. Key *names* are reported; values are not, because
-    an unrecognized field's content has no established privacy classification.
+    keeps its unrecognized fields in `FindingOccurrence.raw_snapshot`, and
+    their presence is reported so a reader knows the reconstructed record is
+    not the whole stored payload. Field *names* are reported; values are not.
+
+    This is also the one channel that tells a reader the withholding happened:
+    both executive serializers render exceptions, so stating it here means
+    neither renderer has to decide on its own what a withheld value implies,
+    and no new top-level export field is needed for it.
     """
-    affected = []
-    names: set[str] = set()
-    for occurrence in occurrences:
-        extra = set(occurrence.raw_snapshot) - _KNOWN_SNAPSHOT_KEYS
-        if extra:
-            affected.append(occurrence)
-            names.update(str(key) for key in extra)
+    affected = [occurrence for occurrence in occurrences if occurrence.unrecognized_field_names]
     if not affected:
         return None
+    names = sorted(
+        {name for occurrence in affected for name in occurrence.unrecognized_field_names}
+    )
     return ExceptionRecord(
         exception_id="EV-EXC-003",
         name="unrecognized_stored_fields",
         statement=(
-            f"{len(affected)} stored snapshot(s) carry field(s) this release "
-            "does not interpret: "
-            + ", ".join(sorted(names))
-            + ". They are retained in the stored payload rather than discarded, "
-            "and are not interpreted by this view."
+            f"{len(affected)} stored snapshot occurrence(s) carry field(s) "
+            "this release does not recognize, including any unrecognized "
+            "direct provenance member -- reported as "
+            "provenance.<member-name> -- even when it is the only "
+            "unrecognized field on that occurrence: "
+            + ", ".join(names)
+            + ". They are retained in the stored payload rather than "
+            "discarded, and are not interpreted by this view. Names are "
+            "disclosed here and in both executive export formats. "
+            + UNRECOGNIZED_FIELD_VALUE_DISCLOSURE
         ),
         outcome_affecting=True,
         references=tuple(occurrence.reference for occurrence in affected),
-        details=tuple(sorted(names)),
+        details=tuple(names),
     )
 
 

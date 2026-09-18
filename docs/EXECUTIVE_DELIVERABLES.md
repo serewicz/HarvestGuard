@@ -14,12 +14,24 @@ does not claim that every deliverable described here is fully implemented
 today.
 
 **What exists today:** the console summary, the `--json` array of normalized
-findings, and the `--markdown` evidence report produced by `reports.py` (see
-[CLI.md](CLI.md)). Every deliverable named below — including the Technology Due
-Diligence Evidence Package itself — is a reporting target derived from that
-evidence, not shipped output. Statuses for the report-packaging work are tracked
-in [ROADMAP.md](ROADMAP.md) (HG-017 and Milestone 5), and each claim in this
-document is classified in [CLAIMS_AUDIT.md](CLAIMS_AUDIT.md).
+findings, and the `--markdown` evidence report produced by `reports.py`, plus
+the **executive evidence view** of a stored run — `harvestguard evidence export
+SCAN-ID --evidence-db PATH --executive-markdown [PATH]` and `--executive-json
+[PATH]`, produced by `executive_reports.py` from the shared projection in
+`executive_evidence.py` (see [CLI.md](CLI.md#executive-evidence-exports) and
+[EXECUTIVE_EVIDENCE_VIEW.md](EXECUTIVE_EVIDENCE_VIEW.md)).
+
+That executive view is the only executive output that ships. It covers exactly
+one stored scan run and states what HarvestGuard observed, what evidence
+supports it, and what can and cannot be concluded — with every executive
+statement traceable back to a retained snapshot occurrence. It is not a
+multi-run, portfolio, HTML or PDF deliverable, and it contains no risk score, no
+business materiality and no recommendation. Every other deliverable named below
+— including the Technology Due Diligence Evidence Package itself — remains a
+reporting target derived from the same evidence, not shipped output. Statuses
+for the report-packaging work are tracked in [ROADMAP.md](ROADMAP.md) (HG-017
+and Milestone 5), and each claim in this document is classified in
+[CLAIMS_AUDIT.md](CLAIMS_AUDIT.md).
 
 ## Primary Deliverable
 

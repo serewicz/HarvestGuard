@@ -89,6 +89,8 @@ def test_release_artifacts_contain_expected_package_content(release_artifacts):
     expected_package_files = {
         Path("harvestguard.py"),
         Path("harvestguard_version.py"),
+        Path("executive_evidence.py"),
+        Path("executive_reports.py"),
         Path("scanner/filesystem.py"),
         Path("code_analysis/rules/crypto.yaml"),
     }

@@ -317,3 +317,92 @@ def test_markdown_report_records_the_harvestguard_version(
     for section in ["## Executive Summary", "## Scan Information", "## Detailed Findings"]:
         assert section in report
     assert SYNTHETIC_SECRET not in report
+
+
+def test_executive_exports_work_offline_from_outside_the_checkout(
+    clean_install, outside_target, tmp_path
+):
+    """The executive exports have to work for a real evaluator: installed from
+    a package, run from outside the checkout, against a local evidence
+    database, with no network access.
+
+    `HTTPS_PROXY`/`HTTP_PROXY` are pointed at a closed port and proxy use is
+    forced for the export, so any attempt to reach a service during the export
+    would fail loudly instead of passing silently on a networked host. The scan
+    that produces the evidence is left alone -- only the export is under test.
+    """
+    venv_dir, _ = clean_install
+
+    database = tmp_path / "evidence.db"
+    scan = _run(
+        venv_dir,
+        tmp_path,
+        "scan",
+        str(outside_target),
+        "--type",
+        "all",
+        "--summary",
+        "--quiet",
+        "--evidence-db",
+        str(database),
+    )
+    _assert_no_missing_module(scan)
+    assert scan.returncode == 0, scan.stderr[-2000:]
+    assert database.exists()
+
+    listing = _run(venv_dir, tmp_path, "evidence", "list", "--evidence-db", str(database))
+    assert listing.returncode == 0, listing.stderr[-2000:]
+    scan_id = listing.stdout.splitlines()[1].split()[0]
+
+    offline = {
+        **os.environ,
+        "HTTP_PROXY": "http://127.0.0.1:9",
+        "HTTPS_PROXY": "http://127.0.0.1:9",
+        "NO_PROXY": "",
+    }
+    json_path = tmp_path / "executive.json"
+    markdown_path = tmp_path / "executive.md"
+    for option, destination in (
+        ("--executive-json", json_path),
+        ("--executive-markdown", markdown_path),
+    ):
+        completed = subprocess.run(
+            [
+                str(_venv_bin(venv_dir, "harvestguard")),
+                "evidence",
+                "export",
+                scan_id,
+                "--evidence-db",
+                str(database),
+                option,
+                str(destination),
+                "--quiet",
+            ],
+            cwd=tmp_path,
+            env=offline,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        _assert_no_missing_module(completed)
+        assert completed.returncode == 0, completed.stderr[-2000:]
+        assert completed.stderr == ""
+
+    document = json.loads(json_path.read_text(encoding="utf-8"))
+    assert document["executive_schema_version"] == "0.1.0"
+    assert document["scan_id"] == scan_id
+    assert document["exporting_harvestguard_version"] == __version__
+    for item in document["evidence"]:
+        assert list(item) == ["ordinal", "finding_id", "snapshot", "unrecognized_field_names"]
+    report = markdown_path.read_text(encoding="utf-8")
+    assert report.startswith("# HarvestGuard Executive Evidence View")
+    for section in [
+        "## Evidence checks and limitations",
+        "## Supported conclusions and limits",
+        "## Technical evidence detail",
+    ]:
+        assert section in report
+    # Sensitive-data records report categories and counts, never the value.
+    assert SYNTHETIC_SECRET not in report
+    assert SYNTHETIC_SECRET not in json_path.read_text(encoding="utf-8")
