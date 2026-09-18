@@ -749,6 +749,88 @@ def test_encoding_failure_is_bounded_atomic_and_preserves_the_destination(tmp_pa
     assert not list(tmp_path.glob(".executive.md.*"))
 
 
+@pytest.mark.parametrize("cli_args", [(), ("-",)])
+def test_markdown_stdout_encoding_failure_is_bounded_with_no_traceback_or_payload(
+    tmp_path, capsys, cli_args
+):
+    """The same encoding failure as the file-output case above, but for the
+    stdout destination (omitted PATH, or explicit `-`).
+
+    Before this fix, `_emit_atomic_output`'s stdout branch was a bare
+    `print(output, end="")` executed *before* the function's try/except --
+    entirely outside the bounded write-error boundary the file-output path
+    already had. A `UnicodeEncodeError` from that `print()` call propagated
+    uncaught: a real traceback, an uncontrolled process exit (not the CLI's
+    own exit-1 discipline), and nothing printed through the normal bounded
+    stderr diagnostic channel. It must instead behave identically to the file
+    case: exit 1, one bounded stderr diagnostic, no traceback, and no normal
+    stdout payload.
+    """
+    db = store(tmp_path, findings=[code_finding()])
+    rewrite_snapshots(db, "run-1", lambda snapshot: {**snapshot, "location": "app.py:\ud800"})
+
+    code, out, err = export_cli(capsys, db, "--executive-markdown", *cli_args)
+
+    assert code == 1
+    assert out == ""
+    assert "could not write" in err
+    assert "stdout" in err
+    assert "Traceback" not in err
+
+
+def test_executive_json_stdout_cannot_encoding_fail_because_json_dumps_ascii_escapes(
+    tmp_path, capsys
+):
+    """Unlike Markdown, executive JSON stdout cannot hit the encoding failure
+    this fix addresses, and that is proven here rather than assumed.
+
+    `executive_json()` serializes with `json.dumps(..., indent=2)`, which
+    defaults to `ensure_ascii=True`: any code point a UTF-8 destination could
+    not otherwise represent -- including an unpaired surrogate -- is emitted
+    as its literal `\\uXXXX` escape sequence (six plain ASCII characters), not
+    as the raw code point. The rendered document text is therefore always
+    representable in UTF-8, so this export never reaches the failure branch
+    for a recognized value carrying a lone surrogate, over stdout or a file.
+    """
+    db = store(tmp_path, findings=[code_finding()])
+    rewrite_snapshots(db, "run-1", lambda snapshot: {**snapshot, "location": "app.py:\ud800"})
+
+    code, out, err = export_cli(capsys, db, "--executive-json")
+
+    assert code == 0
+    assert err == ""
+    # The written text is pure ASCII -- proof the surrogate was escaped, not
+    # merely "didn't happen to break this run".
+    out.encode("ascii")
+    document = json.loads(out)
+    # json.loads() reverses the escape exactly, so the stored value is not
+    # lost or altered -- only its on-the-wire representation is ASCII-safe.
+    assert document["evidence"][0]["snapshot"]["location"] == "app.py:\ud800"
+
+
+@pytest.mark.parametrize(
+    "option", ["--executive-json", "--executive-markdown"]
+)
+@pytest.mark.parametrize("cli_args", [(), ("-",)])
+def test_successful_stdout_export_is_quiet_and_complete(tmp_path, capsys, option, cli_args):
+    """A well-formed run exported to stdout (omitted PATH, or explicit `-`)
+    in quiet mode: exit 0, the complete expected payload on stdout, and empty
+    stderr -- unaffected by the encoding-failure fix, since this run's stored
+    values contain nothing unencodable.
+    """
+    db = store(tmp_path, findings=[code_finding(), filesystem_finding()])
+    code, out, err = export_cli(capsys, db, option, *cli_args, "--quiet")
+    assert code == 0
+    assert err == ""
+    if option == "--executive-json":
+        document = json.loads(out)
+        assert document["scan_id"] == "run-1"
+        assert len(document["evidence"]) == 2
+    else:
+        assert out.startswith("# HarvestGuard Executive Evidence View")
+        assert "### Occurrence 0" in out and "### Occurrence 1" in out
+
+
 def test_write_failure_preserves_an_existing_valid_destination(tmp_path, capsys):
     db = store(tmp_path, findings=[code_finding()])
     destination = tmp_path / "exports"

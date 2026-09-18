@@ -848,18 +848,24 @@ def _emit_atomic_output(content: str, destination: str, label: str, quiet: bool)
     previous file or the complete new one -- never a half-written evidence
     artifact, and never an empty file where a valid one used to be.
 
-    `handle.write(output)` can fail with `UnicodeEncodeError` -- a
-    `UnicodeError`, not an `OSError` -- when `output` carries a code point the
-    destination's UTF-8 encoding cannot represent (for example an unpaired
-    surrogate that reached a stored value through a permissive decode
-    elsewhere). That failure gets exactly the same bounded, atomic treatment
-    as a write failure: the partial temporary file is removed, any existing
-    valid destination is left untouched, and a bounded diagnostic is printed
-    instead of letting the encode error's traceback escape.
+    A write can fail with `UnicodeEncodeError` -- a `UnicodeError`, not an
+    `OSError` -- when `output` carries a code point the destination's UTF-8
+    encoding cannot represent (for example an unpaired surrogate that reached
+    a stored value through a permissive decode elsewhere). That failure gets
+    exactly the same bounded treatment as any other write failure: a bounded
+    diagnostic on stderr and exit 1, never an escaping traceback. This applies
+    to stdout (`destination == "-"`) too, even though atomic replacement --
+    the temporary file, `os.replace` -- only makes sense for a real file: a
+    failed `print()` has no destination file to preserve or partial artifact
+    to clean up, but it still must not raise uncaught.
     """
     output = content if content.endswith("\n") else content + "\n"
     if destination == "-":
-        print(output, end="")
+        try:
+            print(output, end="")
+        except (OSError, UnicodeError) as exc:
+            print(f"Error: could not write {label} to stdout: {exc}", file=sys.stderr)
+            return False
         return True
 
     target = Path(destination)
