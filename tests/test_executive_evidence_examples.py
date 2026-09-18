@@ -1,0 +1,770 @@
+"""Regression coverage for the published executive-evidence examples (#153).
+
+`docs/examples/executive-evidence-view/` publishes one sample per required
+evaluation outcome so a reader can see the real output before installing
+anything, and holds the acceptance materials for issue #153. Because those
+files are published and are cited as acceptance evidence, they have to stay
+true: regenerating them from the real implementation must reproduce them
+byte-for-byte, every published command must be a command the shipped CLI
+actually accepts, both formats must keep saying the same thing, no withheld
+value may leak into them, and the acceptance records must not claim human
+results that have not happened.
+
+These tests exercise the implementation rather than searching for headings:
+every assertion is made against output regenerated through
+`evidence_store` -> verified load -> the shared projection -> both serializers,
+or against the real CLI run as a subprocess.
+
+Two levels of "real", kept apart deliberately. Most tests here regenerate the
+collection in-process, which reaches this checkout's modules. That is not what
+a reader installs, so the last section regenerates the whole collection again
+from a *non-editable install*, runs the shipped console script from a directory
+outside the checkout with no `PYTHONPATH` and no repository import override,
+and requires the committed bytes either way.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).parent.parent
+COLLECTION = ROOT / "docs" / "examples" / "executive-evidence-view"
+SAMPLES = COLLECTION / "samples"
+MANIFEST = COLLECTION / "manifest.json"
+GENERATOR = COLLECTION / "generate_examples.py"
+README = COLLECTION / "README.md"
+
+# Every outcome the issue requires the bounded collection to cover. The
+# manifest's per-scenario `covers` entries are the claim; this list is the
+# contract they are checked against.
+REQUIRED_COVERAGE = (
+    "VERIFIED",
+    "WARNING",
+    "INCOMPLETE",
+    "FAILED",
+    "legitimate zero-finding run",
+    "matching integrity with incomplete execution",
+    "partial findings plus a recorded scanner failure",
+    "missing or invalid historical scan time",
+    "unsupported historical schema or collection contract",
+    "duplicate finding IDs that remain separate by ordinal",
+    "bounded corruption or integrity failure that emits no normal evidence report",
+    "unknown-field name disclosure and value withholding",
+    "local-retention disclosure",
+)
+
+# Shapes that must never appear in a published artifact. These are the
+# credential/secret forms a careless example could plausibly carry; the canary
+# is the synthetic value the generator stores in an *unrecognized* field
+# precisely so a disclosure view has something to withhold.
+FORBIDDEN_PATTERNS = (
+    re.compile(r"SYNTHETIC-CANARY-VALUE"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bghp_[A-Za-z0-9]{20,}"),
+    re.compile(r"(?i)\b(password|passphrase|secret_key|api_key)\s*[=:]\s*\S+"),
+    # An email address would be participant-identifying data.
+    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
+)
+
+
+def _load_generator():
+    """Import generate_examples.py by path -- docs/ is not an importable package."""
+    spec = importlib.util.spec_from_file_location("eev_generate_examples", GENERATOR)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    # Registered before execution: the module defines a dataclass, and
+    # `dataclasses` resolves annotations through `sys.modules[cls.__module__]`.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="module")
+def generator():
+    return _load_generator()
+
+
+@pytest.fixture(scope="module")
+def manifest():
+    return json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def regenerated(tmp_path_factory, generator):
+    """One fresh generation of the whole collection, plus its evidence store."""
+    output = tmp_path_factory.mktemp("eev-output")
+    work = tmp_path_factory.mktemp("eev-work")
+    result = generator.generate(output, work)
+    return output, work, result
+
+
+def _json_samples() -> list[Path]:
+    return sorted(SAMPLES.glob("*.json"))
+
+
+def _markdown_for(json_path: Path) -> Path:
+    return json_path.with_suffix(".md")
+
+
+def _references(document: dict) -> list[dict]:
+    """Every evidence reference a document makes, from every record kind."""
+    found = []
+    for section in ("checks", "exceptions", "observations", "conclusions"):
+        for record in document.get(section, []):
+            found.extend(record.get("references", []))
+    return found
+
+
+# --- the collection is exactly what the implementation produces -------------
+
+
+def test_committed_collection_matches_a_fresh_generation(regenerated):
+    """Every committed byte is reproducible from the real path, with a fixed time."""
+    output, _work, _result = regenerated
+    generated = {
+        path.relative_to(output).as_posix(): path.read_bytes()
+        for path in sorted(output.rglob("*"))
+        if path.is_file()
+    }
+    committed = {
+        path.relative_to(COLLECTION).as_posix(): path.read_bytes()
+        for path in [MANIFEST, *sorted(SAMPLES.iterdir())]
+    }
+    assert set(generated) == set(committed), (
+        "regeneration produced a different set of artifacts; rerun "
+        "`python docs/examples/executive-evidence-view/generate_examples.py`"
+    )
+    for name, content in committed.items():
+        assert generated[name] == content, (
+            f"{name} is stale; rerun the generator "
+            "(a HarvestGuard version change also requires regeneration)"
+        )
+
+
+def test_generation_is_deterministic(tmp_path, generator):
+    """Same fixtures, same explicit export time, same bytes -- twice over."""
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    generator.generate(first, tmp_path / "work-1")
+    generator.generate(second, tmp_path / "work-2")
+    for path in sorted(first.rglob("*")):
+        if path.is_file():
+            assert path.read_bytes() == (second / path.relative_to(first)).read_bytes()
+
+
+def test_generation_needs_no_network(tmp_path, generator, monkeypatch):
+    """No hosted service, account, telemetry or upload in the example path."""
+
+    def refuse(*args, **kwargs):
+        raise AssertionError("the example path must not open a socket")
+
+    monkeypatch.setattr(socket, "socket", refuse)
+    monkeypatch.setattr(socket, "create_connection", refuse)
+    generator.generate(tmp_path / "offline", tmp_path / "offline-work")
+
+
+# --- generation never destroys what is already there -----------------------
+
+# Every path the generator writes inside the work directory. Pinned here so the
+# refusal is proven per destination, not only for the database.
+WORK_DIR_DESTINATIONS = (
+    "example-evidence.sqlite",
+    "corrupted-copy.sqlite",
+    "rejected-run.md",
+)
+PRE_EXISTING = b"pre-existing bytes that are not the generator's to remove"
+
+
+def test_the_refused_destinations_are_the_ones_the_generator_writes(generator):
+    assert set(generator.WORK_DIR_ARTIFACTS) == set(WORK_DIR_DESTINATIONS)
+
+
+def test_generation_refuses_a_work_dir_holding_an_evidence_database(tmp_path, generator):
+    """A database in the work directory may be someone's real evidence.
+
+    The generator cannot tell a leftover fixture from evidence that has to
+    survive, so it refuses rather than deleting or overwriting either. What
+    matters is that the pre-existing run is still there, byte-identical, and
+    still passes the verifying loader afterwards.
+    """
+    import evidence_store
+
+    work = tmp_path / "work"
+    work.mkdir()
+    database = work / "example-evidence.sqlite"
+    context, findings = generator._build_verified("pre-existing-run")
+    evidence_store.store_scan_run(
+        database, scan_id="pre-existing-run", context=context, findings=findings
+    )
+    before = database.read_bytes()
+    output = tmp_path / "output"
+
+    with pytest.raises(FileExistsError):
+        generator.generate(output, work)
+
+    assert database.read_bytes() == before
+    stored = evidence_store.load_scan_run(database, "pre-existing-run")
+    assert stored.scan_id == "pre-existing-run"
+    # A refused run writes nothing anywhere: no second database, no samples.
+    assert [path.name for path in work.iterdir()] == ["example-evidence.sqlite"]
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("name", WORK_DIR_DESTINATIONS)
+def test_generation_refuses_every_occupied_work_dir_destination(tmp_path, generator, name):
+    work = tmp_path / "work"
+    work.mkdir()
+    occupied = work / name
+    occupied.write_bytes(PRE_EXISTING)
+
+    with pytest.raises(FileExistsError):
+        generator.generate(tmp_path / "output", work)
+
+    assert occupied.read_bytes() == PRE_EXISTING
+
+
+# --- required coverage and recorded provenance -----------------------------
+
+
+def test_every_required_outcome_is_covered(manifest):
+    covered = {item for scenario in manifest["scenarios"] for item in scenario["covers"]}
+    assert set(REQUIRED_COVERAGE) <= covered
+
+
+def test_manifest_records_the_required_provenance(manifest):
+    versions = manifest["versions"]
+    for field in (
+        "producing_harvestguard_version",
+        "exporting_harvestguard_version",
+        "executive_schema_version",
+        "executive_policy_version",
+        "finding_schema_version",
+        "evidence_store_schema_version",
+    ):
+        assert versions[field], f"{field} is not recorded"
+    assert manifest["regeneration"]["explicit_export_time"]
+
+    for scenario in manifest["scenarios"]:
+        assert scenario["evidence_label"].startswith("synthetic")
+        assert scenario["commands"], f"{scenario['slug']} records no command"
+        for artifact in scenario["artifacts"]:
+            path = COLLECTION / artifact["path"]
+            assert path.is_file()
+            assert path.stat().st_size == artifact["bytes"]
+            import hashlib
+
+            assert hashlib.sha256(path.read_bytes()).hexdigest() == artifact["sha256"]
+        if scenario["slug"] == "failed-integrity-corruption":
+            continue
+        scope = scenario["scope"]
+        assert scope["target_path"] and scope["scanners"] and scope["scanner_versions"]
+        assert scenario["recorded_scan_time"]
+        assert scenario["export_time"] == manifest["regeneration"]["explicit_export_time"]
+        assert scenario["collection_provenance"] is not None
+        assert scenario["evidence_digest"]
+
+
+def test_versions_recorded_match_the_installed_release(manifest):
+    from executive_evidence import EXECUTIVE_POLICY_VERSION, EXECUTIVE_SCHEMA_VERSION
+    from findings import SCHEMA_VERSION as FINDING_SCHEMA_VERSION
+    from harvestguard_version import __version__
+
+    versions = manifest["versions"]
+    assert versions["producing_harvestguard_version"] == __version__
+    assert versions["exporting_harvestguard_version"] == __version__
+    assert versions["executive_schema_version"] == EXECUTIVE_SCHEMA_VERSION
+    assert versions["executive_policy_version"] == EXECUTIVE_POLICY_VERSION
+    assert versions["finding_schema_version"] == FINDING_SCHEMA_VERSION
+
+
+# --- what the samples say ---------------------------------------------------
+
+
+@pytest.mark.parametrize("sample", _json_samples(), ids=lambda path: path.stem)
+def test_sample_status_agrees_with_the_manifest_and_the_markdown(sample, manifest):
+    document = json.loads(sample.read_text(encoding="utf-8"))
+    recorded = next(
+        scenario for scenario in manifest["scenarios"] if scenario["slug"] == sample.stem
+    )
+    assert document["status"] == recorded["evidence_evaluation"]
+    markdown = _markdown_for(sample).read_text(encoding="utf-8")
+    assert f"**Evidence evaluation: {document['status']}**" in markdown
+    # Status is never cherry-picked from passes: every reason names what it
+    # rests on, and an empty required-check set could not produce one.
+    assert document["status_reasons"]
+    for reason in document["status_reasons"]:
+        assert reason["check_ids"] or reason["exception_ids"]
+
+
+@pytest.mark.parametrize("sample", _json_samples(), ids=lambda path: path.stem)
+def test_json_and_markdown_stay_semantically_parallel(sample):
+    document = json.loads(sample.read_text(encoding="utf-8"))
+    markdown = _markdown_for(sample).read_text(encoding="utf-8")
+    # Markdown escapes punctuation for presentation safety, so compare on
+    # identifiers and unescaped text rather than whole sentences.
+    plain = markdown.replace("\\", "")
+    for check in document["checks"]:
+        assert check["check_id"] in plain
+        assert check["state"] in plain
+    for exception in document["exceptions"]:
+        assert exception["exception_id"] in plain
+    for reason in document["status_reasons"]:
+        assert reason["reason_id"] in plain
+    for occurrence in document["evidence"]:
+        for name in occurrence["unrecognized_field_names"]:
+            assert name in plain, f"{name} is disclosed in JSON but not in Markdown"
+    for limit in document["limits"]:
+        assert limit.split(".")[0] in plain
+
+
+@pytest.mark.parametrize("sample", _json_samples(), ids=lambda path: path.stem)
+def test_every_reference_resolves_to_exactly_one_occurrence(sample):
+    document = json.loads(sample.read_text(encoding="utf-8"))
+    occurrences = {
+        (occurrence["ordinal"], occurrence["finding_id"]) for occurrence in document["evidence"]
+    }
+    markdown = _markdown_for(sample).read_text(encoding="utf-8")
+    for reference in _references(document):
+        assert reference["scan_id"] == document["scan_id"]
+        matches = [
+            occurrence
+            for occurrence in document["evidence"]
+            if occurrence["ordinal"] == reference["ordinal"]
+        ]
+        assert len(matches) == 1, f"reference {reference} does not resolve to one occurrence"
+        if reference["finding_id"] is not None:
+            assert (reference["ordinal"], reference["finding_id"]) in occurrences
+        anchor = f'id="evidence-{document["scan_id"]}-{reference["ordinal"]}"'
+        assert anchor in markdown, f"Markdown has no navigable target for {reference}"
+
+
+def test_duplicate_finding_ids_stay_separate_occurrences():
+    document = json.loads(
+        (SAMPLES / "duplicate-finding-ids.json").read_text(encoding="utf-8")
+    )
+    occurrences = document["evidence"]
+    assert len(occurrences) == 2
+    assert len({occurrence["finding_id"] for occurrence in occurrences}) == 1
+    assert {occurrence["ordinal"] for occurrence in occurrences} == {0, 1}
+    assert (
+        occurrences[0]["snapshot"]["location"] != occurrences[1]["snapshot"]["location"]
+    )
+
+
+def test_unrecognized_fields_disclose_names_and_withhold_values():
+    document = json.loads(
+        (SAMPLES / "warning-unrecognized-fields.json").read_text(encoding="utf-8")
+    )
+    markdown = (SAMPLES / "warning-unrecognized-fields.md").read_text(encoding="utf-8")
+    occurrence = document["evidence"][0]
+    assert occurrence["unrecognized_field_names"] == [
+        "experimental_attribution",
+        "provenance.experimental_collector_note",
+    ]
+    assert "experimental_attribution" not in occurrence["snapshot"]
+    # The local-retention disclosure travels with the withheld names, in both
+    # formats, so a withheld value is never silent data loss.
+    from executive_evidence import UNRECOGNIZED_FIELD_VALUE_DISCLOSURE
+
+    serialized = json.dumps(document)
+    assert UNRECOGNIZED_FIELD_VALUE_DISCLOSURE in serialized
+    assert UNRECOGNIZED_FIELD_VALUE_DISCLOSURE in markdown.replace("\\", "")
+
+
+def test_unknown_historical_time_invents_nothing():
+    document = json.loads(
+        (SAMPLES / "incomplete-unknown-scan-time.json").read_text(encoding="utf-8")
+    )
+    assert document["scan_time"] is None
+    assert "unknown" in document["scan_time_basis"]
+    assert document["status"] == "INCOMPLETE"
+    # The exporting clock is never substituted for the missing historical one.
+    assert document["export_time"] not in json.dumps(document["conclusions"])
+
+
+def test_corruption_sample_is_a_bounded_failure_with_no_report():
+    transcript = (SAMPLES / "failed-integrity-corruption.stderr.txt").read_text(
+        encoding="utf-8"
+    )
+    assert transcript.count("exit status: 1") == 2
+    assert transcript.count("stdout bytes: 0") == 2
+    assert transcript.count("output file written: no") == 2
+    assert transcript.count("failed integrity verification") == 2
+    # A rejected run yields a diagnostic, never an evidence-bearing document.
+    assert "Evidence evaluation" not in transcript
+    assert "Technical evidence detail" not in transcript
+    assert "executive_schema_version" not in transcript
+
+
+# --- published artifacts stay safe -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted(
+        path
+        for path in COLLECTION.rglob("*")
+        if path.is_file() and path.suffix in {".md", ".json", ".txt", ".py"}
+    ),
+    ids=lambda path: path.relative_to(COLLECTION).as_posix(),
+)
+def test_published_artifacts_carry_no_secret_or_identifying_values(path):
+    text = path.read_text(encoding="utf-8")
+    if path.name == "generate_examples.py":
+        # The generator necessarily contains the canary literal it stores in an
+        # unrecognized field; it must appear in no generated artifact.
+        text = text.replace("SYNTHETIC-CANARY-VALUE-0000-NOT-A-REAL-SECRET", "")
+    for pattern in FORBIDDEN_PATTERNS:
+        assert not pattern.search(text), f"{pattern.pattern} matched in {path.name}"
+
+
+def test_no_evidence_database_is_committed():
+    assert not list(COLLECTION.rglob("*.sqlite"))
+    assert not list(COLLECTION.rglob("*.db"))
+
+
+def test_readme_relative_links_resolve():
+    text = README.read_text(encoding="utf-8")
+    for target in re.findall(r"\]\((?!https?:)([^)#]+)", text):
+        assert (COLLECTION / target).exists(), f"broken link: {target}"
+
+
+# --- the real CLI, from outside the checkout -------------------------------
+
+
+def _cli_environment() -> dict[str, str]:
+    environment = dict(os.environ)
+    existing = environment.get("PYTHONPATH")
+    environment["PYTHONPATH"] = f"{ROOT}{os.pathsep}{existing}" if existing else str(ROOT)
+    return environment
+
+
+def _run_cli(argv: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, "-m", "harvestguard", *argv],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        env=_cli_environment(),
+        check=False,
+    )
+
+
+def _assert_live_json_matches_committed(stdout: str, slug: str, fixed: str) -> None:
+    """A live JSON export equals the sample once its export time is normalized."""
+    live = json.loads(stdout)
+    committed = json.loads((SAMPLES / f"{slug}.json").read_text(encoding="utf-8"))
+    assert live["export_time"] != ""
+    live["export_time"] = fixed
+    assert live == committed
+
+
+def _assert_live_markdown_matches_committed(stdout: str, slug: str, fixed: str) -> None:
+    """The same for Markdown, whose export time appears in the identity table."""
+    committed = (SAMPLES / f"{slug}.md").read_text(encoding="utf-8")
+    export_row = re.search(r"\| Export time \| (.+) \|", stdout)
+    assert export_row is not None
+    normalized = stdout.replace(
+        export_row.group(1), fixed.replace("-", "\\-").replace("+", "\\+")
+    )
+    assert normalized.strip() == committed.strip()
+
+
+@pytest.mark.parametrize(
+    "slug", ["verified", "incomplete-partial-execution", "warning-unrecognized-fields"]
+)
+def test_cli_reproduces_each_sample_apart_from_its_export_time(slug, regenerated, manifest):
+    """CLI -> store -> verified load -> projection -> both exports, for real.
+
+    This is the repository's entry point (`python -m harvestguard` with the
+    checkout importable), run from a directory that is not the checkout: it
+    covers the documented no-install path, not what an installed release does
+    -- that is the last section's job. The CLI owns its export time and has no
+    public override, so the committed sample and a live export are compared
+    with that one value normalized away; nothing else may differ. Three
+    representative scenarios keep the subprocess cost bounded; every
+    scenario's byte-for-byte content is already covered above.
+    """
+    _output, work, _result = regenerated
+    scenario = next(item for item in manifest["scenarios"] if item["slug"] == slug)
+    database = work / "example-evidence.sqlite"
+    fixed = manifest["regeneration"]["explicit_export_time"]
+
+    for option, check in (
+        ("--executive-json", _assert_live_json_matches_committed),
+        ("--executive-markdown", _assert_live_markdown_matches_committed),
+    ):
+        completed = _run_cli(
+            [
+                "evidence",
+                "export",
+                scenario["scan_id"],
+                "--evidence-db",
+                str(database),
+                option,
+                "-",
+            ],
+            cwd=work,
+        )
+        assert completed.returncode == 0, completed.stderr
+        check(completed.stdout, slug, fixed)
+
+
+def test_documented_export_commands_use_options_the_cli_accepts(manifest):
+    help_text = _run_cli(["evidence", "export", "--help"], cwd=ROOT).stdout
+    for scenario in manifest["scenarios"]:
+        for command in scenario["commands"]:
+            for option in re.findall(r"--[a-z-]+", command):
+                assert option in help_text, f"{option} is not a shipped CLI option"
+    # #153 explicitly does not add a public export-time override.
+    assert "--export-time" not in help_text
+
+
+def test_the_documented_relative_work_dir_command_generates_the_collection(tmp_path):
+    """The README's `--work-dir ./eev-work`, run exactly as documented.
+
+    Relative paths, from a directory that is not the checkout. The corruption
+    example runs the real CLI with its `cwd` set to the work directory, so a
+    relative work directory that is not pinned absolute first gets resolved a
+    second time against that cwd: the CLI then reports a missing database, and
+    the bounded *integrity* failure the sample exists to show never happens.
+    Every other generation test passes an absolute temporary path, so none of
+    them can see that.
+    """
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(GENERATOR),
+            "--output-dir",
+            "./eev-output",
+            "--work-dir",
+            "./eev-work",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=_cli_environment(),
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+    # Kept where the documented follow-up CLI commands go looking for it.
+    assert (tmp_path / "eev-work" / "example-evidence.sqlite").is_file()
+    # The disposable copy is removed; nothing else is left behind.
+    assert [path.name for path in (tmp_path / "eev-work").iterdir()] == [
+        "example-evidence.sqlite"
+    ]
+
+    samples = tmp_path / "eev-output" / "samples"
+    transcript = (samples / "failed-integrity-corruption.stderr.txt").read_text(
+        encoding="utf-8"
+    )
+    # The real rejection, not a missing-database error that merely also exits 1.
+    assert transcript.count("failed integrity verification") == 2
+    assert transcript.count("exit status: 1") == 2
+    assert transcript.count("stdout bytes: 0") == 2
+    assert (samples / "verified.json").is_file()
+
+
+# --- acceptance records claim nothing that has not happened ----------------
+
+
+@pytest.mark.parametrize(
+    "name, marker",
+    [
+        ("comprehension-protocol.md", "DRAFT"),
+        ("comprehension-results.md", "NO PARTICIPANT HAS BEEN TESTED"),
+        ("independent-use-record.md", "NO PRACTITIONER HAS COMPLETED THE EXERCISE"),
+        ("technical-traceability-review.md", "NOT PERFORMED"),
+    ],
+)
+def test_outstanding_human_acceptance_is_recorded_as_incomplete(name, marker):
+    text = (COLLECTION / name).read_text(encoding="utf-8")
+    assert marker in text
+    assert "INCOMPLETE" in text or "NOT FROZEN" in text
+
+
+def test_acceptance_summary_separates_the_evidence_categories():
+    text = (COLLECTION / "acceptance-summary.md").read_text(encoding="utf-8")
+    for category in (
+        "Automated and AI-produced evidence",
+        "Independent technical-review evidence",
+        "Real human-comprehension evidence",
+        "Maintainer decisions",
+    ):
+        assert category in text
+    assert "INCOMPLETE" in text
+
+
+# --- the installed package, from outside the checkout ----------------------
+
+# A regeneration that imports this checkout says nothing about the release a
+# reader installs, so the collection is regenerated once more from a
+# non-editable install: outside the checkout, with no `PYTHONPATH` and no
+# repository import override, driving the shipped console script. The committed
+# bytes have to come out either way.
+#
+# `--system-site-packages` plus `--no-deps` keeps this offline and fast -- the
+# same narrowing `tests/test_end_to_end_validation.py` documents. What is under
+# test is HarvestGuard's own installed modules answering the imports, not
+# dependency resolution; `tests/test_clean_install.py` covers that separately.
+
+
+def _venv_bin(venv_dir: Path, name: str) -> Path:
+    if sys.platform == "win32":
+        return venv_dir / "Scripts" / f"{name}.exe"
+    return venv_dir / "bin" / name
+
+
+def _installed_environment(venv_dir: Path) -> dict[str, str]:
+    """No repository import path, and the environment's own console script first."""
+    environment = {key: value for key, value in os.environ.items() if key != "PYTHONPATH"}
+    bin_dir = _venv_bin(venv_dir, "python").parent
+    environment["PATH"] = f"{bin_dir}{os.pathsep}{environment.get('PATH', '')}"
+    return environment
+
+
+@pytest.fixture(scope="module")
+def installed_generation(tmp_path_factory):
+    """The whole collection, regenerated by a non-editable install.
+
+    Returns the environment directory, the outside-the-checkout run directory
+    (whose `work/` keeps the generated evidence database), the regenerated
+    collection, and the clean environment used to produce it.
+    """
+    venv_dir = tmp_path_factory.mktemp("eev-installed") / "venv"
+    subprocess.run(
+        [sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        check=True,
+    )
+    install = [str(_venv_bin(venv_dir, "python")), "-m", "pip", "install", "--no-deps"]
+    if importlib.util.find_spec("setuptools") is not None:
+        install.append("--no-build-isolation")
+    installed = subprocess.run(
+        [*install, str(ROOT)], capture_output=True, text=True, timeout=600, check=False
+    )
+    assert installed.returncode == 0, (installed.stdout + installed.stderr)[-3000:]
+
+    outside = tmp_path_factory.mktemp("eev-installed-run")
+    assert ROOT not in outside.parents and outside != ROOT
+    output = outside / "collection"
+    environment = _installed_environment(venv_dir)
+    completed = subprocess.run(
+        [
+            str(_venv_bin(venv_dir, "python")),
+            str(GENERATOR),
+            "--output-dir",
+            str(output),
+            "--work-dir",
+            str(outside / "work"),
+        ],
+        cwd=str(outside),
+        capture_output=True,
+        text=True,
+        timeout=600,
+        env=environment,
+        check=False,
+    )
+    assert completed.returncode == 0, (completed.stdout + completed.stderr)[-3000:]
+    return venv_dir, outside, output, environment
+
+
+def test_the_installed_generator_imports_the_install_not_the_checkout(installed_generation):
+    """Every module the generator drives resolves from the installed package."""
+    venv_dir, outside, _output, environment = installed_generation
+    probe = (
+        "import importlib.util, sys\n"
+        f"spec = importlib.util.spec_from_file_location('eev_probe', {str(GENERATOR)!r})\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "sys.modules['eev_probe'] = module\n"
+        "spec.loader.exec_module(module)\n"
+        "for name in ('evidence_store', 'executive_evidence', 'executive_reports'):\n"
+        "    print(sys.modules[name].__file__)\n"
+        "print(str(module._REPO_ROOT) in sys.path)\n"
+    )
+    completed = subprocess.run(
+        [str(_venv_bin(venv_dir, "python")), "-c", probe],
+        cwd=str(outside),
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=environment,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr[-2000:]
+    *origins, repo_root_on_path = completed.stdout.split()
+    # The checkout is never put on the import path when an install answers.
+    assert repo_root_on_path == "False"
+    for origin in (Path(item) for item in origins):
+        assert venv_dir in origin.parents, origin
+        assert ROOT not in origin.parents, origin
+
+
+def test_a_non_editable_install_regenerates_the_committed_collection(installed_generation):
+    """The published bytes are reproducible from an installed release."""
+    _venv_dir, _outside, output, _environment = installed_generation
+    generated = {
+        path.relative_to(output).as_posix(): path.read_bytes()
+        for path in sorted(output.rglob("*"))
+        if path.is_file()
+    }
+    committed = {
+        path.relative_to(COLLECTION).as_posix(): path.read_bytes()
+        for path in [MANIFEST, *sorted(SAMPLES.iterdir())]
+    }
+
+    assert set(generated) == set(committed)
+    for name, content in committed.items():
+        assert generated[name] == content, (
+            f"{name} differs when generated from a non-editable install"
+        )
+
+
+@pytest.mark.parametrize("slug", ["verified", "warning-unrecognized-fields"])
+def test_installed_cli_reproduces_each_sample_apart_from_its_export_time(
+    slug, installed_generation, manifest
+):
+    """The shipped console script, outside the checkout, against the kept store."""
+    venv_dir, outside, _output, environment = installed_generation
+    scenario = next(item for item in manifest["scenarios"] if item["slug"] == slug)
+    database = outside / "work" / "example-evidence.sqlite"
+    fixed = manifest["regeneration"]["explicit_export_time"]
+
+    for option, check in (
+        ("--executive-json", _assert_live_json_matches_committed),
+        ("--executive-markdown", _assert_live_markdown_matches_committed),
+    ):
+        completed = subprocess.run(
+            [
+                str(_venv_bin(venv_dir, "harvestguard")),
+                "evidence",
+                "export",
+                scenario["scan_id"],
+                "--evidence-db",
+                str(database),
+                option,
+                "-",
+            ],
+            cwd=str(outside),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=environment,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr[-2000:]
+        check(completed.stdout, slug, fixed)

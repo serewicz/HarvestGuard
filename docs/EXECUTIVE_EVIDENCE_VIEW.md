@@ -10,6 +10,13 @@ serializers ship in `executive_reports.py`, exposed as
 Both require an already-stored run: there is no live-scan executive export, and
 no HTML or PDF renderer.
 
+**Worked examples.** One reproducible sample per evaluation outcome — plus a
+zero-finding run, partial execution, unknown historical time, an unsupported
+historical contract, duplicate finding IDs, withheld unrecognized field values
+and a rejected corrupted run — is published in
+[docs/examples/executive-evidence-view/](examples/executive-evidence-view/README.md),
+together with the exact commands, versions and provenance behind each one.
+
 HarvestGuard establishes evidence. Humans establish meaning. This view answers
 exactly three questions:
 
@@ -496,6 +503,33 @@ stored run, not authenticity.
   `status_statement`; never as a bare word.
 - Do not recompute status, counts, references or conclusions. If a renderer
   needs a fact this projection does not carry, extend the projection.
+
+## Usability and traceability evidence
+
+What has actually been established about this view, as of the examples
+collection ([issue #153](https://github.com/serewicz/HarvestGuard/issues/153)):
+
+- **Established by automated checks.** Every required outcome is reproducible
+  through the real store → verified load → projection → both serializers path;
+  generation is deterministic for fixed evidence and an explicit export time;
+  the published samples are reproducible byte-for-byte from a non-editable
+  install, regenerated outside the checkout with no repository import
+  override; both CLI export modes — the documented no-install entry point and
+  the installed console script — reproduce the published samples for
+  representative scenarios apart from the export time the CLI owns;
+  every evidence reference in a published sample resolves to
+  exactly one stored occurrence, with duplicate finding IDs staying separate;
+  JSON and Markdown agree, including withheld unrecognized field names and the
+  local-retention disclosure; no withheld value or secret-shaped canary appears
+  in any generated artifact; a corrupted run yields a bounded diagnostic and no
+  report; and generation needs no network, service or account.
+- **Not yet established.** Independent technical traceability review,
+  independent practitioner use of the published instructions, and
+  nontechnical-reader comprehension are human acceptance steps that have not
+  happened. Their status is recorded in
+  [docs/examples/executive-evidence-view/acceptance-summary.md](examples/executive-evidence-view/acceptance-summary.md).
+  Nothing in this document should be read as a claim that reader comprehension
+  or independent usability has been demonstrated.
 
 ## Compatibility
 

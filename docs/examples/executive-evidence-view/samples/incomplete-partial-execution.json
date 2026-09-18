@@ -1,0 +1,339 @@
+{
+  "executive_schema_version": "0.1.0",
+  "executive_policy_version": "0.1.0",
+  "scan_id": "synthetic-partial-001",
+  "scan_time": "2025-11-04T09:30:00+00:00",
+  "scan_time_basis": "recorded scan time",
+  "export_time": "2026-01-15T00:00:00+00:00",
+  "producing_harvestguard_version": "0.3.0",
+  "exporting_harvestguard_version": "0.3.0",
+  "finding_schema_version": "1.0.0",
+  "evidence_digest": "cbb72a03716f48f25fb89ea3e633929a573764ca833086571654c6b704f36bf2",
+  "scope": {
+    "target_path": "/synthetic/example-target",
+    "scan_type": "code",
+    "scanners": [
+      "code analysis"
+    ],
+    "scanner_versions": {
+      "semgrep_crypto_rules": "0.2.0"
+    },
+    "excluded_paths": [],
+    "scope_constraints": [
+      "SYNTHETIC EXAMPLE FIXTURE: purpose-built evidence for HarvestGuard documentation. Not a real environment, not a real scan, no customer, personal or confidential data."
+    ],
+    "crypto_files_inspected": 12
+  },
+  "status": "INCOMPLETE",
+  "status_statement": "Evidence evaluation: INCOMPLETE. At least one required check or requested evaluation could not be completed or established for the declared scope. Retained evidence remains valid for what it records; what could not be established is listed as an unknown.",
+  "status_reasons": [
+    {
+      "reason_id": "EV-RSN-002",
+      "statement": "1 required check(s) could not be completed or established: EV-CHK-004 execution_completeness (unknown).",
+      "check_ids": [
+        "EV-CHK-004"
+      ],
+      "exception_ids": []
+    },
+    {
+      "reason_id": "EV-RSN-007",
+      "statement": "1 check(s) did not apply to the declared scope: EV-CHK-008.",
+      "check_ids": [
+        "EV-CHK-008"
+      ],
+      "exception_ids": []
+    }
+  ],
+  "checks": [
+    {
+      "check_id": "EV-CHK-001",
+      "name": "evidence_integrity",
+      "title": "Stored evidence integrity",
+      "required": true,
+      "applicable": true,
+      "state": "passed",
+      "method": "evidence_store.load_scan_run() recomputed the stored run's SHA-256 digest over its canonical run payload and ordered finding snapshots and compared it with the stored digest. verify_loaded_scan_run() rechecked the current payload with the same canonical digest definition and checked reconstruction consistency before this projection was built. A mismatch fails closed with EvidenceIntegrityError; no view is produced.",
+      "statement": "The stored run's recomputed digest matched the stored digest cbb72a03716f48f25fb89ea3e633929a573764ca833086571654c6b704f36bf2.",
+      "references": [],
+      "source_references": [
+        "evidence_store.load_scan_run"
+      ],
+      "limitations": [
+        "Internal consistency of the stored run only: not a signature, not source authenticity, and no protection against modification of both the payload and the digest."
+      ],
+      "not_applicable_reason": null
+    },
+    {
+      "check_id": "EV-CHK-002",
+      "name": "supported_evidence_schema",
+      "title": "Supported evidence interpretation",
+      "required": true,
+      "applicable": true,
+      "state": "passed",
+      "method": "Compared the run's recorded normalized-finding schema version, and each retained snapshot's own schema version, with the schema versions executive policy 0.1.0 is defined to interpret: 1.0.0.",
+      "statement": "Every retained record uses normalized-finding schema version 1.0.0, which this policy version interprets.",
+      "references": [],
+      "source_references": [],
+      "limitations": [],
+      "not_applicable_reason": null
+    },
+    {
+      "check_id": "EV-CHK-003",
+      "name": "supported_collection_contract",
+      "title": "Supported collection contract",
+      "required": true,
+      "applicable": true,
+      "state": "passed",
+      "method": "Matched every scanner/version pair recorded for this run against the collection contracts executive policy 0.1.0 documents an evidence basis for. A pair with no documented contract is unknown; it does not pass by default.",
+      "statement": "Every scanner/version pair recorded for this run has a documented collection contract: semgrep_crypto_rules 0.2.0.",
+      "references": [],
+      "source_references": [
+        "Collection contract 0.2.0 propagates execution and output failures through LocalScanError into the run's recorded scanner_errors, retaining usable partial findings (docs/DETECTION_CHARACTERIZATION.md, execution provenance)."
+      ],
+      "limitations": [
+        "The supported-contract mapping names scanner/version pairs whose execution-failure semantics are documented. It says nothing about detection quality or coverage for those scanners."
+      ],
+      "not_applicable_reason": null
+    },
+    {
+      "check_id": "EV-CHK-004",
+      "name": "execution_completeness",
+      "title": "Execution completeness",
+      "required": true,
+      "applicable": true,
+      "state": "unknown",
+      "method": "Read the run's recorded scanner_errors, and required every recorded scanner/version pair to have a documented collection contract (EV-CHK-003) before an empty error list could be read as successful execution.",
+      "statement": "The run recorded 1 scanner error(s), so execution completeness cannot be established. Findings collected before the failure are retained and remain visible.",
+      "references": [],
+      "source_references": [
+        "code analysis: semgrep exited nonzero after 1 of 2 rule files; partial findings retained"
+      ],
+      "limitations": [
+        "An empty scanner-error list establishes execution completeness only for scanner/version pairs whose collection contract persists execution failures. Stored integrity verification never establishes scanner success."
+      ],
+      "not_applicable_reason": null
+    },
+    {
+      "check_id": "EV-CHK-005",
+      "name": "reference_consistency",
+      "title": "Evidence reference consistency",
+      "required": true,
+      "applicable": true,
+      "state": "passed",
+      "method": "Resolved every evidence reference (scan_id, snapshot ordinal, finding_id) against the stored snapshots in canonical stored order, and compared each snapshot's recorded scan_id and finding_id with the run identity and the reconstructed record. Occurrences sharing a finding_id are not deduplicated.",
+      "statement": "All 1 evidence reference(s) resolve to exactly one stored snapshot occurrence of run synthetic-partial-001.",
+      "references": [],
+      "source_references": [],
+      "limitations": [
+        "Reference consistency is an identity check over stored records. It is not a content-integrity check and does not re-hash stored evidence."
+      ],
+      "not_applicable_reason": null
+    },
+    {
+      "check_id": "EV-CHK-006",
+      "name": "scan_time_basis",
+      "title": "Recorded scan-time basis",
+      "required": true,
+      "applicable": true,
+      "state": "passed",
+      "method": "Parsed the run's recorded scan_time as an ISO-8601 timestamp. Time-based derivations use that recorded time; no current-clock value is substituted when it is missing or unreadable.",
+      "statement": "The run recorded scan time 2025-11-04T09:30:00+00:00, which is the basis for every time-based derivation in this view.",
+      "references": [],
+      "source_references": [],
+      "limitations": [
+        "The recorded scan time is the collecting host's clock reading. It is not independently attested or externally timestamped."
+      ],
+      "not_applicable_reason": null
+    },
+    {
+      "check_id": "EV-CHK-007",
+      "name": "scope_observability",
+      "title": "Requested scope observability",
+      "required": true,
+      "applicable": true,
+      "state": "passed",
+      "method": "Classified every retained record with reports.classify_finding() and separated coverage and skipped/inaccessible records that are by design or configured (max_depth_boundary, skipped_special_file) from records showing requested scope that could not be read.",
+      "statement": "No retained record shows requested scope that could not be read. Configured exclusions and depth limits are reported as scope disclosures, not as observability failures.",
+      "references": [],
+      "source_references": [],
+      "limitations": [
+        "Only scope the scanners recorded is considered. Scope that was never requested, and scope no scanner can enumerate, is outside this check."
+      ],
+      "not_applicable_reason": null
+    },
+    {
+      "check_id": "EV-CHK-008",
+      "name": "dated_expiration_basis",
+      "title": "Dated certificate-expiration basis",
+      "required": true,
+      "applicable": false,
+      "state": "not_applicable",
+      "method": "Established whether the declared scope includes a scanner that records certificate validity metadata and whether a recorded scan time (EV-CHK-006) is available to date it against.",
+      "statement": "No dated certificate-expiration derivation was attempted for this run.",
+      "references": [],
+      "source_references": [],
+      "limitations": [],
+      "not_applicable_reason": "The declared scope includes no scanner that observes certificate validity metadata: semgrep_crypto_rules."
+    }
+  ],
+  "exceptions": [],
+  "observations": [
+    {
+      "explanation_id": "EV-OBS-001",
+      "nature": "observation",
+      "statement": "The run retained 1 normalized record(s), of which 1 are material evidence records. By category: Aggregate filesystem context records: 0; Per-file filesystem evidence records: 0; Coverage limitation records: 0; Skipped or inaccessible entry records: 0; Cryptographic inventory records: 0; Sensitive-data records: 0; Code-analysis records: 1; Cloud storage records: 0; Other records: 0.",
+      "method": "reports.count_by_category()/summarize_findings() over the retained snapshots, in canonical stored order.",
+      "references": [],
+      "check_ids": [],
+      "limitations": [
+        "Category counts are record counts. Aggregate context, coverage and skipped/inaccessible records are counted separately from material evidence and are never summed into one total."
+      ]
+    },
+    {
+      "explanation_id": "EV-OBS-002",
+      "nature": "observation",
+      "statement": "Scanner(s) recorded for this run: semgrep_crypto_rules 0.2.0.",
+      "method": "Recorded scanner/version pairs from the stored scan context.",
+      "references": [],
+      "check_ids": [
+        "EV-CHK-003"
+      ],
+      "limitations": []
+    },
+    {
+      "explanation_id": "EV-OBS-003",
+      "nature": "observation",
+      "statement": "Declared scope: target /synthetic/example-target; scan type code; configured scope constraints: SYNTHETIC EXAMPLE FIXTURE: purpose-built evidence for HarvestGuard documentation. Not a real environment, not a real scan, no customer, personal or confidential data..",
+      "method": "Declared scope copied from the stored scan context.",
+      "references": [],
+      "check_ids": [],
+      "limitations": [
+        "A configured exclusion or depth limit bounds what the scan could observe. It is a disclosure, not a failure."
+      ]
+    },
+    {
+      "explanation_id": "EV-OBS-004",
+      "nature": "observation",
+      "statement": "The run recorded 1 scanner error(s): code analysis: semgrep exited nonzero after 1 of 2 rule files; partial findings retained.",
+      "method": "Bounded scanner diagnostics as stored, unchanged. No raw analyzer output, exception object, or file content is included.",
+      "references": [],
+      "check_ids": [
+        "EV-CHK-004"
+      ],
+      "limitations": []
+    }
+  ],
+  "conclusions": [
+    {
+      "explanation_id": "EV-CON-001",
+      "nature": "check_result",
+      "statement": "The stored run's recomputed digest matched the stored digest cbb72a03716f48f25fb89ea3e633929a573764ca833086571654c6b704f36bf2.",
+      "method": "evidence_store.load_scan_run() recomputed the stored run's SHA-256 digest over its canonical run payload and ordered finding snapshots and compared it with the stored digest. verify_loaded_scan_run() rechecked the current payload with the same canonical digest definition and checked reconstruction consistency before this projection was built. A mismatch fails closed with EvidenceIntegrityError; no view is produced.",
+      "references": [],
+      "check_ids": [
+        "EV-CHK-001"
+      ],
+      "limitations": [
+        "Internal consistency of the stored run only: not a signature, not source authenticity, and no protection against modification of both the payload and the digest."
+      ]
+    },
+    {
+      "explanation_id": "EV-CON-002",
+      "nature": "check_result",
+      "statement": "The run recorded 1 scanner error(s), so execution completeness cannot be established. Findings collected before the failure are retained and remain visible.",
+      "method": "Read the run's recorded scanner_errors, and required every recorded scanner/version pair to have a documented collection contract (EV-CHK-003) before an empty error list could be read as successful execution.",
+      "references": [],
+      "check_ids": [
+        "EV-CHK-004",
+        "EV-CHK-003"
+      ],
+      "limitations": [
+        "An empty scanner-error list establishes execution completeness only for scanner/version pairs whose collection contract persists execution failures. Stored integrity verification never establishes scanner success."
+      ]
+    }
+  ],
+  "unknowns": [
+    "EV-CHK-004 execution_completeness: The run recorded 1 scanner error(s), so execution completeness cannot be established. Findings collected before the failure are retained and remain visible.",
+    "Conflicts between records: not assessed. No conflict assessment ran for this run."
+  ],
+  "limits": [
+    "A matching stored digest establishes internal consistency of the stored run only. It is not a signature, not proof of source authenticity, and no protection against deliberate modification of both the payload and the digest by anyone who can write to the evidence database.",
+    "This view describes retained normalized evidence from one scan run. It does not establish that a scanned asset is deployed, in use, trusted, or reachable.",
+    "Absence of a record is not evidence of absence: each scanner has a deliberately narrow detection surface (docs/DETECTION_CHARACTERIZATION.md).",
+    "No conflict assessment ran, so conflicts between records are not assessed. This view does not state that there are no conflicts.",
+    "Certificate expiration is a dated technical derivation against the recorded scan time. It is not a risk rating, a remediation verdict, or a statement of business impact.",
+    "This view establishes evidence. It does not establish organizational security, regulatory compliance, quantum readiness, or business safety; those remain human judgment."
+  ],
+  "counts": {
+    "filesystem_context": 0,
+    "filesystem_file_evidence": 0,
+    "coverage_limitation": 0,
+    "skipped_or_inaccessible": 0,
+    "crypto_inventory": 0,
+    "sensitive_data": 0,
+    "code_analysis": 1,
+    "cloud_evidence": 0,
+    "other_records": 0,
+    "total_records": 1,
+    "material_evidence": 1,
+    "files_scanned": 0,
+    "certificates": 0,
+    "private_keys": 0,
+    "encrypted_keys": 0,
+    "ssh_keys": 0,
+    "pkcs12": 0,
+    "expired_certificates": 0,
+    "sensitive_files": 0,
+    "semgrep_findings": 1,
+    "malformed_assets": 0,
+    "errors": 0
+  },
+  "scanner_errors": [
+    "code analysis: semgrep exited nonzero after 1 of 2 rule files; partial findings retained"
+  ],
+  "evidence": [
+    {
+      "ordinal": 0,
+      "finding_id": "2adf7d326cca9a250b6785c912057fa2c6ac9421caf7ff54d791e9b3e137086f",
+      "snapshot": {
+        "finding_id": "2adf7d326cca9a250b6785c912057fa2c6ac9421caf7ff54d791e9b3e137086f",
+        "scan_id": "synthetic-partial-001",
+        "source_type": "code_analysis",
+        "asset_type": "source_code",
+        "location": "/synthetic/example-target/app/crypto_utils.py:14",
+        "asset_name": "crypto_utils.py:14",
+        "scanner_name": "semgrep_crypto_rules",
+        "scanner_version": "0.2.0",
+        "observed_at": "2025-11-04T09:30:00+00:00",
+        "evidence": "Semgrep rule matched: weak-hash-md5",
+        "confidence": "High",
+        "confidence_rationale": null,
+        "collection_method": "static source-text match",
+        "collection_source": "vendored semgrep rule set",
+        "rule_id": "weak-hash-md5",
+        "repeatable": true,
+        "verification_rationale": "re-running the same rule set reproduces the match",
+        "provenance": {
+          "scanner_name": "semgrep_crypto_rules",
+          "scanner_version": "0.2.0",
+          "collection_method": "static source-text match",
+          "source": "vendored semgrep rule set",
+          "rule_id": "weak-hash-md5",
+          "collected_at": "2025-11-04T09:30:00+00:00",
+          "repeatable": true,
+          "verification_rationale": "re-running the same rule set reproduces the match"
+        },
+        "identity_key": null,
+        "ownership_signals": {},
+        "unknowns": [],
+        "limitations": [],
+        "errors": [],
+        "technical_metadata": {
+          "Rule": "weak-hash-md5"
+        },
+        "schema_version": "1.0.0"
+      },
+      "unrecognized_field_names": []
+    }
+  ]
+}
