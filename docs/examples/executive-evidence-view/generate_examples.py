@@ -24,6 +24,13 @@ result to match the committed bytes. Only when nothing is installed to import
 (a bare checkout) does this file fall back to the repository root, so that
 `python docs/examples/.../generate_examples.py` still works before an install.
 
+The one sample produced by running the CLI (the corruption diagnostic) is run
+through the CLI of that same implementation: the installed distribution's own
+console script, or the checkout's entry point. Before it runs, the helper checks
+that the CLI subprocess would import exactly the module files this process
+imported, and fails with `CliMismatchError` otherwise. It never falls back to a
+`harvestguard` found on `PATH`, which could be an older install.
+
 Determinism. The installed CLI reads its own UTC clock for the export time, by
 design (there is deliberately no public override). Committed samples have to be
 byte-stable, so this helper passes an explicit fixed `export_time` to the same
@@ -513,32 +520,122 @@ SCENARIOS: tuple[Scenario, ...] = (
 # --- generation ------------------------------------------------------------
 
 
-def _cli_invocation() -> tuple[list[str], dict[str, str]]:
-    """The real CLI plus the environment it needs, and nothing else.
+#: Every module the CLI export path runs through. The CLI subprocess must
+#: resolve each one to the very file this process imported, so the committed
+#: corruption diagnostic can never come from a different implementation than
+#: the samples beside it.
+_CLI_MODULES = (
+    "harvestguard",
+    "harvestguard_version",
+    "evidence_store",
+    "executive_evidence",
+    "executive_reports",
+    "findings",
+    "reports",
+)
 
-    Prefers the `harvestguard` console script belonging to the interpreter
-    running this helper -- so an installed environment is answered by its own
-    CLI rather than by whatever is first on `PATH` -- then one off `PATH`. Only
-    from an uninstalled checkout does it fall back to running the same entry
-    point as a module with the repository root on `PYTHONPATH`: the same code,
-    reached the only other way it can be reached.
+
+class CliMismatchError(RuntimeError):
+    """The CLI available to run is not the implementation this helper imported."""
+
+
+def _imported_from_checkout() -> bool:
+    return Path(evidence_store.__file__).resolve().parent == _REPO_ROOT
+
+
+def _installed_console_script() -> Path:
+    """The console script installed by the distribution this helper imported.
+
+    Only the script next to the running interpreter is considered, and only if
+    the installed distribution that owns the imported `evidence_store` also
+    records that script and declares this release's version. Nothing is looked
+    up on `PATH`: an older install elsewhere on the machine must never answer
+    for the code under review.
     """
-    environment = dict(os.environ)
-    script = "harvestguard.exe" if os.name == "nt" else "harvestguard"
+    from importlib import metadata
+
+    imported = Path(evidence_store.__file__).resolve()
+    script_name = "harvestguard.exe" if os.name == "nt" else "harvestguard"
     # Not resolved: a virtual environment's `bin/python` is a symlink to the
     # base interpreter, and resolving it would look for the console script next
     # to *that* instead of in the environment actually in use.
-    sibling = Path(sys.executable).parent / script
-    if sibling.exists():
-        return [str(sibling)], environment
-    executable = shutil.which(script)
-    if executable:
-        return [executable], environment
-    existing = environment.get("PYTHONPATH")
-    environment["PYTHONPATH"] = (
-        f"{_REPO_ROOT}{os.pathsep}{existing}" if existing else str(_REPO_ROOT)
+    script = Path(sys.executable).parent / script_name
+    for distribution in metadata.distributions(name="harvestguard"):
+        owned = {
+            Path(str(distribution.locate_file(entry))).resolve()
+            for entry in distribution.files or ()
+        }
+        if imported not in owned:
+            continue
+        if distribution.version != HARVESTGUARD_VERSION:
+            raise CliMismatchError(
+                f"installed harvestguard distribution is {distribution.version}, "
+                f"but the imported modules report {HARVESTGUARD_VERSION}"
+            )
+        if not script.exists() or script.resolve() not in owned:
+            raise CliMismatchError(
+                f"{script} is not the console script installed with the imported "
+                f"harvestguard distribution ({imported.parent})"
+            )
+        return script
+    raise CliMismatchError(
+        f"no installed harvestguard distribution owns the imported {imported}"
     )
-    return [sys.executable, "-m", "harvestguard"], environment
+
+
+def _verify_cli_imports(python: str, environment: dict[str, str], cwd: Path) -> None:
+    """Fail unless a CLI subprocess would import exactly what this process did."""
+    expected = {name: str(Path(sys.modules[name].__file__).resolve()) for name in _CLI_MODULES}
+    probe = (
+        "import importlib, json, pathlib\n"
+        f"names = {list(_CLI_MODULES)!r}\n"
+        "print(json.dumps({n: str(pathlib.Path(importlib.import_module(n).__file__)"
+        ".resolve()) for n in names}))\n"
+    )
+    completed = subprocess.run(
+        [python, "-c", probe],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+        env=environment,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise CliMismatchError(
+            f"could not confirm the CLI's modules: {completed.stderr.strip()[-500:]}"
+        )
+    actual = json.loads(completed.stdout)
+    mismatched = {name: actual.get(name) for name in expected if actual.get(name) != expected[name]}
+    if mismatched:
+        raise CliMismatchError(
+            "the CLI would import a different implementation than this helper: "
+            + "; ".join(f"{name}: {mismatched[name]} != {expected[name]}" for name in mismatched)
+        )
+
+
+def _cli_invocation(cwd: Path) -> tuple[list[str], dict[str, str]]:
+    """The real CLI for the implementation this helper imported, verified.
+
+    Imported from an installed distribution, that distribution's own console
+    script is used. Imported from this checkout, the same entry point is run
+    as a module with the repository root first on `PYTHONPATH`. Either way the
+    subprocess's module resolution is checked against this process' before
+    anything runs, and a mismatch raises `CliMismatchError` rather than mixing
+    implementations. No fallback to a `harvestguard` found on `PATH` exists.
+    """
+    import harvestguard  # noqa: F401 - imported so its origin can be compared
+
+    environment = dict(os.environ)
+    if _imported_from_checkout():
+        existing = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            f"{_REPO_ROOT}{os.pathsep}{existing}" if existing else str(_REPO_ROOT)
+        )
+        command = [sys.executable, "-m", "harvestguard"]
+    else:
+        command = [str(_installed_console_script())]
+    _verify_cli_imports(sys.executable, environment, cwd)
+    return command, environment
 
 
 def export_command(scan_id: str, db_path: str, mode: str, output: str) -> str:
@@ -774,7 +871,7 @@ def _generate_corruption_example(
         "",
     ]
     commands: list[str] = []
-    command_prefix, environment = _cli_invocation()
+    command_prefix, environment = _cli_invocation(work_dir)
     for mode, destination in (
         ("executive-json", "-"),
         ("executive-markdown", REJECTED_OUTPUT_NAME),

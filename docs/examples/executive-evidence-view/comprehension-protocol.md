@@ -5,8 +5,8 @@
 This protocol was drafted by automation. It becomes the frozen protocol only
 when the maintainer (Tim) approves, in writing and before anyone is tested:
 the evaluated artifact and its exact revision, this protocol, the questions,
-the answer key, the scoring rubric, the timing method, and the participant
-criteria. Until then, nothing here may be used to test a participant, and no
+the participant sheets and session sequence (§3, §4), the answer key, the
+scoring rubric, the timing method, and the participant criteria. Until then, nothing here may be used to test a participant, and no
 result may be reported.
 
 Nothing in this repository contacts, recruits, invites, messages or schedules
@@ -42,36 +42,90 @@ estimates of likely comprehension **cannot** substitute for any of the five.
 Record only an anonymized participant ID and the relevant nontechnical
 background. No names, contact details, employers, demographics or recordings.
 
-## 3. Materials given to the participant
+## 3. Materials: what the participant may and may not see
 
-1. One sentence of framing, read verbatim: *"This is a page of output from a
-   tool that inspects systems and records what it found. Read it, then answer
-   three questions in your own words."*
-2. The evaluated artifact.
-3. The response form
-   ([`participant-response-form.md`](participant-response-form.md)).
+Participant-facing material is kept apart from facilitator and scoring
+material, in its own directory, so that one cannot be handed over with the
+other.
 
-Nothing else: no README, no glossary, no explanation of HarvestGuard, no
-description of what the tool is for beyond that sentence.
+**The participant sees only, and only when §4 says:**
 
-## 4. Questions
+1. One sentence of framing, read aloud verbatim: *"This is a page of output
+   from a tool that inspects systems and records what it found. Read it, then
+   answer three questions in your own words."*
+2. The evaluated artifact (§1), displayed standalone (§4, step 1).
+3. **Part 1**, [`participant/part-1-questions-1-3.md`](participant/part-1-questions-1-3.md):
+   Q1–Q3 only. It does not mention or hint at Q4.
+4. **Part 2**, [`participant/part-2-question-4.md`](participant/part-2-question-4.md):
+   Q4 only, handed over after Part 1 has been submitted.
 
-Asked in this order, all three shown before timing starts:
+**The participant never sees, at any point:** this protocol, the answer key
+(§6), the rubric (§7), the pass threshold (§8), the
+[`facilitator-record-sheet.md`](facilitator-record-sheet.md), the results
+file, any other file in this repository, a README, a glossary, or any
+explanation of HarvestGuard beyond the framing sentence. This is why the
+artifact is never shown through a repository browser or file listing: the
+answer key and rubric sit in the same directory.
+
+Each participant sheet is handed over as its rendered content alone (a
+printout, or its own form page), never as a link into this repository.
+
+## 4. Questions and session sequence
+
+The questions, in this order:
 
 1. What did HarvestGuard observe?
 2. What evidence supports those observations?
 3. What can and cannot be concluded from that evidence?
-
-Asked **separately, after** the first three answers are submitted:
-
 4. What does "Evidence evaluation: VERIFIED" mean?
+
+Q1–Q3 are on Part 1 and are shown before timing starts. Q4 is on Part 2 and is
+shown **only after** Part 1 has been submitted.
+
+**Before the session** (facilitator, out of the participant's sight):
+
+1. Prepare the evaluated artifact as a standalone, read-only rendering of the
+   approved revision of the file named in §1 — a printout, or a locally
+   rendered page that shows that file only. Its own in-page section links may
+   work; nothing may lead from it to any other file. Keep it covered or closed.
+2. Prepare Part 1 and Part 2 with the anonymized participant ID written in.
+   Keep Part 2 out of the participant's sight and reach.
+3. Open a copy of the facilitator record sheet, kept out of the participant's
+   sight for the whole session.
+
+**The session**, in exactly this order:
+
+1. Hand the participant Part 1. The artifact is **not** displayed yet. The
+   participant may read the three questions.
+2. Read the framing sentence (§3, item 1) aloud, verbatim.
+3. Display the artifact. **Timing starts** at the moment it is first
+   displayed.
+4. The participant answers Q1–Q3 on Part 1, with the artifact in view. No
+   coaching, hints, explanation or corrective feedback (§5).
+5. The participant submits Part 1 by handing it back (or, for an electronic
+   form, pressing its submit control). **Timing stops** at that moment. The
+   facilitator records the start and stop times on the record sheet and takes
+   Part 1 out of the participant's reach; its answers cannot be revised.
+6. Only now, hand over Part 2. The artifact stays displayed exactly as it was.
+   Q4 is **untimed**.
+7. The participant submits Part 2 by handing it back. The session ends.
+8. After the participant has left, the facilitator completes the record sheet
+   (verbatim answers, method, deviations) and keeps both original sheets with
+   it. Scoring (§6, §7) happens afterwards, never in front of the participant.
+
+If an electronic form is used instead of paper, Part 1 and Part 2 are separate
+forms or pages, the Part 2 form is given to the participant only after the
+Part 1 submission is recorded, and the submission timestamps are the timing
+record. Any departure from this sequence is a protocol deviation and is
+recorded as one.
 
 ## 5. Timing method
 
-- The timed period **starts** when the evaluated overview is first displayed to
-  the participant.
-- It **stops** when the participant submits their answers to the first three
-  questions.
+- The timed period **starts** when the evaluated overview — the top of the
+  evaluated artifact — is first displayed to the participant (§4, session
+  step 3).
+- It **stops** when the participant submits Part 1, their answers to Q1–Q3
+  (§4, session step 5).
 - Threshold: all three answers correct, within **30 seconds**.
 - Question 4 is **outside** the 30-second timed period and is untimed.
 - No coaching, hints, explanation or corrective feedback of any kind during the

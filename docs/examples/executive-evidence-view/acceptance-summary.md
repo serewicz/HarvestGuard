@@ -23,36 +23,46 @@ work is never described here as human validation.
 | Generation never deletes or overwrites an existing evidence database or output file | Done | `…::test_generation_refuses_a_work_dir_holding_an_evidence_database`, `…::test_generation_refuses_every_occupied_work_dir_destination` |
 | Corruption fails closed: bounded diagnostic, no report, no file | Done | [`samples/failed-integrity-corruption.stderr.txt`](samples/failed-integrity-corruption.stderr.txt) |
 | Exact reference resolution, including duplicate finding IDs | Done | `…::test_every_reference_resolves_to_exactly_one_occurrence`, `…::test_duplicate_finding_ids_stay_separate_occurrences` |
-| JSON/Markdown semantic parity | Done | `…::test_json_and_markdown_stay_semantically_parallel` |
+| JSON/Markdown semantic parity, record by record: every check, exception, observation, conclusion, status reason and occurrence compared with its complete values | Done | `…::test_json_and_markdown_stay_semantically_parallel`, `…::test_semantic_parity_detects_values_on_the_wrong_record` |
+| The CLI used during generation is the implementation the generator imported, verified, never a `harvestguard` found on `PATH` | Done | `…::test_generation_never_runs_a_harvestguard_found_on_path`, `…::test_generation_refuses_a_cli_that_would_import_other_modules`, `…::test_the_installed_generator_refuses_a_console_script_from_elsewhere` |
 | Unknown-field name disclosure, value withholding, local-retention disclosure | Done | `…::test_unrecognized_fields_disclose_names_and_withhold_values` |
 | Secret-canary exclusion and no identifying data in published artifacts | Done | `…::test_published_artifacts_carry_no_secret_or_identifying_values` |
 | No external generation dependency (no service, account, telemetry, upload) | Done | `…::test_generation_needs_no_network` |
 | Published sample commands and links match shipped behaviour | Done | `…::test_documented_export_commands_use_options_the_cli_accepts`, `…::test_readme_relative_links_resolve` |
 | Clean install, packaging, outside-checkout operation | Done (pre-existing) | `tests/test_clean_install.py`, `tests/test_packaging_dependencies.py` |
 | #151/#152 projection, export, CLI, evidence-store, clock-safety and legacy regressions preserved and rerun | Done (pre-existing) | `tests/test_executive_evidence.py`, `tests/test_executive_exports.py`, `tests/test_executive_serializer_clock_safety.py`, `tests/test_cli.py`, `tests/test_evidence_store.py`, `tests/test_reports.py` |
-| AI-drafted protocol, questions, answer key, rubric, response form, templates | Drafted, **not approved** | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant-response-form.md`](participant-response-form.md) |
+| AI-drafted protocol, questions, answer key, rubric, session sequence, participant sheets, facilitator record sheet, templates | Drafted, **not approved** | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
+| Participant material kept apart from facilitator and scoring material; Q4 only on a separate sheet | Done (structure only; protocol still unapproved) | `…::test_participant_sheets_expose_nothing_but_their_questions`, `…::test_protocol_sequences_part_2_after_part_1_is_submitted` |
 
 Honest reporting of the automated run: at the time of writing the full suite
 is green with two skips, both pre-existing and both in
 `tests/test_release_artifacts.py`, which skip unless
 `HARVESTGUARD_RUN_NETWORK_INSTALL_TESTS=1` enables networked install
-validation. No test in this collection is skipped,
-and none is environment-dependent beyond needing a Python interpreter, `pip`
-and the repository.
+validation. Most tests in this collection need only a Python interpreter with
+the repository's development requirements installed. The installed-package
+tests have one more dependency, stated here rather than assumed away: they
+install HarvestGuard *with its declared dependencies* into a fresh, isolated
+virtual environment, so they need a package index — network access, or a pip
+cache or configured index that can supply those dependencies. Like
+`tests/test_clean_install.py`, they are skipped, and reported as skipped, when
+`HARVESTGUARD_SKIP_CLEAN_INSTALL_TESTS=1` is set for offline work.
 
 Two distinct CLI levels are reported separately, because they prove different
 things. The `…::test_cli_reproduces_each_sample…` tests run the documented
 no-install entry point (`python -m harvestguard`) from outside the checkout
 with the repository on `PYTHONPATH`; that is the no-install path, not an
 installed release. The installed-package tests build a throwaway virtual
-environment, `pip install --no-deps` the project into it non-editably, and then
-regenerate the whole collection and rerun both export modes from outside the
-checkout with `PYTHONPATH` removed — so the committed samples are established
-as reproducible from an installed release, with no repository import override.
-Dependency-metadata completeness is out of scope there (`--no-deps`,
-`--system-site-packages`) and is covered by `tests/test_clean_install.py`
-instead. A HarvestGuard version change makes the committed samples stale by
-design, and the regeneration tests fail until they are regenerated.
+environment *without* `--system-site-packages`, `pip install` the project into
+it non-editably with its declared dependencies, and then confirm inside that
+environment — before generating anything — that system site-packages are off,
+`pip check` is clean, and every declared dependency resolves from the
+environment itself. Only then do they regenerate the whole collection and
+rerun both export modes from outside the checkout with `PYTHONPATH` removed, so
+the committed samples are established as reproducible from an installed
+release, with no repository import override and no reliance on packages
+installed globally or in the test runner's own environment. A HarvestGuard
+version change makes the committed samples stale by design, and the
+regeneration tests fail until they are regenerated.
 
 ## Category 2 — Independent technical-review evidence
 

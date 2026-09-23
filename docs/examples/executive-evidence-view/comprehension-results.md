@@ -32,8 +32,9 @@ recorded here.
 | P-04 | | | | | | | | | | |
 | P-05 | | | | | | | | | | |
 
-Verbatim answers are recorded per participant using
-[`participant-response-form.md`](participant-response-form.md) and are
+Verbatim answers are recorded per participant on a copy of
+[`facilitator-record-sheet.md`](facilitator-record-sheet.md), with the
+participant's original Part 1 and Part 2 sheets kept alongside, and are
 preserved unaltered, including for failed attempts.
 
 ### Result against the threshold
