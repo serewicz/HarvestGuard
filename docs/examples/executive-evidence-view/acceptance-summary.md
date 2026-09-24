@@ -1,10 +1,10 @@
 # Acceptance summary — Executive Evidence View (issue #153)
 
 **Overall status: INCOMPLETE.** Automation and independent technical review
-are recorded below, with qualified validation results. Tim approved and froze
-the package at the revision recorded in Category 4; no practitioner or reader
-testing has occurred. Human
-acceptance, merge, #153 closure, #150 closure and release readiness remain
+are recorded below, with qualified validation results. The asynchronous reader
+revision awaits Tim’s refreeze; the previous freeze is preserved below as
+history. No practitioner or reader testing has occurred. Human acceptance,
+merge, #153 closure, #150 closure and release readiness remain
 outstanding. Technical approval does not clear the 0.4.0 release.
 
 Acceptance evidence is kept in four clearly separated categories. Category 1
@@ -32,8 +32,8 @@ work is never described here as human validation.
 | Published sample commands and links match shipped behaviour | Done | `…::test_documented_export_commands_use_options_the_cli_accepts`, `…::test_readme_relative_links_resolve` |
 | Clean install, packaging, outside-checkout operation | Done (pre-existing) | `tests/test_clean_install.py`, `tests/test_packaging_dependencies.py` |
 | #151/#152 projection, export, CLI, evidence-store, clock-safety and legacy regressions preserved and rerun | Done (pre-existing) | `tests/test_executive_evidence.py`, `tests/test_executive_exports.py`, `tests/test_executive_serializer_clock_safety.py`, `tests/test_cli.py`, `tests/test_evidence_store.py`, `tests/test_reports.py` |
-| AI-drafted protocol, questions, answer key, rubric, session sequence, participant sheets, facilitator record sheet, templates | Drafted by automation; **approved and frozen by Tim** (Category 4) | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
-| Participant material kept apart from facilitator and scoring material; Q4 only on a separate sheet | Done (structure only; maintainer freeze recorded in Category 4, no human results) | `…::test_participant_sheets_expose_nothing_but_their_questions`, `…::test_protocol_sequences_part_2_after_part_1_is_submitted` |
+| AI-drafted protocol, questions, answer key, rubric, asynchronous sequence, participant packet, facilitator record sheet, templates | Async revision drafted; **REFREEZE PENDING** (Category 4) | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
+| Single standalone reader packet, unchanged artifact and questions, no added scoring material | Drafted; **REFREEZE PENDING** | `…::test_async_packet_identity_questions_and_isolation` |
 
 Independent validation at implementation head
 `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` is recorded in
@@ -83,7 +83,7 @@ regeneration tests fail until they are regenerated.
 | --- | --- |
 | Independent practitioner completes the published use path unaided | **NOT PERFORMED** — see [`independent-use-record.md`](independent-use-record.md) |
 | Five real representative nontechnical participants | **NOT TESTED** — see [`comprehension-results.md`](comprehension-results.md) |
-| ≥ 4 of 5 answer Q1–Q3 correctly within 30 seconds | **NOT ESTABLISHED** |
+| ≥ 4 of 5 answer all Q1–Q3 correctly without coaching | **NOT ESTABLISHED** |
 | No participant interprets VERIFIED in a prohibited way | **NOT ESTABLISHED** |
 
 Independent use and comprehension are recorded separately. No individual may
@@ -92,7 +92,19 @@ invites, messages or schedules anyone.
 
 ## Category 4 — Maintainer decisions
 
-### Maintainer approval and freeze — 2026-09-24
+### Current reader revision — REFREEZE PENDING
+
+Tim authorized replacing synchronous reader acceptance with independent
+asynchronous comprehension before any human attempts or results. See
+[protocol-history.md](protocol-history.md). The revised reader protocol and
+single packet are not frozen; no packet may be dispatched before explicit
+approval of the new exact revision. This is a protocol change, not evidence.
+Independent technical review and the separately frozen practitioner procedure
+remain unchanged at their recorded revisions.
+
+### Historical revision 1 approval and freeze — 2026-09-24
+
+The following records the original decision, not approval of the async revision.
 
 Tim explicitly approved and froze the human acceptance package in his written
 instruction in the Codex conversation, beginning: “I approve and freeze the
@@ -128,14 +140,17 @@ No participant selection, contact, testing or results are recorded by this
 approval. Independent-practitioner and five-reader acceptance remain
 outstanding. Merge, #153/#150 closure and release decisions remain separate.
 
+### Current decision status
+
 | Decision | Status |
 | --- | --- |
-| Approve and freeze the evaluated artifact and its exact revision | **APPROVED AND FROZEN** by Tim, 2026-09-24, revision above |
-| Approve and freeze the protocol, questions, answer key, rubric and timing method | **APPROVED AND FROZEN** by Tim, 2026-09-24 |
-| Approve participant eligibility/disposition rules and the independent-practitioner packet | **APPROVED AND FROZEN** by Tim, 2026-09-24 |
+| Refreeze reader package with the unchanged evaluated artifact | **PENDING** |
+| Refreeze asynchronous protocol, packet, questions, key and rubric | **PENDING** |
+| Refreeze reader eligibility/disposition rules | **PENDING** |
+| Independent-practitioner packet and procedure | Existing freeze unchanged |
 | Select and contact participants | **OUTSTANDING**; Tim’s responsibility |
 | Resolve any ambiguous score; record overrides with reasons | **PENDING** (none to resolve yet) |
-| Approve the corrected acceptance package and exact revision for freeze | **APPROVED AND FROZEN** by Tim, 2026-09-24 |
+| Approve revised reader package exact revision | **PENDING** |
 | Final acceptance, merge, epic closure, release decisions | **PENDING** |
 
 ## Claims audit

@@ -1,156 +1,102 @@
-# Human-comprehension evaluation protocol (issue #153)
+# Asynchronous human-comprehension protocol (issue #153)
 
-**Status: DRAFT — NOT FROZEN, NOT APPROVED, NO PARTICIPANT TESTED.**
+**Status: DRAFT — NOT FROZEN. Awaiting Tim's explicit refreeze.**
+**NO PARTICIPANT HAS BEEN TESTED. Human acceptance remains INCOMPLETE.**
 
-This protocol was drafted by automation. It becomes the frozen protocol only
-when the maintainer (Tim) approves, in writing and before anyone is tested:
-the evaluated artifact and its exact revision, this protocol, the questions,
-the participant sheets and session sequence (§3, §4), the answer key, the
-scoring rubric, the timing method, and the participant criteria. Until then, nothing here may be used to test a participant, and no
-result may be reported.
+This is an acceptance-protocol revision, not acceptance evidence. Tim must
+approve the exact revised package commit before any packet is sent. The
+[protocol history](protocol-history.md) preserves the previous freeze and the
+reason for revising it before any human results existed. This procedure tests
+independent comprehension without coaching, not reading speed.
 
-Nothing in this repository contacts, recruits, invites, messages or schedules
-a participant. Selection and contact are the maintainer's responsibility.
+## 1. Evaluated artifact
 
-## 1. Evaluated artifact (proposed, pending approval)
+Use `docs/examples/executive-evidence-view/samples/verified.md`, unchanged from
+`997c4d745d4944f3e26c2bc420c753916d3992b0`, source SHA-256
+`69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94`.
+The synthetic artifact is embedded byte-for-byte in the single
+[participant packet](participant/reader-packet.md). Record both the source
+artifact digest and the sent packet digest and approved package Git revision.
+Every reader receives the same approved content apart from their anonymous ID.
 
-| Field | Value |
-| --- | --- |
-| Proposed artifact | `docs/examples/executive-evidence-view/samples/verified.md` |
-| Format shown | Standalone rendered Markdown in a facilitator-controlled local/read-only presentation; no repository navigation or file listing |
-| Artifact revision | The exact corrected PR commit approved by Tim; record its full Git SHA before testing |
-| Source artifact SHA-256 | `69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94` (unchanged from reviewed implementation `c934e63c8c3c0d0b7150301e1942b7e76d0439b8`) |
-| HarvestGuard version | As recorded in the artifact's *Produced by* / *Exported by* rows |
-| Evidence content | Synthetic; no organizational, customer or confidential evidence |
+## 2. Participants and attempt disposition
 
-One standardized artifact is used for every participant. If the maintainer
-approves a different artifact, the answer key below must be re-derived from
-that artifact *before* any testing, and this file updated in the same change.
+Five real, maintainer-approved representative nontechnical decision-making
+readers who are not implementing HarvestGuard: for example an operating
+executive (CEO/CFO/COO), board member or advisor, PE operating partner or diligence
+professional, risk/compliance/legal/security leader, or technically literate
+business leader outside the project. No category quota is required. Record
+anonymized relevant background, not names, employers or unnecessary demographics.
+The independent practitioner cannot also be a reader in this round.
 
-## 2. Participants (maintainer-selected)
+Tim determines eligibility before sending anything, and selects the intended
+five-person cohort without reference to results. Dispatch to an eligible reader
+starts a recorded attempt; no read receipt, tracking or proof of opening is
+required. Every dispatch and all returned evidence remain in the ledger.
 
-Five real, maintainer-approved participants who represent intended
-decision-making readers and are not implementing HarvestGuard — for example an
-operating executive (CEO/CFO/COO), a board member or advisor, a PE operating
-partner or diligence professional, a risk/compliance/legal/security leader, or
-a technically literate business leader outside the project. No category is
-required; the recorded anonymized backgrounds must simply show why the group is
-relevant.
+Incorrect answers or prohibited VERIFIED interpretations never justify
+replacement. Missing answers, missing evidence and nonresponse cannot pass.
+A participant may withdraw; retain the withdrawal and all evidence collected.
+For nonresponse, Tim may send a neutral availability reminder, then document a
+closure decision if no response is available. There is no response deadline or
+elapsed-time pass/fail rule. Scheduling delay alone is not a failed comprehension
+answer. Record dispatch/reminder/closure dates only for disposition, never for
+calculating reading time. Withdrawals and closed nonresponses may be replaced;
+link the replacement to the original cohort slot and attempt. Genuine procedural
+failure, such as sending the wrong packet, may invalidate an attempt only with
+Tim's recorded decision and reason; preserve it and any replacement.
 
-AI personas, simulated participants, model answers, developer guesses and AI
-estimates of likely comprehension **cannot** substitute for any of the five.
+Never silently discard unfavorable attempts, exclusions, withdrawals, invalid
+attempts, late returns, reruns or replacements. Preserve late responses even
+after replacement; Tim records how they affect the round and cannot select the
+best five results. Any prohibited VERIFIED interpretation remains disqualifying
+for this round even on a withdrawn, invalid or replaced attempt. Tim decides
+ambiguous eligibility, invalidation, scoring and overrides with rationale.
 
-Record only an anonymized participant ID and the relevant nontechnical
-background. No names, contact details, employers, demographics or recordings.
+## 3. Materials and administration
 
-Determine eligibility before the participant sees the evaluated artifact.
-Select and record the intended five-person cohort without reference to results.
-The independent practitioner must not be one of these five readers in this
-round. Tim decides ambiguous eligibility, recording the decision and rationale.
+Send only a standalone copy of `participant/reader-packet.md`, containing neutral
+instructions, the exact artifact, Q1–Q4 and answer spaces. A normal document
+reader and a way to return written answers suffice; no repository access,
+account, special software or hosted service is required. Tim supplies the return
+channel as ordinary logistics. Do not send repository links or this protocol.
 
-Every eligible started attempt remains in the acceptance record. Incorrect
-answers, exceeding 30 seconds, and prohibited interpretations of VERIFIED are
-not grounds for replacement. Missing required evidence cannot count as a pass.
-A genuine procedural failure (such as the wrong artifact or a failed stopwatch)
-may invalidate a session; Tim must record the reason and decision, retain the
-attempt, and record any replacement. A withdrawal may be replaced, but retain
-the withdrawal and all evidence already collected. No unfavorable attempt,
-exclusion, withdrawal, invalid session, rerun or replacement may be silently
-discarded. Link replacements to their original attempts, preserving the
-five-person cohort accounting rather than selecting the best five results.
-Tim decides ambiguous invalidation, scoring and overrides with a recorded
-rationale. Disposition never erases a prohibited VERIFIED interpretation or
-makes it permissible under the no-participant criterion in §8.
+The participant must not receive the answer key, rubric, expected answers,
+threshold, prohibited-interpretation list, technical-review results or
+facilitator/scorer notes. Keep `facilitator-record-sheet.md` private. The artifact's
+own evidence explanations remain unchanged. No implementer explanation, coaching
+or corrective feedback is given before the participant's response is final.
 
-## 3. Materials: what the participant may and may not see
-
-Participant-facing material is kept apart from facilitator and scoring
-material, in its own directory, so that one cannot be handed over with the
-other.
-
-**The participant sees only, and only when §4 says:**
-
-1. One sentence of framing, read aloud verbatim: *"This is a page of output
-   from a tool that inspects systems and records what it found. Read it, then
-   answer three questions in your own words."*
-2. The evaluated artifact (§1), displayed standalone (§4, session step 3).
-3. **Part 1**, [`participant/part-1-questions-1-3.md`](participant/part-1-questions-1-3.md):
-   Q1–Q3 only. It does not mention or hint at Q4.
-4. **Part 2**, [`participant/part-2-question-4.md`](participant/part-2-question-4.md):
-   Q4 only, handed over after Part 1 has been submitted.
-
-**The participant never sees, at any point:** this protocol, the answer key
-(§6), the rubric (§7), the pass threshold (§8), the
-[`facilitator-record-sheet.md`](facilitator-record-sheet.md), the results
-file, any other file in this repository, a README, a glossary, or any
-explanation of HarvestGuard beyond the framing sentence. This is why the
-artifact is never shown through a repository browser or file listing: the
-answer key and rubric sit in the same directory.
-
-Each participant sheet is a standalone printed rendering, handed over on
-paper, never as a link into this repository. Q4 stays out of sight and reach
-until Part 1 has been submitted. No screen recording is used.
-
-## 4. Questions and session sequence
-
-The questions, in this order:
+## 4. Questions and asynchronous sequence
 
 1. What did HarvestGuard observe?
 2. What evidence supports those observations?
 3. What can and cannot be concluded from that evidence?
 4. What does "Evidence evaluation: VERIFIED" mean?
 
-Q1–Q3 are on Part 1 and are shown before timing starts. Q4 is on Part 2 and is
-shown **only after** Part 1 has been submitted.
+After eligibility and refreeze, Tim sends one packet. The reader opens it when
+convenient, reads the artifact, answers Q1–Q3 then Q4 in their own words without
+coaching, and returns the written answers to Tim. The artifact remains available
+throughout. Returning answers submits the final response; retain it unaltered.
+Any subsequent clarification or correction is a separate dated record, never
+an overwrite or a coached replacement of the original.
 
-**Before the session** (facilitator, out of the participant's sight):
+Q4 appears after Q1–Q3 in the same packet. Its unchanged wording asks about a
+label already displayed in the artifact; it supplies no definition, expected
+answer, limitation or scoring hint. It can direct attention to that label, but
+the revised claim is independent comprehension with the whole artifact
+available, not unprimed recall. A separate reveal is therefore unnecessary.
+Automated checks verify order, unchanged wording, artifact identity and absence
+of added coaching; they do not establish human comprehension or prove absence
+of a psychological order effect.
 
-1. Prepare the evaluated artifact as a standalone, read-only rendering of the
-   approved revision of the file named in §1, in a facilitator-controlled
-   local/read-only presentation showing only that file. Its own in-page
-   section links may work; nothing may lead to any other file, repository
-   navigation or file listing. Keep it closed until session step 3.
-2. Prepare Part 1 and Part 2 with the anonymized participant ID written in.
-   Keep Part 2 out of the participant's sight and reach.
-3. Open a copy of the facilitator record sheet, kept out of the participant's
-   sight for the whole session.
+## 5. Completion time
 
-**The session**, in exactly this order:
-
-1. Hand the participant Part 1. The artifact is **not** displayed yet. The
-   participant may read the three questions.
-2. Read the framing sentence (§3, item 1) aloud, verbatim.
-3. Display the artifact. **Timing starts**: start the stopwatch at the moment
-   the artifact first becomes visible.
-4. The participant answers Q1–Q3 on Part 1, with the artifact in view. No
-   coaching, hints, explanation or corrective feedback (§5).
-5. The participant submits Part 1 by handing it back. **Timing stops**: stop
-   the stopwatch at that moment. The facilitator records the start, stop and
-   elapsed time on the record sheet and takes
-   Part 1 out of the participant's reach; its answers cannot be revised.
-6. Only now, hand over Part 2. The artifact stays displayed exactly as it was.
-   Q4 is **untimed**.
-7. The participant submits Part 2 by handing it back. The session ends.
-8. After the participant has left, the facilitator completes the record sheet
-   (verbatim answers, method, deviations) and keeps both original sheets with
-   it. Scoring (§6, §7) happens afterwards, never in front of the participant.
-
-Any departure from this sequence is a protocol deviation and is recorded.
-
-## 5. Timing method
-
-- The timed period **starts** when the evaluated overview — the top of the
-  evaluated artifact — is first displayed to the participant (§4, session
-  step 3).
-- It **stops** when the participant submits Part 1, their answers to Q1–Q3
-  (§4, session step 5).
-- Threshold: all three answers correct, within **30 seconds**.
-- Question 4 is **outside** the 30-second timed period and is untimed.
-- No coaching, hints, explanation or corrective feedback of any kind during the
-  timed portion. Clarifying that an answer may be in the participant's own
-  words is permitted; restating or explaining the artifact is not.
-- Use a stopwatch only; record elapsed seconds, start/stop events and any
-  deviation per participant. Do not use screen recording or form timestamps.
+There is no pass/fail completion-time requirement, live meeting, controlled
+reveal or required timing measurement. Do not use timers, telemetry, recording,
+form timing or message timestamps to infer reading speed. Optional approximate
+self-reported duration may be retained if volunteered; it is neither required
+for validity nor precise timing evidence and never affects acceptance.
 
 ## 6. Answer key (derived from the proposed artifact, before testing)
 
@@ -217,20 +163,22 @@ authenticity; proof that no relevant cryptographic asset exists.
 
 ## 8. Pass threshold
 
-- At least **four of five** participants answer all of Q1–Q3 correctly within
-  30 seconds.
-- **No** participant interprets VERIFIED in any prohibited way (§6).
-- Unavailable participants, an unmet threshold, or an unresolved ambiguous
-  score leave acceptance **incomplete**.
+- At least **four of five** readers correctly answer all of Q1–Q3 without
+  coaching. There is no completion-time threshold.
+- **No** participant result may contain a prohibited VERIFIED interpretation
+  (§6); disposition cannot hide one.
+- Partial answers do not count as correct. Missing evidence, an unmet threshold,
+  unavailable readers or unresolved ambiguity leave acceptance **incomplete**.
 
-## 9. Changes, failures and reruns
+## 9. Records, failures and revisions
 
-The answer key and rubric **cannot** be changed retrospectively to make results
-pass. A revision after results are seen requires a transparent protocol
-revision recorded here *and* a new evaluation round with new participants'
-answers; the earlier attempt stays in the record. Every failed attempt, rerun
-and protocol deviation is preserved in
-[`comprehension-results.md`](comprehension-results.md).
+Preserve original returned files or verbatim responses, every attempt and its
+disposition in [comprehension-results.md](comprehension-results.md), using the
+private [record sheet](facilitator-record-sheet.md). AI may mechanically apply
+the frozen rubric and flag ambiguity; Tim owns final ambiguous decisions and
+records overrides with reasons. No answer-key or rubric change after results
+may make an attempt pass. Any later revision requires a transparent new round
+and retention of earlier evidence. No participant contact is automated.
 
 ## 10. Corrective work if comprehension fails
 

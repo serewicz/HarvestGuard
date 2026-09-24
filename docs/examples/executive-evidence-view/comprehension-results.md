@@ -1,78 +1,57 @@
-# Human-comprehension results (issue #153)
+# Human-comprehension results — issue #153
 
 **Category 3 evidence: real human-comprehension evidence.**
+**NO PARTICIPANT HAS BEEN TESTED. Acceptance remains INCOMPLETE.**
 
-**Status: NO PARTICIPANT HAS BEEN TESTED. This acceptance item is INCOMPLETE.**
+This empty record is for the proposed asynchronous round, pending Tim's refreeze.
+The [history](protocol-history.md) preserves the prior freeze with zero attempts.
+No AI persona, simulation or estimate is human evidence. Practitioner results
+remain separate in [independent-use-record.md](independent-use-record.md).
 
-Nothing in this file may be filled in before the maintainer approves and
-freezes the protocol, questions, answer key, rubric, timing method, evaluated
-artifact and participant criteria in
-[`comprehension-protocol.md`](comprehension-protocol.md). Participant selection
-and contact are the maintainer's responsibility; no tooling in this repository
-contacts anyone.
-
-AI-generated personas, simulated participants, model answers, developer guesses
-and AI estimates of likely comprehension are not results and must never be
-recorded here.
-
-## Round 1
+## Round record
 
 | Field | Value |
 | --- | --- |
-| Protocol revision used | *(not started)* |
-| Evaluated artifact and SHA-256 | *(not started)* |
-| Repository commit SHA | *(not started)* |
-| Dates (UTC) | *(not started)* |
-| Tim's written freeze approval and exact package revision | Approved and frozen 2026-09-24 at `997c4d745d4944f3e26c2bc420c753916d3992b0`; see [maintainer decision](acceptance-summary.md#category-4--maintainer-decisions) |
-| Preselected five-person cohort / eligibility decisions before artifact display | *(not selected)* |
-| Practitioner excluded from reader cohort | *(not established)* |
-| Presentation / timing | Standalone local/read-only artifact; stopwatch from display to Part 1 submission; Q4 afterward, untimed, artifact visible |
+| Tim's refreeze / exact package revision | pending |
+| Artifact path and SHA-256 / packet SHA-256 | not dispatched |
+| Preselected five-person cohort and eligibility decisions | not selected |
+| Practitioner excluded from cohort | not established |
 
-| Participant | Background | Q1 | Q2 | Q3 | Elapsed (s) | Within 30 s | Q4 interpretation | Prohibited interpretation | Overall | Deviation |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| P-01 | | | | | | | | | | |
-| P-02 | | | | | | | | | | |
-| P-03 | | | | | | | | | | |
-| P-04 | | | | | | | | | | |
-| P-05 | | | | | | | | | | |
+| Slot | Attempt ID | Background | Q1 | Q2 | Q3 | Q4 interpretation | Prohibited interpretation | Overall | Disposition / deviation |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| P-01 | | | | | | | | | |
+| P-02 | | | | | | | | | |
+| P-03 | | | | | | | | | |
+| P-04 | | | | | | | | | |
+| P-05 | | | | | | | | | |
 
-Verbatim answers are recorded per participant on a copy of
-[`facilitator-record-sheet.md`](facilitator-record-sheet.md), with the
-participant's original Part 1 and Part 2 sheets kept alongside, and are
-preserved unaltered, including for failed attempts.
+Retain original returned files and the private [record sheet](facilitator-record-sheet.md).
+No completion time affects validity or scoring. Optional volunteered duration is
+approximate only. Dispatch starts the recorded attempt; missing evidence cannot
+pass. Retain incorrect answers and prohibited interpretations. Follow
+[protocol §2](comprehension-protocol.md) for all dispositions, including
+withdrawal/nonresponse, invalidation, late returns and replacement; never select
+favorable results. Tim records ambiguous decisions and overrides with rationale.
 
-### Result against the threshold
+## Attempt ledger
+
+No attempts, reminders, withdrawals, invalidations, replacements or results exist.
+
+| Slot / attempt | Dispatch | Response / reminder / closure | Disposition and reason | Replacement / rerun link | Evidence retained | Tim decision / rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| not started | | | | | | |
+
+## Acceptance assessment
 
 | Requirement | Result |
 | --- | --- |
-| ≥ 4 of 5 answered Q1–Q3 correctly within 30 s | *(not established)* |
-| No participant interpreted VERIFIED in a prohibited way | *(not established)* |
-| Ambiguous answers resolved by the maintainer | *(none recorded)* |
-| Initial AI scoring shown with per-answer rubric reasoning | *(none recorded)* |
-| Maintainer overrides (what, why, who) | *(none recorded)* |
+| At least four of five correctly answer all Q1–Q3 without coaching | not established |
+| No prohibited VERIFIED interpretation in any participant result | not established |
+| Per-answer rubric reasoning and original responses retained | no responses |
+| Ambiguities and overrides decided by Tim with rationale | none recorded |
 
-## Attempt disposition ledger
+## Failed attempts, revisions and corrective work
 
-No attempts have occurred. Follow [protocol §2](comprehension-protocol.md):
-retain every eligible started attempt. Wrong answers, overtime and prohibited
-VERIFIED interpretations cannot justify replacement; missing evidence is not
-a pass. Retain withdrawals and procedural invalidations with all collected
-evidence. Record every exclusion, failed attempt, rerun and replacement, linked
-to its cohort slot and original attempt. Tim decides ambiguous eligibility,
-invalidation, scoring and overrides, with rationale. The threshold remains
-four of five and no prohibited interpretation; do not select the best results.
-
-| Cohort slot | Attempt ID | Eligibility decision before display | Disposition / reason | Replacement or rerun link | Evidence retained | Tim decision / rationale |
-| --- | --- | --- | --- | --- | --- | --- |
-| *(not started)* | | | | | | |
-
-## Failed attempts, reruns and protocol revisions
-
-None. Any failed attempt or rerun is appended here rather than replaced, and a
-protocol revision after results are seen requires a new round with new answers.
-
-## Corrective work arising from results
-
-None. Any correction is bounded to wording, navigation, discoverability or
-Markdown layout inside the approved architecture (see
-[`comprehension-protocol.md` §10](comprehension-protocol.md)).
+None. Append failures and reruns rather than overwriting them. Later changes
+require a transparent revision and new round under protocol §9; retain earlier
+evidence. No human results motivated the current pre-testing protocol revision.

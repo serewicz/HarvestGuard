@@ -148,13 +148,13 @@ files below state plainly which requirements are still outstanding.
 | --- | --- | --- |
 | 1. Automated and AI-produced evidence | [`acceptance-summary.md`](acceptance-summary.md), `samples/`, `manifest.json`, `tests/test_executive_evidence_examples.py` | Recorded there |
 | 2. Independent technical-review evidence | [`technical-traceability-review.md`](technical-traceability-review.md) | APPROVE WITH NON-BLOCKING FOLLOW-UP at `c934e63c8c3c0d0b7150301e1942b7e76d0439b8`; qualified results recorded in the review |
-| 3. Real human-comprehension evidence | [`comprehension-protocol.md`](comprehension-protocol.md), participant sheets in [`participant/`](participant/) (with the evaluated artifact, the only material a participant ever sees), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) (facilitator and scorer only), [`comprehension-results.md`](comprehension-results.md), [`independent-use-record.md`](independent-use-record.md) | Package approved and frozen by Tim at `997c4d745d4944f3e26c2bc420c753916d3992b0`; practitioner and reader evidence outstanding |
-| 4. Maintainer decisions | [`acceptance-summary.md`](acceptance-summary.md) | Freeze recorded in Category 4; final acceptance and subsequent decisions outstanding |
+| 3. Real human-comprehension evidence | [`comprehension-protocol.md`](comprehension-protocol.md), single self-contained packet in [`participant/`](participant/) (with the evaluated artifact, the only material a participant ever sees), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) (facilitator and scorer only), [`comprehension-results.md`](comprehension-results.md), [`independent-use-record.md`](independent-use-record.md) | Async reader revision awaiting refreeze; prior freeze preserved in [protocol-history.md](protocol-history.md); practitioner freeze unchanged; human evidence outstanding |
+| 4. Maintainer decisions | [`acceptance-summary.md`](acceptance-summary.md) | Previous freeze and pending reader refreeze recorded in Category 4; final acceptance outstanding |
 
 No participant is contacted, recruited, invited, messaged or scheduled by any
 tooling in this repository. Participant selection and contact are the
 maintainer's responsibility, and the protocol, questions, answer key, rubric,
-timing method and evaluated artifact must be approved and frozen *before*
+asynchronous administration and evaluated artifact must be approved and frozen *before*
 anyone is tested.
 
 This directory contains no participant names, contact details, employers,

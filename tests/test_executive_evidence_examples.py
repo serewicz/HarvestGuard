@@ -25,6 +25,7 @@ and requires the committed bytes either way.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -1053,8 +1054,7 @@ def test_outstanding_human_acceptance_is_recorded_as_incomplete(name, marker):
 # --- participant material is separate from facilitator material -------------
 
 PARTICIPANT = COLLECTION / "participant"
-PART_1 = PARTICIPANT / "part-1-questions-1-3.md"
-PART_2 = PARTICIPANT / "part-2-question-4.md"
+PACKET = PARTICIPANT / "reader-packet.md"
 PROTOCOL = COLLECTION / "comprehension-protocol.md"
 QUESTIONS = (
     "What did HarvestGuard observe?",
@@ -1063,81 +1063,77 @@ QUESTIONS = (
     'What does "Evidence evaluation: VERIFIED" mean?',
 )
 
-# Nothing a participant is handed may lead to, or carry, facilitator or scoring
-# material: no link, no path, and none of the vocabulary of the answer key,
-# rubric, threshold or facilitation.
-PARTICIPANT_FORBIDDEN = (
-    re.compile(r"\]\("),
-    re.compile(r"https?:|www\."),
-    re.compile(r"\.md\b|\.json\b"),
-    re.compile(
-        r"(?i)answer key|rubric|scor|correct|partial|prohibit|threshold|facilitat|"
-        r"protocol|manifest|30 seconds|timed|README|glossary"
-    ),
-)
 
-
-def _question_lines(text: str) -> list[str]:
-    return re.findall(r"^\*\*\d\. (.+)\*\*$", text, flags=re.MULTILINE)
-
-
-def test_participant_directory_holds_only_the_two_participant_sheets():
-    assert sorted(path.name for path in PARTICIPANT.iterdir()) == sorted(
-        [PART_1.name, PART_2.name]
+def test_async_packet_identity_questions_and_isolation():
+    assert sorted(p.name for p in PARTICIPANT.iterdir()) == [PACKET.name]
+    packet = PACKET.read_bytes()
+    intro, rest = packet.split(b"<!-- BEGIN EVALUATED ARTIFACT -->\n")
+    artifact, answers = rest.split(b"<!-- END EVALUATED ARTIFACT -->")
+    assert artifact == (COLLECTION / "samples/verified.md").read_bytes()
+    assert hashlib.sha256(artifact).hexdigest() == (
+        "69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94"
     )
-    # The former combined form, which linked to the answer key and showed Q4
-    # up front, is gone and nothing points at it.
-    assert not (COLLECTION / "participant-response-form.md").exists()
+    added = (intro + answers).decode("utf-8")
+    assert re.findall(r"^\*\*\d\. (.+)\*\*$", added, re.MULTILINE) == list(QUESTIONS)
+    assert added.count("Your answer:") == 4
+    assert not re.search(
+        r"(?i)answer key|rubric|threshold|correct answer|prohibited|technical.review|"
+        r"facilitator|30.second|stopwatch|https?:|\]\(",
+        added,
+    )
+    # The unchanged artifact may have internal navigation, never repository links.
+    assert all(t.startswith("#") for t in re.findall(r"\]\(([^)]+)\)", artifact.decode()))
+    protocol = PROTOCOL.read_text(encoding="utf-8")
+    questions = protocol[protocol.index("## 4.") : protocol.index("## 5.")]
+    assert re.findall(r"^\d\. (.+)$", questions, re.MULTILINE)[:4] == list(QUESTIONS)
+
+
+def test_async_active_reader_materials_have_no_timing_or_split_reveal_contract():
+    for name in (
+        "comprehension-protocol.md",
+        "comprehension-results.md",
+        "facilitator-record-sheet.md",
+        "participant/reader-packet.md",
+    ):
+        text = (COLLECTION / name).read_text(encoding="utf-8")
+        assert not re.search(r"(?i)30[ -]second|30 s\b|stopwatch|Part [12]|screen.share", text)
+    protocol = PROTOCOL.read_text(encoding="utf-8")
+    for rule in (
+        "no pass/fail completion-time requirement",
+        "four of five",
+        "Dispatch to an eligible reader",
+        "Missing answers",
+        "Withdrawals and closed nonresponses may be replaced",
+        "Tim decides",
+        "original returned files",
+        "not establish",
+    ):
+        assert rule in protocol
+    for boundary in (
+        "organizational security",
+        "regulatory compliance",
+        "business safety",
+        "complete environmental coverage",
+        "source authenticity",
+        "proof that no relevant cryptographic asset exists",
+    ):
+        assert boundary in " ".join(protocol.split())
+
+
+def test_async_revision_preserves_semantic_key_rubric_and_practitioner():
+    protocol = PROTOCOL.read_bytes()
+    key = protocol[protocol.index(b"## 6. Answer key") : protocol.index(b"## 8. Pass threshold")]
+    assert (
+        hashlib.sha256(key).hexdigest()
+        == "0f3b982a2daac91a8ba84af3a8b7f3164ff1bd6899639e3f0a76526a165270ab"
+    )
+    practitioner = (COLLECTION / "independent-use-record.md").read_bytes()
+    assert (
+        hashlib.sha256(practitioner).hexdigest()
+        == "847d76541551b9b7129fd2d95ca0dd1cfec22c2dea0c57477bfc26a13505539c"
+    )
     for path in COLLECTION.rglob("*.md"):
-        assert "participant-response-form" not in path.read_text(encoding="utf-8"), path
-
-
-@pytest.mark.parametrize("sheet", [PART_1, PART_2], ids=lambda path: path.name)
-def test_participant_sheets_expose_nothing_but_their_questions(sheet):
-    text = sheet.read_text(encoding="utf-8")
-    for pattern in PARTICIPANT_FORBIDDEN:
-        assert not pattern.search(text), f"{pattern.pattern} found in {sheet.name}"
-    if sheet == PART_1:
-        assert _question_lines(text) == list(QUESTIONS[:3])
-        # Part 1 neither shows nor hints at the later question.
-        assert "VERIFIED" not in text
-        assert not re.search(r"(?i)\bQ?4\b|part 2|another question|next question", text)
-    else:
-        assert _question_lines(text) == [QUESTIONS[3]]
-
-
-def test_protocol_questions_match_the_participant_sheets():
-    protocol = PROTOCOL.read_text(encoding="utf-8")
-    section = protocol[protocol.index("## 4.") : protocol.index("## 5.")]
-    assert re.findall(r"^\d\. (.+)$", section, flags=re.MULTILINE)[:4] == list(QUESTIONS)
-
-
-def test_protocol_sequences_part_2_after_part_1_is_submitted():
-    """Display, timing start, Part 1 submission, timing stop, then Part 2."""
-    protocol = PROTOCOL.read_text(encoding="utf-8")
-    section = protocol[protocol.index("**The session**") : protocol.index("## 5.")]
-    steps = re.findall(r"^(\d)\. (.+?)(?=^\d\. |\Z)", section, flags=re.MULTILINE | re.DOTALL)
-    text = {int(number): " ".join(body.split()) for number, body in steps}
-
-    def step_of(phrase: str) -> int:
-        matches = [number for number, body in text.items() if phrase in body]
-        assert len(matches) == 1, f"'{phrase}' should appear in exactly one session step"
-        return matches[0]
-
-    hand_part_1 = step_of("Hand the participant Part 1")
-    framing = step_of("Read the framing sentence")
-    start = step_of("**Timing starts**")
-    stop = step_of("**Timing stops**")
-    hand_part_2 = step_of("hand over Part 2")
-    assert hand_part_1 < framing < start < stop < hand_part_2
-    assert "artifact is **not** displayed" in text[hand_part_1]
-    assert "submits Part 1" in text[stop]
-    assert "Only now" in text[hand_part_2] and "untimed" in text[hand_part_2]
-    # The facilitator sheet, answer key and rubric are named as never shown.
-    materials = protocol[protocol.index("## 3.") : protocol.index("## 4.")]
-    never = materials[materials.index("**The participant never sees") :]
-    for item in ("answer key", "rubric", "facilitator-record-sheet.md"):
-        assert item in never
+        assert "participant-response-form" not in path.read_text(encoding="utf-8")
 
 
 def test_facilitator_sheet_is_marked_facilitator_only():
