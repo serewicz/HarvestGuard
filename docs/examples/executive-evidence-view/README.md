@@ -147,7 +147,7 @@ files below state plainly which requirements are still outstanding.
 | Category | Where | Status |
 | --- | --- | --- |
 | 1. Automated and AI-produced evidence | [`acceptance-summary.md`](acceptance-summary.md), `samples/`, `manifest.json`, `tests/test_executive_evidence_examples.py` | Recorded there |
-| 2. Independent technical-review evidence | [`technical-traceability-review.md`](technical-traceability-review.md) | Awaiting an independent reviewer |
+| 2. Independent technical-review evidence | [`technical-traceability-review.md`](technical-traceability-review.md) | APPROVE WITH NON-BLOCKING FOLLOW-UP at `c934e63c8c3c0d0b7150301e1942b7e76d0439b8`; qualified results recorded in the review |
 | 3. Real human-comprehension evidence | [`comprehension-protocol.md`](comprehension-protocol.md), participant sheets in [`participant/`](participant/) (with the evaluated artifact, the only material a participant ever sees), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) (facilitator and scorer only), [`comprehension-results.md`](comprehension-results.md), [`independent-use-record.md`](independent-use-record.md) | Awaiting maintainer approval, then real participants |
 | 4. Maintainer decisions | [`acceptance-summary.md`](acceptance-summary.md) | Awaiting the maintainer |
 

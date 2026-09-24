@@ -2,7 +2,13 @@
 
 **Category 2 evidence: independent technical review.**
 
-**Status: NOT PERFORMED. This acceptance item is INCOMPLETE.**
+**Status: independent review completed at the implementation head below.**
+**Verdict: APPROVE WITH NON-BLOCKING FOLLOW-UP.**
+
+This records the completed independent Codex review, also recorded in
+[PR #160](https://github.com/serewicz/HarvestGuard/pull/160). It is not human
+acceptance, approval of these subsequent documentation corrections, maintainer
+freeze, merge authorization or 0.4.0 release clearance.
 
 ## What the review must establish
 
@@ -37,32 +43,66 @@ implementation, records its method and limitations, and did not implement the
 code under review. That is category 2 evidence and must never be described as
 human validation.
 
-## Review record (to be completed)
+## Completed implementation-review record
 
 | Field | Value |
 | --- | --- |
-| Reviewer identity/role | *(not performed)* |
-| Independent of the #152 implementation | *(not established)* |
-| Exact artifacts reviewed (paths + SHA-256 from `manifest.json`) | *(not performed)* |
-| HarvestGuard version in the artifacts | *(not performed)* |
-| Repository commit SHA | *(not performed)* |
-| Review method | *(not performed)* |
-| Date (UTC) | *(not performed)* |
+| Reviewer identity/role | Codex, independent principal/security/QA reviewer |
+| Independence | Did not implement #152 or the implementation reviewed here; these later acceptance-document corrections do not constitute a new independent implementation review |
+| Reviewed implementation Git SHA | `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` |
+| Previous reviewed Git SHA | `85ea2115c5f1566e9205ff4470506edb726aa521` |
+| Exact main/base reviewed | `77b52ac56833d9821008d1466683bb9969ed7641` |
+| Exact artifacts | Immutable `docs/examples/executive-evidence-view/samples/` files at the reviewed SHA; individual SHA-256 values in that revision's `manifest.json` |
+| Manifest SHA-256 | `efdefbdf2eff4826f7d51d190af7c1f9df8d410c98f2cc10192eb2291a3a8944` |
+| Evaluated `samples/verified.md` SHA-256 | `69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94` |
+| Companion `samples/verified.json` SHA-256 | `b9d85f1f39bdf2136433a2dcdef88563721388aadf288abea842aa435defc0b8` |
+| HarvestGuard version in artifacts | 0.3.0; executive schema/policy 0.1.0; finding schema 1.0.0 |
+| Review method | Complete PR diff against exact main, correction diff against previous head, immutable sample inspection, evidence/check/derivation and privacy tracing, production-path and test-assertion inspection, independent regression and installed/offline probes, exact-head CI log inspection |
 
-### Statement-by-statement resolution
+### Findings and resolution
 
-| Artifact | Statement | Resolved to (occurrence scan/ordinal/finding ID, check, derivation, or standing limitation) | Verdict |
-| --- | --- | --- | --- |
-| | | | |
+All four previous findings were resolved:
 
-### Mismatches and unsupported statements
+1. Isolated installed-package testing provisions and verifies dependencies
+   inside the actual isolated target environment.
+2. Participant materials separate Part 1, Part 2 and facilitator/key/rubric
+   content, with Q4 supplied only after Part 1 submission.
+3. JSON/Markdown semantic parity is checked within corresponding records;
+   mutation tests reject values assigned to the wrong record.
+4. Generation selects the imported implementation's CLI and verifies origins,
+   instead of selecting unrelated code from PATH.
 
-*(none recorded — the review has not run)*
+No Blocker, Major or Minor findings remained in that technical review. The
+subsequent maintainer-freeze review identified documentation preparation gaps;
+those corrections do not alter this historical implementation-review verdict.
+No unsupported claim was accepted by rationalizing or silently repairing it.
 
-### Reviewer limitations
+### Independent validation and limitations
 
-*(none recorded — the review has not run)*
+| Check at reviewed implementation head | Result |
+| --- | --- |
+| Focused examples/projection/exports/clock-safety | 235 passed, no skips or errors |
+| Exact-head CI Python 3.10 / 3.11 / 3.12 | 3,407 passed, 2 skipped on each; [run 35920437417](https://github.com/serewicz/HarvestGuard/actions/runs/35920437417) logs inspected |
+| Installed generation outside checkout with sockets blocked | All 20 generated files byte-identical to committed artifacts |
+| Installed CLI outside checkout with sockets blocked | 9 normal scenarios × 2 formats = 18 exports passed; only CLI-owned export time differs |
+| Ruff; patch applicability/whitespace | Passed |
+| Complete local suite | 3,398 passed, 2 failed, 4 setup errors, 5 skipped |
+| Exact-main end-to-end reproduction | 21 passed, same 2 failures and 4 setup errors |
+| Explicit offline opt-out, example tests | 101 passed, 5 installed tests explicitly skipped |
 
-### Verdict
+The two failures and four setup errors reproduce on exact main in
+`tests/test_end_to_end_validation.py`, untouched by PR #160. The failures are
+pre-existing coverage-wording assertions. The setup fixture combines
+`--system-site-packages`, `--no-deps` and a parent-interpreter setuptools check,
+leading to `Cannot import 'setuptools.build_meta'` in the isolated contributor
+environment. Independent review classified these as **separate QA follow-up,
+not a PR #160 merge blocker or demonstrated product/runtime defect**. They
+remain failures to fix or explicitly disposition for release readiness.
 
-*(none — the review has not run)*
+The five local skips were three GPG-dependent cases (GPG unavailable) and two
+opt-in release-artifact installation cases; CI skipped those two opt-in cases.
+The enabled focused run skipped no corrected installed-package tests.
+These are bounded automated and technical observations, not proof of human
+usability or comprehension. No practitioner or reader testing has occurred.
+Tim's package approval/freeze, human evidence, final acceptance, merge,
+#153/#150 closure and release readiness remain outstanding.

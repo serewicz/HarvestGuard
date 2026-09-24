@@ -20,18 +20,29 @@ contact details, no employer, no demographics, no recordings.
 | --- | --- |
 | Anonymized participant ID | `P-0n` |
 | Relevant nontechnical background | e.g. "operating executive, no security engineering role" |
-| Evaluated artifact | `samples/<file>.md` |
-| Artifact SHA-256 | from `manifest.json` |
+| Eligibility decided before artifact display | decision, rationale, Tim / date |
+| Preselected cohort slot / attempt ID | |
+| Not the independent practitioner | confirm before session |
+| Attempt disposition | not started / completed / withdrawn / invalid; reason and Tim decision |
+| Exclusion, rerun or replacement linkage | original and replacement attempt IDs; reason and decision |
+| Evaluated artifact | `samples/verified.md` |
+| Artifact SHA-256 | `69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94` |
 | Repository commit SHA | |
 | HarvestGuard version in the artifact | |
 | Date (UTC) | |
-| How the artifact was displayed | e.g. printout, locally rendered page showing only that file |
-| Timing method used | e.g. stopwatch, form timestamps |
+| How the artifact was displayed | Facilitator-controlled local/read-only standalone rendering; no repository navigation or file listing |
+| Timing method used | Stopwatch; no screen recording |
 | Timing start: artifact first displayed | time |
 | Timing stop: Part 1 submitted | time |
 | Elapsed time for Q1–Q3 | seconds |
 | Part 2 handed over after Part 1 submitted | yes / no — describe |
 | Protocol deviation | none / describe |
+
+Retain every eligible started attempt and any collected evidence, following
+[protocol §2](comprehension-protocol.md). Incorrect answers, overtime and
+prohibited interpretations never justify replacement. Missing evidence is not
+a pass. Record procedural failures, withdrawals, exclusions, replacements and
+Tim's reasons; never discard unfavorable evidence.
 
 ## Answers, verbatim
 
@@ -66,6 +77,6 @@ Keep the original sheets with this record.
 
 | Field | Value |
 | --- | --- |
-| Overall result (pass / fail) | |
+| Overall result (pass / fail / incomplete / invalid / withdrawn) | |
 | Maintainer decision on ambiguity | none required / decision + reason + who |
 | Override of an initial score | none / what, why, who |

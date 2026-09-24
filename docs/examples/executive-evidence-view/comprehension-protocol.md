@@ -17,8 +17,9 @@ a participant. Selection and contact are the maintainer's responsibility.
 | Field | Value |
 | --- | --- |
 | Proposed artifact | `docs/examples/executive-evidence-view/samples/verified.md` |
-| Format shown | Rendered Markdown, read-only |
-| Artifact revision | The committed file at the approved commit SHA — record the SHA and the file's SHA-256 from `manifest.json` in the results |
+| Format shown | Standalone rendered Markdown in a facilitator-controlled local/read-only presentation; no repository navigation or file listing |
+| Artifact revision | The exact corrected PR commit approved by Tim; record its full Git SHA before testing |
+| Source artifact SHA-256 | `69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94` (unchanged from reviewed implementation `c934e63c8c3c0d0b7150301e1942b7e76d0439b8`) |
 | HarvestGuard version | As recorded in the artifact's *Produced by* / *Exported by* rows |
 | Evidence content | Synthetic; no organizational, customer or confidential evidence |
 
@@ -42,6 +43,25 @@ estimates of likely comprehension **cannot** substitute for any of the five.
 Record only an anonymized participant ID and the relevant nontechnical
 background. No names, contact details, employers, demographics or recordings.
 
+Determine eligibility before the participant sees the evaluated artifact.
+Select and record the intended five-person cohort without reference to results.
+The independent practitioner must not be one of these five readers in this
+round. Tim decides ambiguous eligibility, recording the decision and rationale.
+
+Every eligible started attempt remains in the acceptance record. Incorrect
+answers, exceeding 30 seconds, and prohibited interpretations of VERIFIED are
+not grounds for replacement. Missing required evidence cannot count as a pass.
+A genuine procedural failure (such as the wrong artifact or a failed stopwatch)
+may invalidate a session; Tim must record the reason and decision, retain the
+attempt, and record any replacement. A withdrawal may be replaced, but retain
+the withdrawal and all evidence already collected. No unfavorable attempt,
+exclusion, withdrawal, invalid session, rerun or replacement may be silently
+discarded. Link replacements to their original attempts, preserving the
+five-person cohort accounting rather than selecting the best five results.
+Tim decides ambiguous invalidation, scoring and overrides with a recorded
+rationale. Disposition never erases a prohibited VERIFIED interpretation or
+makes it permissible under the no-participant criterion in §8.
+
 ## 3. Materials: what the participant may and may not see
 
 Participant-facing material is kept apart from facilitator and scoring
@@ -53,7 +73,7 @@ other.
 1. One sentence of framing, read aloud verbatim: *"This is a page of output
    from a tool that inspects systems and records what it found. Read it, then
    answer three questions in your own words."*
-2. The evaluated artifact (§1), displayed standalone (§4, step 1).
+2. The evaluated artifact (§1), displayed standalone (§4, session step 3).
 3. **Part 1**, [`participant/part-1-questions-1-3.md`](participant/part-1-questions-1-3.md):
    Q1–Q3 only. It does not mention or hint at Q4.
 4. **Part 2**, [`participant/part-2-question-4.md`](participant/part-2-question-4.md):
@@ -67,8 +87,9 @@ explanation of HarvestGuard beyond the framing sentence. This is why the
 artifact is never shown through a repository browser or file listing: the
 answer key and rubric sit in the same directory.
 
-Each participant sheet is handed over as its rendered content alone (a
-printout, or its own form page), never as a link into this repository.
+Each participant sheet is a standalone printed rendering, handed over on
+paper, never as a link into this repository. Q4 stays out of sight and reach
+until Part 1 has been submitted. No screen recording is used.
 
 ## 4. Questions and session sequence
 
@@ -85,9 +106,10 @@ shown **only after** Part 1 has been submitted.
 **Before the session** (facilitator, out of the participant's sight):
 
 1. Prepare the evaluated artifact as a standalone, read-only rendering of the
-   approved revision of the file named in §1 — a printout, or a locally
-   rendered page that shows that file only. Its own in-page section links may
-   work; nothing may lead from it to any other file. Keep it covered or closed.
+   approved revision of the file named in §1, in a facilitator-controlled
+   local/read-only presentation showing only that file. Its own in-page
+   section links may work; nothing may lead to any other file, repository
+   navigation or file listing. Keep it closed until session step 3.
 2. Prepare Part 1 and Part 2 with the anonymized participant ID written in.
    Keep Part 2 out of the participant's sight and reach.
 3. Open a copy of the facilitator record sheet, kept out of the participant's
@@ -98,13 +120,13 @@ shown **only after** Part 1 has been submitted.
 1. Hand the participant Part 1. The artifact is **not** displayed yet. The
    participant may read the three questions.
 2. Read the framing sentence (§3, item 1) aloud, verbatim.
-3. Display the artifact. **Timing starts** at the moment it is first
-   displayed.
+3. Display the artifact. **Timing starts**: start the stopwatch at the moment
+   the artifact first becomes visible.
 4. The participant answers Q1–Q3 on Part 1, with the artifact in view. No
    coaching, hints, explanation or corrective feedback (§5).
-5. The participant submits Part 1 by handing it back (or, for an electronic
-   form, pressing its submit control). **Timing stops** at that moment. The
-   facilitator records the start and stop times on the record sheet and takes
+5. The participant submits Part 1 by handing it back. **Timing stops**: stop
+   the stopwatch at that moment. The facilitator records the start, stop and
+   elapsed time on the record sheet and takes
    Part 1 out of the participant's reach; its answers cannot be revised.
 6. Only now, hand over Part 2. The artifact stays displayed exactly as it was.
    Q4 is **untimed**.
@@ -113,11 +135,7 @@ shown **only after** Part 1 has been submitted.
    (verbatim answers, method, deviations) and keeps both original sheets with
    it. Scoring (§6, §7) happens afterwards, never in front of the participant.
 
-If an electronic form is used instead of paper, Part 1 and Part 2 are separate
-forms or pages, the Part 2 form is given to the participant only after the
-Part 1 submission is recorded, and the submission timestamps are the timing
-record. Any departure from this sequence is a protocol deviation and is
-recorded as one.
+Any departure from this sequence is a protocol deviation and is recorded.
 
 ## 5. Timing method
 
@@ -131,8 +149,8 @@ recorded as one.
 - No coaching, hints, explanation or corrective feedback of any kind during the
   timed portion. Clarifying that an answer may be in the participant's own
   words is permitted; restating or explaining the artifact is not.
-- The method actually used (stopwatch, screen recording timestamps, form
-  timestamps) is recorded per participant, together with any deviation.
+- Use a stopwatch only; record elapsed seconds, start/stop events and any
+  deviation per participant. Do not use screen recording or form timestamps.
 
 ## 6. Answer key (derived from the proposed artifact, before testing)
 

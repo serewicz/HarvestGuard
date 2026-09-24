@@ -23,6 +23,10 @@ recorded here.
 | Evaluated artifact and SHA-256 | *(not started)* |
 | Repository commit SHA | *(not started)* |
 | Dates (UTC) | *(not started)* |
+| Tim's written freeze approval and exact package revision | *(pending)* |
+| Preselected five-person cohort / eligibility decisions before artifact display | *(not selected)* |
+| Practitioner excluded from reader cohort | *(not established)* |
+| Presentation / timing | Standalone local/read-only artifact; stopwatch from display to Part 1 submission; Q4 afterward, untimed, artifact visible |
 
 | Participant | Background | Q1 | Q2 | Q3 | Elapsed (s) | Within 30 s | Q4 interpretation | Prohibited interpretation | Overall | Deviation |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -46,6 +50,21 @@ preserved unaltered, including for failed attempts.
 | Ambiguous answers resolved by the maintainer | *(none recorded)* |
 | Initial AI scoring shown with per-answer rubric reasoning | *(none recorded)* |
 | Maintainer overrides (what, why, who) | *(none recorded)* |
+
+## Attempt disposition ledger
+
+No attempts have occurred. Follow [protocol §2](comprehension-protocol.md):
+retain every eligible started attempt. Wrong answers, overtime and prohibited
+VERIFIED interpretations cannot justify replacement; missing evidence is not
+a pass. Retain withdrawals and procedural invalidations with all collected
+evidence. Record every exclusion, failed attempt, rerun and replacement, linked
+to its cohort slot and original attempt. Tim decides ambiguous eligibility,
+invalidation, scoring and overrides, with rationale. The threshold remains
+four of five and no prohibited interpretation; do not select the best results.
+
+| Cohort slot | Attempt ID | Eligibility decision before display | Disposition / reason | Replacement or rerun link | Evidence retained | Tim decision / rationale |
+| --- | --- | --- | --- | --- | --- | --- |
+| *(not started)* | | | | | | |
 
 ## Failed attempts, reruns and protocol revisions
 

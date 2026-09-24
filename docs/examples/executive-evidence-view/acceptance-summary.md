@@ -1,10 +1,10 @@
 # Acceptance summary — Executive Evidence View (issue #153)
 
-**Overall status: INCOMPLETE.** Everything automatable has been prepared and
-runs green. Every acceptance item that requires a real person — maintainer
-approval, an independent practitioner, an independent technical reviewer, and
-five representative nontechnical readers — is outstanding and is recorded as
-outstanding. Issue #153 and epic #150 stay open until those items are done.
+**Overall status: INCOMPLETE.** Automation and independent technical review
+are recorded below, with qualified validation results. Tim has not approved or
+frozen the package; no practitioner or reader testing has occurred. Human
+acceptance, merge, #153 closure, #150 closure and release readiness remain
+outstanding. Technical approval does not clear the 0.4.0 release.
 
 Acceptance evidence is kept in four clearly separated categories. Category 1
 evidence never substitutes for categories 2–4, and automated or AI-produced
@@ -34,11 +34,17 @@ work is never described here as human validation.
 | AI-drafted protocol, questions, answer key, rubric, session sequence, participant sheets, facilitator record sheet, templates | Drafted, **not approved** | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
 | Participant material kept apart from facilitator and scoring material; Q4 only on a separate sheet | Done (structure only; protocol still unapproved) | `…::test_participant_sheets_expose_nothing_but_their_questions`, `…::test_protocol_sequences_part_2_after_part_1_is_submitted` |
 
-Honest reporting of the automated run: at the time of writing the full suite
-is green with two skips, both pre-existing and both in
-`tests/test_release_artifacts.py`, which skip unless
-`HARVESTGUARD_RUN_NETWORK_INSTALL_TESTS=1` enables networked install
-validation. Most tests in this collection need only a Python interpreter with
+Independent validation at implementation head
+`c934e63c8c3c0d0b7150301e1942b7e76d0439b8` is recorded in
+[technical-traceability-review.md](technical-traceability-review.md). The complete
+local suite was **3,398 passed, 2 failed, 4 setup errors, 5 skipped**, not an
+unconditionally green suite. The same two failures and four setup errors
+reproduce on exact main `77b52ac56833d9821008d1466683bb9969ed7641` in the
+unchanged `tests/test_end_to_end_validation.py`; independent review classified
+them as separate QA follow-up, not a PR #160 merge blocker or demonstrated
+product/runtime defect. Release readiness still requires separate disposition.
+
+Most tests in this collection need only a Python interpreter with
 the repository's development requirements installed. The installed-package
 tests have one more dependency, stated here rather than assumed away: they
 install HarvestGuard *with its declared dependencies* into a fresh, isolated
@@ -68,7 +74,7 @@ regeneration tests fail until they are regenerated.
 
 | Item | Status |
 | --- | --- |
-| Independent traceability review of the immutable artifacts | **NOT PERFORMED** — see [`technical-traceability-review.md`](technical-traceability-review.md) |
+| Independent traceability review of the immutable artifacts | **APPROVE WITH NON-BLOCKING FOLLOW-UP** at `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` — see [`technical-traceability-review.md`](technical-traceability-review.md) |
 
 ## Category 3 — Real human-comprehension evidence and real human use
 
@@ -79,8 +85,8 @@ regeneration tests fail until they are regenerated.
 | ≥ 4 of 5 answer Q1–Q3 correctly within 30 seconds | **NOT ESTABLISHED** |
 | No participant interprets VERIFIED in a prohibited way | **NOT ESTABLISHED** |
 
-Independent use and comprehension are recorded separately, even if one person
-is eligible for both. No tooling in this repository contacts, recruits,
+Independent use and comprehension are recorded separately. No individual may
+participate in both for this round. No tooling in this repository contacts, recruits,
 invites, messages or schedules anyone.
 
 ## Category 4 — Maintainer decisions
@@ -89,9 +95,9 @@ invites, messages or schedules anyone.
 | --- | --- |
 | Approve and freeze the evaluated artifact and its exact revision | **PENDING** |
 | Approve and freeze the protocol, questions, answer key, rubric and timing method | **PENDING** |
-| Approve the participant criteria; select and contact participants | **PENDING** |
+| Approve participant eligibility/disposition rules and the independent-practitioner packet; select and contact participants | **PENDING** |
 | Resolve any ambiguous score; record overrides with reasons | **PENDING** (none to resolve yet) |
-| Approve any corrective wording or layout change | **PENDING** (none proposed) |
+| Approve the corrected acceptance package and exact revision for freeze | **PENDING** |
 | Final acceptance, merge, epic closure, release decisions | **PENDING** |
 
 ## Claims audit

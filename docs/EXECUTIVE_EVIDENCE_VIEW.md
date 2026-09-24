@@ -523,10 +523,14 @@ collection ([issue #153](https://github.com/serewicz/HarvestGuard/issues/153)):
   local-retention disclosure; no withheld value or secret-shaped canary appears
   in any generated artifact; a corrupted run yields a bounded diagnostic and no
   report; and generation needs no network, service or account.
-- **Not yet established.** Independent technical traceability review,
-  independent practitioner use of the published instructions, and
-  nontechnical-reader comprehension are human acceptance steps that have not
-  happened. Their status is recorded in
+- **Independent technical review recorded.** Codex reviewed implementation
+  `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` with verdict
+  APPROVE WITH NON-BLOCKING FOLLOW-UP. This is technical evidence, not human
+  validation; qualified test results and limitations are preserved in the
+  acceptance records.
+- **Not yet established.** Independent practitioner use of the published
+  instructions and nontechnical-reader comprehension have not happened.
+  Maintainer approval and freeze also remain pending. Their status is recorded in
   [docs/examples/executive-evidence-view/acceptance-summary.md](examples/executive-evidence-view/acceptance-summary.md).
   Nothing in this document should be read as a claim that reader comprehension
   or independent usability has been demonstrated.

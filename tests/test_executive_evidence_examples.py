@@ -1042,7 +1042,6 @@ def test_the_documented_relative_work_dir_command_generates_the_collection(tmp_p
         ("comprehension-protocol.md", "DRAFT"),
         ("comprehension-results.md", "NO PARTICIPANT HAS BEEN TESTED"),
         ("independent-use-record.md", "NO PRACTITIONER HAS COMPLETED THE EXERCISE"),
-        ("technical-traceability-review.md", "NOT PERFORMED"),
     ],
 )
 def test_outstanding_human_acceptance_is_recorded_as_incomplete(name, marker):
