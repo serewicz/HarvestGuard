@@ -1,8 +1,9 @@
 # Acceptance summary — Executive Evidence View (issue #153)
 
 **Overall status: INCOMPLETE.** Automation and independent technical review
-are recorded below, with qualified validation results. Tim has not approved or
-frozen the package; no practitioner or reader testing has occurred. Human
+are recorded below, with qualified validation results. Tim approved and froze
+the package at the revision recorded in Category 4; no practitioner or reader
+testing has occurred. Human
 acceptance, merge, #153 closure, #150 closure and release readiness remain
 outstanding. Technical approval does not clear the 0.4.0 release.
 
@@ -31,8 +32,8 @@ work is never described here as human validation.
 | Published sample commands and links match shipped behaviour | Done | `…::test_documented_export_commands_use_options_the_cli_accepts`, `…::test_readme_relative_links_resolve` |
 | Clean install, packaging, outside-checkout operation | Done (pre-existing) | `tests/test_clean_install.py`, `tests/test_packaging_dependencies.py` |
 | #151/#152 projection, export, CLI, evidence-store, clock-safety and legacy regressions preserved and rerun | Done (pre-existing) | `tests/test_executive_evidence.py`, `tests/test_executive_exports.py`, `tests/test_executive_serializer_clock_safety.py`, `tests/test_cli.py`, `tests/test_evidence_store.py`, `tests/test_reports.py` |
-| AI-drafted protocol, questions, answer key, rubric, session sequence, participant sheets, facilitator record sheet, templates | Drafted, **not approved** | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
-| Participant material kept apart from facilitator and scoring material; Q4 only on a separate sheet | Done (structure only; protocol still unapproved) | `…::test_participant_sheets_expose_nothing_but_their_questions`, `…::test_protocol_sequences_part_2_after_part_1_is_submitted` |
+| AI-drafted protocol, questions, answer key, rubric, session sequence, participant sheets, facilitator record sheet, templates | Drafted by automation; **approved and frozen by Tim** (Category 4) | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
+| Participant material kept apart from facilitator and scoring material; Q4 only on a separate sheet | Done (structure only; maintainer freeze recorded in Category 4, no human results) | `…::test_participant_sheets_expose_nothing_but_their_questions`, `…::test_protocol_sequences_part_2_after_part_1_is_submitted` |
 
 Independent validation at implementation head
 `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` is recorded in
@@ -91,13 +92,50 @@ invites, messages or schedules anyone.
 
 ## Category 4 — Maintainer decisions
 
+### Maintainer approval and freeze — 2026-09-24
+
+Tim explicitly approved and froze the human acceptance package in his written
+instruction in the Codex conversation, beginning: “I approve and freeze the
+HarvestGuard #153 human acceptance package at PR #160 head”. This entry records
+that human decision; it is not an AI approval or a human-test result.
+
+- **Frozen package Git revision:** `997c4d745d4944f3e26c2bc420c753916d3992b0`.
+- **Evaluated artifact:** `docs/examples/executive-evidence-view/samples/verified.md`.
+- **Artifact SHA-256:** `69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94`.
+- **Implementation-review ancestor:** `c934e63c8c3c0d0b7150301e1942b7e76d0439b8`.
+
+Approval covers the comprehension protocol; Part 1 Q1–Q3; Part 2 Q4; answer
+key; scoring rubric; stopwatch timing; participant eligibility; cohort
+disposition/replacement rules; facilitator record procedure; and the independent
+practitioner procedure, permitted documentation, `synthetic-verified-001`
+input/workflow and independence requirements, exactly as documented at the
+frozen revision.
+
+Tim approved the facilitator-controlled standalone read-only presentation,
+stopwatch starting when the artifact first becomes visible and stopping when
+Part 1 is submitted, no screen recording, no revision of submitted Part 1,
+then untimed Q4 with the artifact remaining visible. The five-reader threshold
+and disposition rules and the practitioner procedure are frozen unchanged.
+
+The approved materials are the files at the immutable revision above. Their
+pre-approval draft/pending labels describe their state when authored; this
+maintainer decision supersedes those labels only, not their contents or
+requirements. This later recording commit does not replace the frozen package
+revision. In particular, the practitioner receives the source and permitted
+documents from that frozen SHA, not a moving branch or this later record.
+
+No participant selection, contact, testing or results are recorded by this
+approval. Independent-practitioner and five-reader acceptance remain
+outstanding. Merge, #153/#150 closure and release decisions remain separate.
+
 | Decision | Status |
 | --- | --- |
-| Approve and freeze the evaluated artifact and its exact revision | **PENDING** |
-| Approve and freeze the protocol, questions, answer key, rubric and timing method | **PENDING** |
-| Approve participant eligibility/disposition rules and the independent-practitioner packet; select and contact participants | **PENDING** |
+| Approve and freeze the evaluated artifact and its exact revision | **APPROVED AND FROZEN** by Tim, 2026-09-24, revision above |
+| Approve and freeze the protocol, questions, answer key, rubric and timing method | **APPROVED AND FROZEN** by Tim, 2026-09-24 |
+| Approve participant eligibility/disposition rules and the independent-practitioner packet | **APPROVED AND FROZEN** by Tim, 2026-09-24 |
+| Select and contact participants | **OUTSTANDING**; Tim’s responsibility |
 | Resolve any ambiguous score; record overrides with reasons | **PENDING** (none to resolve yet) |
-| Approve the corrected acceptance package and exact revision for freeze | **PENDING** |
+| Approve the corrected acceptance package and exact revision for freeze | **APPROVED AND FROZEN** by Tim, 2026-09-24 |
 | Final acceptance, merge, epic closure, release decisions | **PENDING** |
 
 ## Claims audit

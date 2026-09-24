@@ -80,7 +80,7 @@ Automated checks establish as much of this path as machines can. They do
 | Anonymized practitioner ID | `IU-01` |
 | Independent of both #152 and #153 implementation | *(not established)* |
 | No prior coaching through this workflow | *(not established)* |
-| Tim's packet approval / exact corrected source Git SHA | *(pending)* |
+| Tim's packet approval / exact corrected source Git SHA | Approved and frozen 2026-09-24 at `997c4d745d4944f3e26c2bc420c753916d3992b0`; see [maintainer decision](acceptance-summary.md#category-4--maintainer-decisions) |
 | Reviewed implementation ancestor | `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` |
 | Approved input and permitted document revisions | *(not yet handed over)* |
 | Relevant technical background | |

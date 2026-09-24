@@ -23,7 +23,7 @@ recorded here.
 | Evaluated artifact and SHA-256 | *(not started)* |
 | Repository commit SHA | *(not started)* |
 | Dates (UTC) | *(not started)* |
-| Tim's written freeze approval and exact package revision | *(pending)* |
+| Tim's written freeze approval and exact package revision | Approved and frozen 2026-09-24 at `997c4d745d4944f3e26c2bc420c753916d3992b0`; see [maintainer decision](acceptance-summary.md#category-4--maintainer-decisions) |
 | Preselected five-person cohort / eligibility decisions before artifact display | *(not selected)* |
 | Practitioner excluded from reader cohort | *(not established)* |
 | Presentation / timing | Standalone local/read-only artifact; stopwatch from display to Part 1 submission; Q4 afterward, untimed, artifact visible |

@@ -530,7 +530,9 @@ collection ([issue #153](https://github.com/serewicz/HarvestGuard/issues/153)):
   acceptance records.
 - **Not yet established.** Independent practitioner use of the published
   instructions and nontechnical-reader comprehension have not happened.
-  Maintainer approval and freeze also remain pending. Their status is recorded in
+  Tim approved and froze the acceptance package at
+  `997c4d745d4944f3e26c2bc420c753916d3992b0`; this does not establish human
+  acceptance. The approval and outstanding human requirements are recorded in
   [docs/examples/executive-evidence-view/acceptance-summary.md](examples/executive-evidence-view/acceptance-summary.md).
   Nothing in this document should be read as a claim that reader comprehension
   or independent usability has been demonstrated.
