@@ -3,7 +3,7 @@
 **Category 3 evidence: real human-comprehension evidence.**
 **NO PARTICIPANT HAS BEEN TESTED. Acceptance remains INCOMPLETE.**
 
-This empty record is for the proposed asynchronous round, pending Tim's refreeze.
+This empty record is for the asynchronous round approved and refrozen by Tim.
 The [history](protocol-history.md) preserves the prior freeze with zero attempts.
 No AI persona, simulation or estimate is human evidence. Practitioner results
 remain separate in [independent-use-record.md](independent-use-record.md).
@@ -12,7 +12,7 @@ remain separate in [independent-use-record.md](independent-use-record.md).
 
 | Field | Value |
 | --- | --- |
-| Tim's refreeze / exact package revision | pending |
+| Tim's refreeze / exact package revision | Approved and refrozen 2026-09-24 at `028836c4f5bac1b9156b6f25732848d3b40fe1b1`; see [decision](protocol-history.md#maintainer-refreeze--2026-09-24) |
 | Artifact path and SHA-256 / packet SHA-256 | not dispatched |
 | Preselected five-person cohort and eligibility decisions | not selected |
 | Practitioner excluded from cohort | not established |

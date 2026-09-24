@@ -2,7 +2,7 @@
 
 **Overall status: INCOMPLETE.** Automation and independent technical review
 are recorded below, with qualified validation results. The asynchronous reader
-revision awaits Tim’s refreeze; the previous freeze is preserved below as
+revision was explicitly approved and refrozen by Tim; the previous freeze is preserved below as
 history. No practitioner or reader testing has occurred. Human acceptance,
 merge, #153 closure, #150 closure and release readiness remain
 outstanding. Technical approval does not clear the 0.4.0 release.
@@ -32,8 +32,8 @@ work is never described here as human validation.
 | Published sample commands and links match shipped behaviour | Done | `…::test_documented_export_commands_use_options_the_cli_accepts`, `…::test_readme_relative_links_resolve` |
 | Clean install, packaging, outside-checkout operation | Done (pre-existing) | `tests/test_clean_install.py`, `tests/test_packaging_dependencies.py` |
 | #151/#152 projection, export, CLI, evidence-store, clock-safety and legacy regressions preserved and rerun | Done (pre-existing) | `tests/test_executive_evidence.py`, `tests/test_executive_exports.py`, `tests/test_executive_serializer_clock_safety.py`, `tests/test_cli.py`, `tests/test_evidence_store.py`, `tests/test_reports.py` |
-| AI-drafted protocol, questions, answer key, rubric, asynchronous sequence, participant packet, facilitator record sheet, templates | Async revision drafted; **REFREEZE PENDING** (Category 4) | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
-| Single standalone reader packet, unchanged artifact and questions, no added scoring material | Drafted; **REFREEZE PENDING** | `…::test_async_packet_identity_questions_and_isolation` |
+| AI-drafted protocol, questions, answer key, rubric, asynchronous sequence, participant packet, facilitator record sheet, templates | **APPROVED AND REFROZEN** by Tim (Category 4) | [`comprehension-protocol.md`](comprehension-protocol.md), [`participant/`](participant/), [`facilitator-record-sheet.md`](facilitator-record-sheet.md) |
+| Single standalone reader packet, unchanged artifact and questions, no added scoring material | **APPROVED AND REFROZEN** by Tim (Category 4) | `…::test_async_packet_identity_questions_and_isolation` |
 
 Independent validation at implementation head
 `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` is recorded in
@@ -92,15 +92,19 @@ invites, messages or schedules anyone.
 
 ## Category 4 — Maintainer decisions
 
-### Current reader revision — REFREEZE PENDING
+### Current reader revision — APPROVED AND REFROZEN
 
-Tim authorized replacing synchronous reader acceptance with independent
-asynchronous comprehension before any human attempts or results. See
-[protocol-history.md](protocol-history.md). The revised reader protocol and
-single packet are not frozen; no packet may be dispatched before explicit
-approval of the new exact revision. This is a protocol change, not evidence.
-Independent technical review and the separately frozen practitioner procedure
-remain unchanged at their recorded revisions.
+Tim explicitly approved and refroze the asynchronous reader package on
+2026-09-24 at `028836c4f5bac1b9156b6f25732848d3b40fe1b1`.
+The full decision, scope, packet/artifact identities and digests are recorded in
+[protocol-history.md](protocol-history.md#maintainer-refreeze--2026-09-24).
+This supersedes the synchronous reader procedure for future attempts while
+preserving its history. It tests independent comprehension without coaching,
+not reading speed. No human result motivated the revision; no attempts occurred
+under the prior procedure. The recording commit does not replace the immutable
+approved package revision. Independent technical evidence and the separately
+frozen practitioner procedure remain unchanged. Both human exercises remain
+outstanding. No packet has been dispatched by this recording task.
 
 ### Historical revision 1 approval and freeze — 2026-09-24
 
@@ -144,13 +148,13 @@ outstanding. Merge, #153/#150 closure and release decisions remain separate.
 
 | Decision | Status |
 | --- | --- |
-| Refreeze reader package with the unchanged evaluated artifact | **PENDING** |
-| Refreeze asynchronous protocol, packet, questions, key and rubric | **PENDING** |
-| Refreeze reader eligibility/disposition rules | **PENDING** |
+| Refreeze reader package with the unchanged evaluated artifact | **APPROVED AND REFROZEN** by Tim, 2026-09-24, revision above |
+| Refreeze asynchronous protocol, packet, questions, key and rubric | **APPROVED AND REFROZEN** by Tim, 2026-09-24, revision above |
+| Refreeze reader eligibility/disposition rules | **APPROVED AND REFROZEN** by Tim, 2026-09-24, revision above |
 | Independent-practitioner packet and procedure | Existing freeze unchanged |
 | Select and contact participants | **OUTSTANDING**; Tim’s responsibility |
 | Resolve any ambiguous score; record overrides with reasons | **PENDING** (none to resolve yet) |
-| Approve revised reader package exact revision | **PENDING** |
+| Approve revised reader package exact revision | **APPROVED AND REFROZEN** by Tim, 2026-09-24, revision above |
 | Final acceptance, merge, epic closure, release decisions | **PENDING** |
 
 ## Claims audit

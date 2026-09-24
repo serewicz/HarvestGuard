@@ -530,8 +530,9 @@ collection ([issue #153](https://github.com/serewicz/HarvestGuard/issues/153)):
   acceptance records.
 - **Not yet established.** Independent practitioner use of the published
   instructions and nontechnical-reader comprehension have not happened.
-  Tim’s prior freeze remains historical; the asynchronous reader revision
-  awaits explicit refreeze and tests independent comprehension without coaching,
+  Tim’s prior freeze remains historical; the asynchronous reader package was
+  approved and refrozen at `028836c4f5bac1b9156b6f25732848d3b40fe1b1`.
+  It tests independent comprehension without coaching,
   not reading speed. The practitioner procedure remains unchanged.
   Decisions and outstanding human requirements are recorded in
   [docs/examples/executive-evidence-view/acceptance-summary.md](examples/executive-evidence-view/acceptance-summary.md).
