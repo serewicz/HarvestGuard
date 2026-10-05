@@ -173,3 +173,53 @@ outstanding. Merge, #153/#150 closure and release decisions remain separate.
   changelog, release notes, tag, publication workflow, PyPI or GitHub Release
   state, and no announcement. Those follow #153's closure review and epic
   #150's own closure review.
+
+
+## Maintainer scope amendment — 2026-10-05 (append-only)
+
+> External human-comprehension validation is deferred beyond 0.4.0 because participant recruitment has not produced the required completed evaluations. Recruitment is insufficient; human comprehension remains unverified. This is not a failed comprehension test and does not establish a passing result. The original requirements, frozen materials, scoring rubric, prior decisions, and any participant evidence remain preserved. Automated tests and independent technical review are separate evidence categories and do not substitute for human validation.
+
+Tim explicitly approved this decision and its implementation in the Codex conversation on 2026-10-05. Recruitment insufficiency is recorded from that instruction; no count, dispatch, response, score or outcome is inferred from it. This is a maintainer scope decision, not acceptance evidence.
+
+External reader comprehension is no longer a 0.4.0 release requirement. Its unperformed criteria are **deferred, not passed**, to [#161 — Executive Evidence View: complete deferred external human-comprehension validation](https://github.com/serewicz/HarvestGuard/issues/161). This is deferred acceptance work, not another implementation child. Original issue text and unchecked criteria above remain historical requirements; this dated amendment controls only their release/closure applicability.
+
+The approved asynchronous package remains `028836c4f5bac1b9156b6f25732848d3b40fe1b1`: five representative readers, at least four of five correct on all Q1–Q3 without coaching, no prohibited VERIFIED interpretation, unchanged questions/key/rubric, full unfavorable-evidence retention and maintainer scoring authority. It has no completion-time requirement. Preserve the earlier timed package `997c4d745d4944f3e26c2bc420c753916d3992b0`, original 30-second criterion and all freeze/refreeze decisions. No frozen material is regenerated or edited.
+
+**Independent practitioner use remains required and incomplete.** It is not part of this deferral. The practitioner must complete the already-approved frozen procedure at `997c4d745d4944f3e26c2bc420c753916d3992b0` unaided; no technical/automated result substitutes for this human exercise.
+
+For this issue, the five-reader records, four-of-five Q1–Q3 correctness and prohibited-VERIFIED-interpretation acceptance criteria move to deferred fulfillment in #161. Their response/scoring/attempt-retention obligations remain binding on any evidence and on that follow-up. The final acceptance/post-merge closure and Definition of Done requirements now exclude external reader completion only; they still require practitioner acceptance, technical review and all other nondeferred criteria. The existing restriction on release work in #153 and requirement for a separate #150 closure review remain. This amendment supersedes earlier language only insofar as it made missing reader results block #153/#150 closure or 0.4.0; it does not declare any criterion satisfied.
+
+For this epic, the reader-comprehension acceptance criterion and reader timing/comprehension regression requirement are deferred to #161. The original under-30-seconds objective is not a validated claim. The exactly-three-implementation-children contract is unchanged; #153 must satisfy its amended contract, including practitioner acceptance, before closure. The children-merged-and-closure-reviewed criterion remains required, evaluated against the expressly amended scope. After #153 closes, #150 still requires its own closure review before roadmap reconciliation or release preparation. Technical traceability, compatibility, privacy and evidence/status semantics are unchanged.
+
+Exact-head independent review, required CI, maintainer merge, post-merge closure review and honest QA disposition remain required. This decision authorizes no merge, closure, version change, release preparation, tag, publication or announcement. #153 and #150 remain open.
+
+Known QA remains separate: the two host-dependent coverage assertions (#154 / PR #158) and four previously recorded installed-fixture setup errors must be fixed or explicitly dispositioned with evidence for release readiness. Green CI skips wheel/sdist install checks and does not establish 0.4.0 artifact readiness. The known blank line at EOF in the frozen reader packet is retained with an explicit narrow whitespace exception rather than changing the frozen digest. No QA fix is included in this scope amendment.
+
+### Frozen identities and evidence limits
+
+- Evaluated `samples/verified.md` SHA-256: `69b173bacfdc6dc04a9b2daf9223851d20529d376bce6eff64116b49ba15ba94`.
+- `participant/reader-packet.md` SHA-256: `6340e20896aba669be514b8c31100fdb86c5cf5cb557d31987c0d5529ea5a86e`.
+- [Protocol history](protocol-history.md), protocol, answer key, rubric, participant packet, samples, manifest and independent-use record remain unchanged. Preapproval labels in immutable materials are interpreted through the existing freeze/refreeze decisions, not edited away.
+- Historical independent technical approval remains scoped to `c934e63c8c3c0d0b7150301e1942b7e76d0439b8`; subsequent changes require final-head review.
+- Before this amendment, PR #160 head `08c87cb7d7a1482ff8e55a7e97565ff58734b55c` had [CI](https://github.com/serewicz/HarvestGuard/actions/runs/36042578847) reporting 3,404 passed and 2 skipped per Python 3.10/3.11/3.12, with Ruff passing. Exact main `77b52ac56833d9821008d1466683bb9969ed7641` had [CI](https://github.com/serewicz/HarvestGuard/actions/runs/35385840664) reporting 3,300 passed and 2 skipped per version. Those are automated results for those revisions, not human evidence or CI for a later commit.
+- No participant response or practitioner result has been added. Earlier empty result/dispatch records are preserved as historical records, not asserted to be a current recruitment ledger. No comprehension-within-30-seconds claim is made.
+
+### Closure and release status
+
+Current #153 status remains INCOMPLETE: practitioner acceptance, final-head review, merge and post-merge closure review are outstanding. #150 remains open pending #153 and its own closure review. The reader study remains unverified in #161. Future release documentation must disclose the deferral and distinguish automated tests, independent technical review and real human evidence. This record is a scope amendment only, not the start of 0.4.0 release preparation; no package version, changelog, release notes or roadmap status changes accompany it.
+
+### Verification of this documentation-only amendment
+
+The relevant example/acceptance suite was run with
+`HARVESTGUARD_SKIP_CLEAN_INSTALL_TESTS=1`: **98 passed, 5 explicitly skipped**
+(installed-package checks requiring dependency provisioning). This is not a
+fresh installed-package validation or a full-suite run. Frozen artifact and
+packet hashes, key/rubric, protocol history, manifest, all sample files and the
+practitioner procedure remain byte-identical to the pre-amendment head; the
+frozen package references and added documentation links were checked.
+`git diff --check` passes for this amendment. The cumulative PR diff against
+main retains only the pre-existing `participant/reader-packet.md:336` blank-line
+at EOF finding. That exact frozen-content exception is disclosed, not fixed or
+reported as a clean cumulative whitespace check. No human result is created or
+inferred. CI for the pushed amendment must be checked separately from the
+historical CI runs above.

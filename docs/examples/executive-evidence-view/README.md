@@ -159,3 +159,22 @@ anyone is tested.
 
 This directory contains no participant names, contact details, employers,
 demographics or raw recordings, and must never contain them.
+
+
+## Maintainer scope amendment — 2026-10-05
+
+External human-comprehension validation is deferred beyond 0.4.0 to
+[#161](https://github.com/serewicz/HarvestGuard/issues/161), as deferred acceptance
+work rather than another implementation child. Participant recruitment has not
+produced the required completed evaluations. Recruitment is insufficient; human
+comprehension remains unverified. This is neither a failed comprehension test
+nor a passing result. External reader completion is no longer a 0.4.0 release
+requirement; independent practitioner use remains required before #153 can close.
+
+The [append-only maintainer decision](acceptance-summary.md#maintainer-scope-amendment--2026-10-05-append-only)
+preserves the original criteria, frozen materials, historical 30-second
+criterion, prior decisions and all evidence. Automated tests and independent
+technical review are separate from human validation. #153 and #150 remain open;
+final-head review, practitioner acceptance, merge, closure reviews and separate
+release-readiness/QA disposition remain outstanding. No release preparation,
+version change or publication is authorized or begun by this amendment.
