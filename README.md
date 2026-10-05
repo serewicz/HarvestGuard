@@ -168,7 +168,10 @@ To see what that output looks like before installing anything, read the sample
 JSON and Markdown artifacts from exactly this demo scan in
 [`docs/examples/first-run/`](docs/examples/first-run/README.md), and the
 per-finding walkthrough in the
-[CLI demo walkthrough](docs/CLI.md#demo-walkthrough).
+[CLI demo walkthrough](docs/CLI.md#demo-walkthrough). Samples of the executive
+evidence view — one per evaluation outcome, with the commands and provenance
+behind each — are in
+[`docs/examples/executive-evidence-view/`](docs/examples/executive-evidence-view/README.md).
 
 ### 6. Validate on your own Linux host
 

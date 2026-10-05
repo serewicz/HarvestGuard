@@ -1337,6 +1337,10 @@ Both take an optional `PATH`; an omitted `PATH` or `-` writes to stdout, like
 `--json` and `--markdown`. All five output options are mutually exclusive, so
 asking for two of them is invalid usage (exit `2`).
 
+**See one before you run one.** Published samples of both formats, one per
+evaluation outcome, with the exact commands and provenance that produced them,
+are in [docs/examples/executive-evidence-view/](examples/executive-evidence-view/README.md).
+
 **They require a stored run.** There is no live-scan executive export: run
 `harvestguard scan ... --evidence-db PATH` first, find the run with `evidence
 list`, then export it. The view is built from the stored evidence through the

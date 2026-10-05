@@ -19,7 +19,9 @@ the **executive evidence view** of a stored run — `harvestguard evidence expor
 SCAN-ID --evidence-db PATH --executive-markdown [PATH]` and `--executive-json
 [PATH]`, produced by `executive_reports.py` from the shared projection in
 `executive_evidence.py` (see [CLI.md](CLI.md#executive-evidence-exports) and
-[EXECUTIVE_EVIDENCE_VIEW.md](EXECUTIVE_EVIDENCE_VIEW.md)).
+[EXECUTIVE_EVIDENCE_VIEW.md](EXECUTIVE_EVIDENCE_VIEW.md)). Published samples of
+that output, one per evaluation outcome, are in
+[docs/examples/executive-evidence-view/](examples/executive-evidence-view/README.md).
 
 That executive view is the only executive output that ships. It covers exactly
 one stored scan run and states what HarvestGuard observed, what evidence

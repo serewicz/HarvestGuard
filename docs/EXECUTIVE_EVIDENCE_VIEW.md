@@ -10,6 +10,13 @@ serializers ship in `executive_reports.py`, exposed as
 Both require an already-stored run: there is no live-scan executive export, and
 no HTML or PDF renderer.
 
+**Worked examples.** One reproducible sample per evaluation outcome — plus a
+zero-finding run, partial execution, unknown historical time, an unsupported
+historical contract, duplicate finding IDs, withheld unrecognized field values
+and a rejected corrupted run — is published in
+[docs/examples/executive-evidence-view/](examples/executive-evidence-view/README.md),
+together with the exact commands, versions and provenance behind each one.
+
 HarvestGuard establishes evidence. Humans establish meaning. This view answers
 exactly three questions:
 
@@ -497,6 +504,41 @@ stored run, not authenticity.
 - Do not recompute status, counts, references or conclusions. If a renderer
   needs a fact this projection does not carry, extend the projection.
 
+## Usability and traceability evidence
+
+What has actually been established about this view, as of the examples
+collection ([issue #153](https://github.com/serewicz/HarvestGuard/issues/153)):
+
+- **Established by automated checks.** Every required outcome is reproducible
+  through the real store → verified load → projection → both serializers path;
+  generation is deterministic for fixed evidence and an explicit export time;
+  the published samples are reproducible byte-for-byte from a non-editable
+  install, regenerated outside the checkout with no repository import
+  override; both CLI export modes — the documented no-install entry point and
+  the installed console script — reproduce the published samples for
+  representative scenarios apart from the export time the CLI owns;
+  every evidence reference in a published sample resolves to
+  exactly one stored occurrence, with duplicate finding IDs staying separate;
+  JSON and Markdown agree, including withheld unrecognized field names and the
+  local-retention disclosure; no withheld value or secret-shaped canary appears
+  in any generated artifact; a corrupted run yields a bounded diagnostic and no
+  report; and generation needs no network, service or account.
+- **Independent technical review recorded.** Codex reviewed implementation
+  `c934e63c8c3c0d0b7150301e1942b7e76d0439b8` with verdict
+  APPROVE WITH NON-BLOCKING FOLLOW-UP. This is technical evidence, not human
+  validation; qualified test results and limitations are preserved in the
+  acceptance records.
+- **Not yet established.** Independent practitioner use of the published
+  instructions and nontechnical-reader comprehension have not happened.
+  Tim’s prior freeze remains historical; the asynchronous reader package was
+  approved and refrozen at `028836c4f5bac1b9156b6f25732848d3b40fe1b1`.
+  It tests independent comprehension without coaching,
+  not reading speed. The practitioner procedure remains unchanged.
+  Decisions and outstanding human requirements are recorded in
+  [docs/examples/executive-evidence-view/acceptance-summary.md](examples/executive-evidence-view/acceptance-summary.md).
+  Nothing in this document should be read as a claim that reader comprehension
+  or independent usability has been demonstrated.
+
 ## Compatibility
 
 Existing CLI options, exit codes, stdout/stderr separation, the bare
@@ -507,3 +549,22 @@ unchanged by this projection. The two narrow additions are the optional
 `reference_time` argument described under [Time basis](#time-basis) and the
 additive `StoredScanRun.raw_finding_snapshots` field described under
 [Evidence references](#evidence-references).
+
+
+## Maintainer scope amendment — 2026-10-05
+
+External human-comprehension validation is deferred beyond 0.4.0 to
+[#161](https://github.com/serewicz/HarvestGuard/issues/161), as deferred acceptance
+work rather than another implementation child. Participant recruitment has not
+produced the required completed evaluations. Recruitment is insufficient; human
+comprehension remains unverified. This is neither a failed comprehension test
+nor a passing result. External reader completion is no longer a 0.4.0 release
+requirement; independent practitioner use remains required before #153 can close.
+
+The [append-only maintainer decision](examples/executive-evidence-view/acceptance-summary.md#maintainer-scope-amendment--2026-10-05-append-only)
+preserves the original criteria, frozen materials, historical 30-second
+criterion, prior decisions and all evidence. Automated tests and independent
+technical review are separate from human validation. #153 and #150 remain open;
+final-head review, practitioner acceptance, merge, closure reviews and separate
+release-readiness/QA disposition remain outstanding. No release preparation,
+version change or publication is authorized or begun by this amendment.
